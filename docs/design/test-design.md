@@ -2,7 +2,7 @@
 
 **Version:** v0.2 — approved documentation-only test plan and traceability baseline  
 **Date:** 2026-10-18  
-**Status:** **APPROVED_DESIGN** by user review on 2026-10-18 for the consolidated test plan and 100 API contract cases / eight module ownership checks. Previously approved QA, DB and ADR case requirements remain authoritative; unreviewed `DAT-EX` extras and ADR-008 `STACK` cases remain PROPOSED. **ALL runtime/SQL/API/benchmark tests remain `NOT_RUN`**.  
+**Status:** **APPROVED_DESIGN** by user review on 2026-10-18 for the consolidated test plan and 100 API contract cases / eight module ownership checks. Previously approved QA, DB and ADR case requirements remain authoritative; unreviewed `DAT-EX` extras remain PROPOSED; ADR-008 `STACK-01..10` cases are APPROVED_DESIGN. **ALL runtime/SQL/API/benchmark tests remain `NOT_RUN`**.  
 **Target path:** `docs/design/test-design.md`  
 **No implementation:** no pytest/k6 scripts, migration, Postman collections, GitHub workflows or generated source code in this deliverable.
 
@@ -21,7 +21,7 @@ An executable verification result must eventually include: Git commit SHA; appro
 - [Database Design](database-design.md) — **18 approved tables**, physical schema and transactions; reference `DBP-01..12`, `DBTX-01..18` and other listed DB invariants (`NOT_RUN`).
 - [API Contract](api-contract.md) — **14 Auth + 18 Listing + 68 other public/internal/general tests = 100 `APPROVED_DESIGN` API cases**, all `NOT_RUN`. `API-OPEN-01/02` and the precise dispatch `simulation_input` allowlist are still OPEN; the approved 900s token policy is binding.
 - [Module Design](module-design.md) — `MODOWN-01..08` **APPROVED_DESIGN** boundary checks, all `NOT_RUN`.
-- [ADR-001..007](../architecture/decisions/ADR-001-modular-monolith.md) (use their individual files for exact acceptance), especially ADR-003 Outbox/Inbox, ADR-004 Signed Result V1, ADR-005 retry and auth, ADR-006 evidence holds, ADR-007 load configuration. [ADR-008](../architecture/decisions/ADR-008-technology-stack.md) remains **PROPOSED**.
+- [ADR-001..007](../architecture/decisions/ADR-001-modular-monolith.md) (use their individual files for exact acceptance), especially ADR-003 Outbox/Inbox, ADR-004 Signed Result V1, ADR-005 retry and auth, ADR-006 evidence holds, ADR-007 load configuration. [ADR-008](../architecture/decisions/ADR-008-technology-stack.md) is **ACCEPTED** with `STACK-01..10` approved as test designs; all `NOT_RUN`.
 
 | Status | Meaning; not interchangeable |
 |---|---|
@@ -90,7 +90,7 @@ For a race test, independently force **both commit orders** under separate DB sn
 | `FR-JL-04` | Jobs QUEUED cancel TX-CANCEL | `API-JOB-09..12`, `INT-03/04`: mutually exclusive winning state |
 | `FR-JL-05` | Manager Outbox/Inbox/finalize | `COM-01..08`, `RT-01..14`, `REL-01..06`: one terminal result/release |
 | `FR-JL-06` | Jobs DB trusted time and errors | `API-JOB-01/10`, `API-INT-09/10`: honest terminal time/fault reasons |
-| `FR-SR-01` | Simulator Ed25519 key + Registry | `SEC-03/08`, `STACK-09` (when stack approved): no private key leak |
+| `FR-SR-01` | Simulator Ed25519 key + Registry | `SEC-03/08`, `STACK-09` (approved design, `NOT_RUN`): no private key leak |
 | `FR-SR-02` | Simulator V1 wire contract | `WIRE-01..07`, `ENUM-01..06`: correct canonical bytes/enums |
 | `FR-SR-03` | Manager verifier/finalization | `SEC-01..07`, `API-INT-05/11`, `DBP-06/11`: signature + DB context |
 | `FR-SR-04` | Inbox reject/replay, Manager fallback | `SEC-02/05/06`, `RT`, `API-INT-06..12`: invalid/replay produces zero duplicate effect |
@@ -137,7 +137,7 @@ Authentication/Logout `UC-G01` is cross-cutting rather than a separately numbere
 | [QA Operations](../architecture/quality-attributes.md) | `OPS-01..07` mandatory; `OPS-08` calibration | Approved design, all `NOT_RUN` | P0 ops / hypothesis separate |
 | [QA Modifiability](../architecture/quality-attributes.md) | `MOD-*`, `MOD2-01..09` | Approved **experiment design**; V2 is not MVP P0 | Change-exercise/traceability |
 | [ADR-007](../architecture/decisions/ADR-007-load-test-configuration.md) + QA | `LDCFG-01..09`, `PER-01..06`, `SCA-01..06` | Approved benchmark design, all `NOT_RUN` | P0 perf measurements and safety; ratios calibration only |
-| [ADR-008](../architecture/decisions/ADR-008-technology-stack.md) | `STACK-01..10` | **PROPOSED; ADR itself not accepted** | Conditional upon stack approval |
+| [ADR-008](../architecture/decisions/ADR-008-technology-stack.md) | `STACK-01..10` | **ACCEPTED ADR / APPROVED_DESIGN**, all `NOT_RUN` | Required implementation verification when coding authorized |
 
 If an original source uses a longer suffix or human-readable ID, the **exact identifier in that source wins**. This register is navigation only, not a replacement for original individual test fixtures/oracles.
 
@@ -209,7 +209,7 @@ A valid load-test run that misses p95 or server-error targets is a real performa
 | API Listings group and approved 900s token lifetime | Previously reviewed; maintain that baseline |
 | API endpoints/DTO/errors; token algorithm/storage and workload allowlist | **APPROVED_DESIGN** for documented contracts; bounded Auth/workload details OPEN; see [API Contract](api-contract.md) §14.2 |
 | Logical module responsibilities/dependency/ports | **APPROVED_DESIGN**; implementation package names may be reviewed as needed |
-| ADR-008 Python/FastAPI/React reference stack | **PROPOSED**; explicit stakeholder approval required before coding |
+| ADR-008 Python/FastAPI/React reference stack | **ACCEPTED (2026-10-18)**; implementation still requires separate coding authorization |
 | Physical migrations, executable SQL/Python/TypeScript, generated OpenAPI, CI, benchmark | **NOT_STARTED/NOT_RUN**; user has expressly prohibited coding until separate authorization |
 
 **Document approval is not a substitute for implementation evidence**. After documentation review, seek **explicit user authorization** to code. Then freeze the revision/commit and create executable tests; later use actual code commit hashes for the AD-090 school assignment, keeping its 99/28d/22h parameters separate from the real product baseline.

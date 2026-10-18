@@ -303,8 +303,8 @@ Một yêu cầu không hợp lệ bị từ chối trước khi tạo Job; khô
 
 ### 11.2. Quyết định còn chờ và phần thiết kế chi tiết chưa thực hiện
 
-- **ADR-008 — PROPOSED / REVIEW:** Lựa chọn Python/FastAPI, React/TypeScript, PostgreSQL và Docker Compose chưa được phê duyệt. [ADR-008](architecture/decisions/ADR-008-technology-stack.md).
-- **Detailed design — NOT_STARTED:** Bảng/cột/index và DB transactions cụ thể; API endpoints, HTTP errors, fixtures và mã triển khai vẫn cần thiết kế/kiểm thử. Không coi các nội dung này đã được thực hiện chỉ vì ADR đã duyệt.
+- **ADR-008 — ACCEPTED (18/10/2026):** Đã duyệt Option B: Python 3.12/FastAPI, React 19/TypeScript/Vite, PostgreSQL 16, Docker Compose v2 và các bộ công cụ kiểm thử. Chỉ phê duyệt thiết kế; các kiểm thử `STACK-01..10` đều `NOT_RUN`. [ADR-008](architecture/decisions/ADR-008-technology-stack.md).
+- **Detailed design — APPROVED_DESIGN / NOT_IMPLEMENTED:** Database Design 18 bảng và transaction/lock order, API Contract, Module Design và Test Design đã được duyệt ở mức tài liệu trong `docs/design/`. Chưa có migration, mã ứng dụng hay kết quả thực thi kiểm thử; ba chi tiết API Auth / `simulation_input` vẫn OPEN.
 - Các mục tiêu latency, recovery và load test vẫn là mục tiêu nghiệm thu/chỉ tiêu đo, **không phải kết quả PASS**.
 
 > Mục này chỉ đồng bộ trạng thái tài liệu đã phê duyệt tới 18/10/2026; không thay đổi SRS v1.3, 21 FRs hoặc 33 NFRs và không bổ sung phạm vi MVP.

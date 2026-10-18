@@ -1,8 +1,8 @@
 # GPU Resource Marketplace - System Architecture
 
-**Version:** 0.9 - ADR-007 reproducible benchmark configuration accepted and synchronized (2026-10-18)  
+**Version:** 0.10 - ADR-008 Option B accepted and document statuses synchronized (2026-10-18)  
 **Date:** 2026-10-18  
-**Status:** Existing architecture boundaries and 14 drivers APPROVED; ADR-003/004/005/006/007 ACCEPTED for design. ADR-008 remains OPEN; implementation and system tests remain `NOT_RUN`.  
+**Status:** Existing architecture boundaries and 14 drivers APPROVED; ADR-001..008 **ACCEPTED** as design decisions. API Auth and `simulation_input` details remain OPEN; implementation and system tests remain `NOT_RUN`.  
 **Owner:** GPU Resource Marketplace development team  
 **Scope:** Simulation-only MVP
 
@@ -372,7 +372,7 @@ Core gates before MVP acceptance:
 | ADR-005 | Persisted bounded retry/timeout/backoff, strict Inbox deadline ordering, scoped 256-bit service Bearer tokens | **ACCEPTED 2026-10-18** | [Approved decision and 18 deterministic test designs](decisions/ADR-005-retry-timeout-internal-auth.md); implementation `NOT_RUN` |
 | ADR-006 | Seven-day Dispute filing; unresolved evidence hold, warning/retry/escalation, post-resolution cleanup | **APPROVED** | [ADR-006](decisions/ADR-006-dispute-retention.md); no universal hard-delete guarantee |
 | ADR-007 | Reproducible k6 profile, fixed hardware, data 1x/5x, 128 in-flight Simulator attempts, nine config tests | **ACCEPTED 2026-10-18** | [Decision and verification](decisions/ADR-007-load-test-configuration.md); benchmark/tests `NOT_RUN` |
-| ADR-008 | Python/FastAPI API + Manager + Simulator, React/TypeScript SPA, PostgreSQL, Compose and test toolchain | **PROPOSED / REVIEW (not accepted)** | [Draft stack decision and ten test cases](decisions/ADR-008-technology-stack.md); await explicit approval |
+| ADR-008 | Python 3.12/FastAPI API + Manager + Simulator, React 19/TypeScript SPA, PostgreSQL 16, Compose v2 and test toolchain | **ACCEPTED 2026-10-18** | [Approved reference stack and ten test designs](decisions/ADR-008-technology-stack.md); implementation `NOT_STARTED`, tests `NOT_RUN` |
 
 **No requirement to implement a real GPU, broker, blockchain or payment rail follows from any architecture driver.** Proposals become decisions only after explicit team review; revisions should update this register, related quality scenarios and affected SRS traces.
 
@@ -381,11 +381,11 @@ Core gates before MVP acceptance:
 The recommended sequence minimizes design risk without creating documents solely for coursework:
 
 1. Validate this architecture and linked quality scenarios against SRS/FR/NFR.
-2. ADR-003 communication, ADR-004 Signed Result V1, ADR-005 execution retry/timeout/internal authentication, ADR-006 dispute retention and ADR-007 repeatable load-test configuration are accepted for design. ADR-008 technology stack remains OPEN, under separate review.
-3. Apply the accepted ADR-005 retry/deadline/authentication decisions when physical database/API design begins; no implementation has begun.
-4. Design database constraints/ERD according to transaction and retention rules.
-5. Specify API/internal protocols with auth, errors, idempotency and signed payload examples.
-6. Plan repeatable integration, security, crash-recovery and load tests before building UI polish.
-7. Implement the smallest end-to-end vertical slice: listing -> job -> allocation -> signed result -> dispute -> lifetime reputation.
+2. ADR-001..008 are accepted architecture decisions for design, including ADR-008 Option B; implementation/testing remain separately gated.
+3. Preserve approved retry/deadline/authentication decisions in the existing Database and API Design documents; no implementation has begun.
+4. Use the approved 18-table Database Design, transaction/lock-order rules and retention guards in `../design/database-design.md`.
+5. Use the approved API Contract and Module/Test Design baselines in `../design/`; resolve bounded Auth and simulation-input details before coding.
+6. Preserve the approved Test Design, deterministic fixtures, ADR verification cases and 736-VU performance-test methodology; all executable tests remain `NOT_RUN`.
+7. **Only after separate coding authorization**, implement the smallest end-to-end vertical slice: listing -> job -> allocation -> signed result -> dispute -> lifetime reputation.
 
 **Change management:** a new FR/NFR or a revised business behavior belongs in the owning requirements document; an implementation decision belongs in this architecture/ADR set. Do not silently promote a proposal to an approved baseline.

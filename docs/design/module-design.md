@@ -2,7 +2,7 @@
 
 **Version:** v0.2 — approved module and responsibility design baseline (Markdown only)  
 **Date:** 2026-10-18  
-**Status:** **APPROVED_DESIGN** by user review on 2026-10-18 for the logical module responsibilities, dependencies and eight `MODOWN` test designs. All ADR-001..007 boundaries remain binding; module/interface names are design labels, not implemented packages. ADR-008 remains **PROPOSED**. No application code, migration or test runner exists (`NOT_STARTED` / `NOT_RUN`).  
+**Status:** **APPROVED_DESIGN** by user review on 2026-10-18 for the logical module responsibilities, dependencies and eight `MODOWN` test designs. All ADR-001..008 boundaries remain binding; module/interface names are design labels, not implemented packages. ADR-008 Option B is **ACCEPTED** (2026-10-18). No application code, migration or test runner exists (`NOT_STARTED` / `NOT_RUN`).  
 **Target path:** `docs/design/module-design.md`  
 **Scope:** the real simulation-only GPU Marketplace MVP (736 VU test target, 23-day history, 7-day Dispute filing, 18-hour CR response). The separate AD-090 assignment variant is out of scope.
 
@@ -12,7 +12,7 @@
 
 **Workflow:** (1) freeze accepted process/DB trust boundaries; (2) allocate responsibility for the six P0 business modules and cross-cutting concerns; (3) map each API/Manager operation to one owner and transaction; (4) define interface directions and sensitive-data rules; (5) specify failure ownership and future review tests. This document adds **no MVP feature** and **does not implement the interfaces**.
 
-Normative sources: [SRS](../requirements.md), [FR](../functional-requirements.md), [NFR](../non-functional-requirements.md), [System Architecture](../architecture/system-architecture.md), [Quality Scenarios](../architecture/quality-attributes.md), [Database Design](database-design.md), [API Contract](api-contract.md), [ADR-001](../architecture/decisions/ADR-001-modular-monolith.md), [ADR-002](../architecture/decisions/ADR-002-postgresql-access-boundaries.md), [ADR-003](../architecture/decisions/ADR-003-internal-communication.md), [ADR-004](../architecture/decisions/ADR-004-signed-result.md), [ADR-005](../architecture/decisions/ADR-005-retry-timeout-internal-auth.md), [ADR-006](../architecture/decisions/ADR-006-dispute-retention.md), [ADR-007](../architecture/decisions/ADR-007-load-test-configuration.md). [ADR-008](../architecture/decisions/ADR-008-technology-stack.md) is **PROPOSED**, not accepted by this document.
+Normative sources: [SRS](../requirements.md), [FR](../functional-requirements.md), [NFR](../non-functional-requirements.md), [System Architecture](../architecture/system-architecture.md), [Quality Scenarios](../architecture/quality-attributes.md), [Database Design](database-design.md), [API Contract](api-contract.md), [ADR-001](../architecture/decisions/ADR-001-modular-monolith.md), [ADR-002](../architecture/decisions/ADR-002-postgresql-access-boundaries.md), [ADR-003](../architecture/decisions/ADR-003-internal-communication.md), [ADR-004](../architecture/decisions/ADR-004-signed-result.md), [ADR-005](../architecture/decisions/ADR-005-retry-timeout-internal-auth.md), [ADR-006](../architecture/decisions/ADR-006-dispute-retention.md), [ADR-007](../architecture/decisions/ADR-007-load-test-configuration.md). [ADR-008](../architecture/decisions/ADR-008-technology-stack.md) is **ACCEPTED**; application package naming remains flexible under its approved boundaries.
 
 ## 2. Frozen runtime boundaries (APPROVED by existing ADRs)
 
@@ -51,7 +51,7 @@ flowchart LR
     SIM -->|Authenticated signed callback| IN
 ```
 
-Arrows in this picture indicate allowed runtime interactions, **not** source-code imports. `UI`/framework names are candidates from ADR-008, and PostgreSQL/three-process access rights are approved independent of those framework choices.
+Arrows in this picture indicate allowed runtime interactions, **not** source-code imports. `UI`/framework families are accepted in ADR-008; the diagram still represents logical dependencies rather than implemented package imports. PostgreSQL/three-process access rights are binding.
 
 ## 3. Module catalog: responsibility, data, API and invariants
 
@@ -238,7 +238,7 @@ If Worker signs a **valid but false** claim, keep original accepted receipt. Onl
 | 18-table data model and lock order | **APPROVED DESIGN**, tests `NOT_RUN` | No physical schema changes without review |
 | Logical module responsibilities, dependency directions and interface boundaries | **APPROVED_DESIGN** | Preserve single policy owner; package names can evolve with explicit review |
 | Documented API route/DTO design | **APPROVED_DESIGN** with bounded Auth/internal payload choices OPEN | Resolve open details in [API Contract](api-contract.md) before coding |
-| Concrete Python/FastAPI+React toolchain | **ADR-008 PROPOSED / REVIEW** | Explicitly approve/adjust before coding |
+| Concrete Python/FastAPI+React toolchain | **ADR-008 ACCEPTED (2026-10-18)** | Pin compatible dependency/image digests at implementation; no coding before separate authorization |
 | Production code, migration, automated tests, DB benchmark | **NOT_STARTED / NOT_RUN** | **Do not implement without explicit user authorization** |
 
 The final assignment AD-090 may later cite real implementation commits, but its separate privacy-deletion variant **must not contaminate** the MVP module graph or data-retention policies before a real project change request is approved.

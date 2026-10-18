@@ -9,10 +9,10 @@ Read the relevant files before editing or reviewing:
 - `docs/requirements.md` - main SRS and approved MVP scope.
 - `docs/functional-requirements.md` and `docs/non-functional-requirements.md` - requirements and acceptance targets.
 - `docs/architecture/system-architecture.md` and `docs/architecture/quality-attributes.md` - process boundaries and quality scenarios.
-- `docs/architecture/decisions/ADR-001-*.md` through `ADR-007-*.md` - accepted architectural decisions.
+- `docs/architecture/decisions/ADR-001-*.md` through `ADR-008-*.md` - accepted architectural decisions.
 - `docs/design/database-design.md`, `api-contract.md`, `module-design.md`, and `test-design.md` - approved design baseline and its explicitly open items.
 
-If documents appear inconsistent, identify the conflicting sections and ask for a decision; do not silently invent a new rule. `ADR-008-technology-stack.md` is still **PROPOSED**, not accepted. The API token signing/storage choice, login normalization, and exact `simulation_input` allowlist also remain open design details.
+If documents appear inconsistent, identify the conflicting sections and ask for a decision; do not silently invent a new rule. `ADR-008-technology-stack.md` is **ACCEPTED** (2026-10-18) for Option B; its `STACK-01..10` checks are still `NOT_RUN`. The API token signing/storage choice, login normalization, and exact `simulation_input` allowlist also remain open design details.
 
 The real MVP uses a **736-virtual-user** load-test workload, **23-day** normal history/audit retention, a strict **7 x 24-hour** Dispute filing window, and an **18-hour** change-request initial response target. Do not mix in separate AD-090 assignment parameters.
 

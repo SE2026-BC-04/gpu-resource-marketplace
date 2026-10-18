@@ -1,7 +1,7 @@
 # ADR-008 - Implementation technology stack and local packaging
 
-**Status:** PROPOSED / REVIEW (NOT ACCEPTED)  
-**Version:** 0.1 (2026-10-18; design proposal only)  
+**Status:** **ACCEPTED** — Option B approved by project owner on 2026-10-18 (design decision only)  
+**Version:** 0.2 (2026-10-18; decision accepted, no implementation)  
 **Date:** 2026-10-18  
 **Project:** GPU Resource Marketplace - simulation-only MVP  
 **Intended repository path:** `docs/architecture/decisions/ADR-008-technology-stack.md`  
@@ -26,14 +26,14 @@ Select one *small, reproducible* application/framework stack for the already-app
 | Option | Main stack | Advantages | Limitations | Review position |
 |---|---|---|---|---|
 | A | Full TypeScript: Node.js + NestJS API/Manager/Simulator, React + PostgreSQL | One application language; strong typing across frontend/backend | More backend framework structure for a small MVP; additional work to express trusted scheduler transactions and canonical signing consistently | Feasible alternative, not selected as first recommendation |
-| **B** | **Python/FastAPI modular backend + React/TypeScript frontend + PostgreSQL + Docker Compose** | Direct mapping to existing three Python-compatible processes; simple deterministic simulation, mature PostgreSQL/Ed25519 tooling, small team learning surface | Two application languages, need strict frontend/backend contract and event-loop/DB-call discipline | **PROPOSED CHOICE** |
+| **B** | **Python/FastAPI modular backend + React/TypeScript frontend + PostgreSQL + Docker Compose** | Direct mapping to existing three Python-compatible processes; simple deterministic simulation, mature PostgreSQL/Ed25519 tooling, small team learning surface | Two application languages, need strict frontend/backend contract and event-loop/DB-call discipline | **ACCEPTED (Option B)** |
 | C | Django (DRF) API + separate Python Manager/Simulator + React + PostgreSQL | Mature ORM/auth/migrations, batteries included | Adds Django framework conventions and API/admin machinery not required by approved user roles; still requires independent scheduler processes | Feasible alternative, not preferred for this MVP |
 
-**Proposed decision: B.** Technology is chosen for delivery simplicity and compatibility with accepted architecture, **not** on an unmeasured promise that it meets 736-VU latency targets. A performance failure requires measuring and fixing the actual bottleneck; this ADR does not authorize bypassing any integrity constraint.
+**Accepted decision: B (2026-10-18).** Technology is chosen for delivery simplicity and compatibility with accepted architecture, **not** on an unmeasured promise that it meets 736-VU latency targets. A performance failure requires measuring and fixing the actual bottleneck; this ADR does not authorize bypassing any integrity constraint.
 
-## 3. Proposed technology register (requires explicit review)
+## 3. Accepted technology register (reference runtime families/versions)
 
-| Area | Proposed selection | Scope / rationale |
+| Area | Accepted selection | Scope / rationale |
 |---|---|---|
 | Backend language | **Python 3.12** as baseline runtime major/minor | Shared Backend API/Manager domain code and Simulator's Python-based deterministic fixtures/crypto. Pin exact patch/image when implementing. |
 | HTTP API | **FastAPI** + **Pydantic 2** + Uvicorn ASGI | Validated request/response DTOs and role-scoped REST APIs; API is source of public HTTP contracts. |
@@ -51,11 +51,11 @@ Select one *small, reproducible* application/framework stack for the already-app
 | Frontend tests | **Vitest + React Testing Library**; minimal **Playwright** end-to-end smoke | Check UI role behavior and core user journey without inventing additional user features. |
 | Load tests | **k6 per ADR-007**, separately version/image pinned | ADR-008 does not change workload, hardware, thresholds or already accepted nine LDCFG cases. |
 
-**Dependency version policy:** The major/minor reference versions listed above are the **proposal**, not an assertion that packages or containers have already been installed. When implementation starts, capture exact compatible patch versions, dependency-lock digests, container image digests and language/runtime manifests, and re-run regression checks on any update. FastAPI, `uv`, Vite, TypeScript, SQLAlchemy minor/patch versions are selected *from mutually compatible supported releases at coding time*, never from unreviewed latest-tag drift.
+**Dependency version policy:** The major/minor reference versions listed above are **accepted architecture decisions**, not an assertion that packages or containers have already been installed. When implementation starts, capture exact compatible patch versions, dependency-lock digests, container image digests and language/runtime manifests, and re-run regression checks on any update. FastAPI, `uv`, Vite, TypeScript, SQLAlchemy minor/patch versions are selected *from mutually compatible supported releases at coding time*, never from unreviewed latest-tag drift.
 
-**Version-lifecycle context (checked 2026-10-18):** Node.js 24 is on the LTS line; PostgreSQL 16 remains supported by upstream. Official source references: https://nodejs.org/en/about/previous-releases ; https://www.postgresql.org/support/versioning/ ; Vite toolchain compatibility: https://vite.dev/guide/ . These links inform **the proposed** baseline; they do not prove an installed application exists.
+**Version-lifecycle context (checked 2026-10-18):** Node.js 24 is on the LTS line; PostgreSQL 16 remains supported by upstream. Official source references: https://nodejs.org/en/about/previous-releases ; https://www.postgresql.org/support/versioning/ ; Vite toolchain compatibility: https://vite.dev/guide/ . These links provide lifecycle context for the **accepted reference** baseline; they do not prove an installed application exists.
 
-## 4. Proposed runtime and module boundaries
+## 4. Accepted runtime and module boundaries
 
 ```text
 Browser (React/TypeScript SPA)
@@ -78,8 +78,8 @@ Note: Only Backend API and Manager have DB credentials or DB-network access.
 - **Ownership rule:** Backend API handles user-facing writes/role authorization, durable Inbox ingress and read projections; Manager alone schedules/allocates/finalizes/adjudicates/reconciles; Simulator handles dispatch and Worker-result signatures. The framework must not create a second unauthorized write path.
 - **Database correctness:** Listing locks, strictly ordered FIFO, deduplication, one release/reputation effect and retention holds are enforced by durable PostgreSQL transactions/constraints. Never rely on a process-local Python lock for cross-process GPU capacity safety.
 - **Sync/async discipline:** DB-backed API endpoints use synchronous SQLAlchemy and short transactions with FastAPI `def` handlers or an explicit thread boundary; Simulator uses bounded asynchronous tasks for mock time waits and network I/O. Do not hold PostgreSQL locks over `httpx` calls, sleeps or simulated execution.
-- **Network:** A proposed Compose design separates app HTTP and DB networks so the Simulator cannot reach PostgreSQL. Enforce distinct accepted ADR-005 Bearer secrets per HTTP direction, and treat Ed25519 as a separate content-authenticity check.
-- **Single host, no production-HA claim:** Compose is an accepted MVP option **only if the user approves this ADR**. The single-host trusted-network assumption from ADR-005 still applies; public/multi-host traffic would require separate TLS/security design, out of scope here.
+- **Network:** The accepted Compose design separates app HTTP and DB networks so the Simulator cannot reach PostgreSQL. Enforce distinct accepted ADR-005 Bearer secrets per HTTP direction, and treat Ed25519 as a separate content-authenticity check.
+- **Single host, no production-HA claim:** Compose is accepted for the CPU-only, single-host MVP under this ADR. The single-host trusted-network assumption from ADR-005 still applies; public/multi-host traffic would require separate TLS/security design, out of scope here.
 
 ## 5. Costs, risks, and explicitly deferred details
 
@@ -94,7 +94,7 @@ Note: Only Backend API and Manager have DB credentials or DB-network access.
 
 **Explicitly not decided in ADR-008:** physical entity/column/index design and migration ordering; exact external/internal API routes or HTTP error taxonomy; end-user login session/token model; UI styling/component library; detailed infrastructure beyond CPU-only Compose; deployment on cloud/production; acceptance results. The requirements, current decisions and 736-VU workload remain unchanged.
 
-## 6. Proposed deterministic verification cases (design only; all `NOT_RUN`)
+## 6. Approved deterministic verification cases (design only; all `NOT_RUN`)
 
 The following **ten** checks verify the *selected stack* without replacing pre-approved QA/ADR tests. Every MUST check has an independently inspectable oracle; failure of a required check is `FAIL`, absent implementation/evidence is `NOT_RUN` or `BLOCKED`, never an assumed PASS.
 
@@ -111,10 +111,10 @@ The following **ten** checks verify the *selected stack* without replacing pre-a
 | `STACK-09-SECRETS` | Scan Git-tracked source, built static bundle, Docker build context/layers and emitted logs for injected tokens/private keys. | No injected secret bytes or Worker private keys appear in tracked artifacts, browser assets, image layers or logs; distinct ADR-005 service tokens are absent from unauthorized processes. |
 | `STACK-10-LOAD-PROFILE` | Compare running reference SUT process/config snapshot with accepted ADR-007 benchmark manifest before launch. | Exactly 2 API execution units, 1 Manager, 1 Simulator with cap 128, 1 PostgreSQL; k6 on separate host; 736-VU workload untouched. Otherwise test campaign `BLOCKED` rather than claimed performance PASS. |
 
-**Decision gate for ADR-008:** Accepting this document means approving the *tool families/reference runtime versions and ten test designs*, not claiming any test ran. Actual implementation must later lock exact minor/patch/build digests and produce recorded PASS/FAIL evidence. No technology choice can weaken the accepted security, domain or retention guarantees.
+**Approval scope (2026-10-18):** The project owner approved the *tool families/reference runtime versions and ten `STACK-01..10` test designs*, not any executable test result. Actual implementation must later lock exact minor/patch/build digests and produce recorded PASS/FAIL evidence. No technology choice can weaken the accepted security, domain or retention guarantees.
 
-## 7. Review decision requested
+## 7. Recorded approval and remaining implementation gates
 
-**PROPOSED:** Choose Option B: Python 3.12 + FastAPI/Pydantic 2 + SQLAlchemy 2/psycopg 3 + Alembic; separate Python Manager and Worker Simulator using `httpx`, `cryptography` and RFC 8785 JCS; PostgreSQL 16; React 19 + TypeScript + Vite on Node.js 24 LTS; `uv`+`npm` lockfiles; Docker Compose v2 with five long-lived services; pytest/Vitest/Playwright and the already accepted k6 profile. Approve the ten `STACK-01..10` design checks. Leave actual code, ERD, migrations, external API schema and benchmark execution for their separate future phases.
+**ACCEPTED (Option B, 2026-10-18):** Python 3.12 + FastAPI/Pydantic 2 + SQLAlchemy 2/psycopg 3 + Alembic; separate Python Manager and Worker Simulator using `httpx`, `cryptography` and RFC 8785 JCS; PostgreSQL 16; React 19 + TypeScript + Vite on Node.js 24 LTS; `uv`+`npm` lockfiles; Docker Compose v2 with five long-lived services; pytest/Vitest/Playwright and the already accepted k6 profile. All ten `STACK-01..10` checks are accepted **as test designs** (`NOT_RUN`). Existing Database/API/Module/Test Design documents remain authoritative for their respective contracts. Application code, migrations and benchmarks require separate explicit coding authorization.
 
-**Current disposition: AWAITING USER APPROVAL.** Until approval, the ADR-008 entry in `system-architecture.md` remains `OPEN`, and the codebase is not asserted to exist.
+**Current disposition: ACCEPTED (user decision 2026-10-18).** The companion documentation-status updates are included in this Markdown-only approval bundle. `API-OPEN-01` (token algorithm/storage), `API-OPEN-02` (login normalization), and the exact `simulation_input` allowlist remain OPEN and are **not** implicitly approved by this ADR. No application code or successful test execution is asserted.

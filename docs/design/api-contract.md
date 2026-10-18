@@ -2,7 +2,7 @@
 
 **Document version:** v0.4 — review-accepted design baseline; Markdown only  
 **Date:** 2026-10-18  
-**Status:** **APPROVED_DESIGN** (user review 2026-10-18) for the described public/internal API routes, DTOs and 100 contract-test designs. Existing 900-second stateless token policy remains approved. **Bounded OPEN details:** API-OPEN-01 token signing/storage choice; API-OPEN-02 login normalization; exact allowlist schema for `simulation_input` in §13. ADR-008 remains **PROPOSED**. All implementation/API/database tests remain `NOT_RUN`; no code or migration is authorized.  
+**Status:** **APPROVED_DESIGN** (user review 2026-10-18) for the described public/internal API routes, DTOs and 100 contract-test designs. Existing 900-second stateless token policy remains approved. **Bounded OPEN details:** API-OPEN-01 token signing/storage choice; API-OPEN-02 login normalization; exact allowlist schema for `simulation_input` in §13. ADR-008 Option B is **ACCEPTED** (2026-10-18). All implementation/API/database tests remain `NOT_RUN`; no code or migration is authorized.  
 **Target repository path:** `docs/design/api-contract.md`  
 **Output scope:** Markdown documentation only; no source code, SQL migration, OpenAPI generator, Docker file, or CI workflow.  
 **Product scope:** Real GPU Marketplace simulation-only MVP. NOT the separate AD-090 assignment variant.
@@ -21,7 +21,7 @@ Define a reviewable API interface against the **approved 18-table Database Desig
 4. Define reproducible API contract test cases with binary PASS/FAIL oracles.
 5. Record the 2026-10-18 approval of the documented API contracts, maintain explicit open items separately, and never claim executable verification without a code commit and test evidence.
 
-**Review record (2026-10-18):** The user approved this v0.4 API design baseline after review of its completed groups. That approval covers the contracts/test oracles documented here; it **does not** settle `API-OPEN-01`/`API-OPEN-02`, the exact internal `simulation_input` allowlist or the separately proposed ADR-008, and it is **not** permission to begin coding.
+**Review record (2026-10-18):** The user approved this v0.4 API design baseline after review of its completed groups. That approval covers the contracts/test oracles documented here; it **does not** settle `API-OPEN-01`/`API-OPEN-02`, the exact internal `simulation_input` allowlist nor authorize coding. ADR-008 was accepted separately on 2026-10-18.
 
 ### 1.3 Normative references
 
@@ -31,7 +31,7 @@ Define a reviewable API interface against the **approved 18-table Database Desig
 - [Database Design](database-design.md): 18 approved tables, physical schemas and transactional ownership/locking design (no migrations have been run).
 - [System Architecture](../architecture/system-architecture.md), [Quality Attributes](../architecture/quality-attributes.md).
 - [ADR-001](../architecture/decisions/ADR-001-modular-monolith.md), [ADR-002](../architecture/decisions/ADR-002-postgresql-access-boundaries.md), [ADR-003](../architecture/decisions/ADR-003-internal-communication.md), [ADR-004](../architecture/decisions/ADR-004-signed-result.md), [ADR-005](../architecture/decisions/ADR-005-retry-timeout-internal-auth.md), [ADR-006](../architecture/decisions/ADR-006-dispute-retention.md) and [ADR-007](../architecture/decisions/ADR-007-load-test-configuration.md).
-- [ADR-008](../architecture/decisions/ADR-008-technology-stack.md) remains PROPOSED; this API document must not turn its Python/React/framework proposals into accepted product decisions.
+- [ADR-008](../architecture/decisions/ADR-008-technology-stack.md) is ACCEPTED for technology reference choices; this does not settle any API Auth/simulation-input details.
 
 **Non-goals:** No personal-data-erasure feature/third-party adapter from AD-090; no public self-registration, real payments, real GPUs, multi-role account behavior, new database tables, or Admin manual adjudication. Do not substitute 99 VUs / 28 days / 22 hours from AD-090 for the product baseline.
 
@@ -483,7 +483,7 @@ All errors use the Section 3.3 shape `{ "error": { "code", "message", "request_i
 | ADR-001/002/003/005; NFR-S02 | API Registry owns Listings; Manager alone allocates; service tokens distinct | API-LIST-04, 08, 16 plus API-AUTH-11 |
 | Approved Database Design (18 tables) | `gpu_listings`, `workers`, `jobs`, `worker_reputation_aggregates` | DB constraints and transaction test design (`NOT_RUN`) |
 
-**Review outcome (2026-10-18):** the Listings group was first reviewed in v0.2; the user subsequently approved the consolidated v0.4 Markdown design baseline. The six Listing endpoints and 18 `API-LIST` tests are **APPROVED_DESIGN** and `NOT_RUN`. The same design-level approval applies to the other documented API groups; `API-OPEN-01/02`, the exact `simulation_input` schema and ADR-008 remain separate open choices. Future code evidence may require an explicit contract revision.
+**Review outcome (2026-10-18):** the Listings group was first reviewed in v0.2; the user subsequently approved the consolidated v0.4 Markdown design baseline. The six Listing endpoints and 18 `API-LIST` tests are **APPROVED_DESIGN** and `NOT_RUN`. The same design-level approval applies to the other documented API groups; `API-OPEN-01/02` and the exact `simulation_input` schema remain separate OPEN choices; ADR-008 is already ACCEPTED. Future code evidence may require an explicit contract revision.
 
 
 ## 8. Client Jobs API (APPROVED_DESIGN; implementation `NOT_RUN`)
@@ -869,7 +869,7 @@ The user approved the documented contract baseline. The table distinguishes deta
 | Public API — Auth, Listings, Jobs, Results, Disputes, Reputation, Dashboard | **APPROVED_DESIGN** as described; 100 contract cases are `NOT_RUN` |
 | Internal HTTP dispatch / callback | **APPROVED_DESIGN**; exact `simulation_input` allowlist still OPEN; ADR-004 V1 remains authoritative |
 | Remaining bounded Auth decisions | `API-OPEN-01` token format/algorithm/storage and `API-OPEN-02` login normalization **OPEN** |
-| ADR-008 technology stack | **PROPOSED / REVIEW**, not accepted by this document |
+| ADR-008 technology stack | **ACCEPTED (2026-10-18)** in its own ADR; no implementation/test evidence |
 | Actual API, DB migrations, application code, test runners, benchmarks, GitHub push | **NOT_STARTED / NOT_RUN** in this documentation handoff |
 
-**Next permissible design step:** resolve `API-OPEN-01/02`, the `simulation_input` allowlist and ADR-008 without changing MVP product scope. **Coding still requires a separate, explicit user instruction.** The document approval validates design text, not executable behavior or measured performance.
+**Next permissible design step:** resolve `API-OPEN-01/02` and the exact `simulation_input` allowlist without changing MVP product scope; ADR-008 is already accepted. **Coding still requires a separate, explicit user instruction.** The document approval validates design text, not executable behavior or measured performance.

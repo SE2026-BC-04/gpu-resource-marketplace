@@ -119,7 +119,7 @@ audit_events
 - **ADR-005 ACCEPTED:** directional service Bearer authentication, persisted retry/lease, deadline and backoff; `architecture/decisions/ADR-005-retry-timeout-internal-auth.md`.
 - **ADR-006 ACCEPTED:** 7-day Dispute filing and unresolved evidence held until RESOLVED (no fixed maximum), including warning/CRITICAL/retry/cleanup; see `architecture/decisions/ADR-006-dispute-retention.md`.
 - **ADR-007 ACCEPTED:** 736-VU k6 profile, 1x/5x fixed data, specified reference hardware and 128 in-flight Simulator attempts; implementation benchmark still `NOT_RUN`.
-- **ADR-008 PROPOSED / REVIEW:** FastAPI/React/Compose stack and reference versions await user approval; see `architecture/decisions/ADR-008-technology-stack.md`.
+- **ADR-008 ACCEPTED (2026-10-18):** Option B Python 3.12/FastAPI, React 19/TypeScript, PostgreSQL 16 and Compose v2 reference stack and ten `STACK-01..10` test designs approved; actual tests `NOT_RUN`. See `architecture/decisions/ADR-008-technology-stack.md`.
 
 **Test designs:** all 11 QA scenarios reviewed, execution `NOT_RUN`; six newly proposed `DAT-EX-01..06` monitoring tests need separate test-design review. See `architecture/quality-attributes.md` v0.12.
 

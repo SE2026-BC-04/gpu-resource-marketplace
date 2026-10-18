@@ -119,7 +119,7 @@ Compute GPU thực, container/SSH, thanh toán/token có giá trị, blockchain,
 - **OPEN-03 — Chi tiết thiết kế:** Phạm vi tranh chấp với job thiếu receipt hợp lệ để sau MVP; dispute cho job có receipt hợp lệ duy trì quy tắc một dispute/job.
 - **NFR BASELINE (CONFIRMED AS PROVISIONAL TARGETS):** 736 concurrently active users in the load-test scenario; 23-day detailed-history retention from `terminal_at`; change-request first substantive response within 18 hours. API latency/recovery targets remain to be measured, not claims of achieved performance.
 
-Các chi tiết còn OPEN không làm thay đổi phạm vi chức năng đã phê duyệt; những quyết định kỹ thuật ADR-003/004/005/006/007 đã ACCEPTED, ADR-008 còn PROPOSED. Database Design và API Contract chưa được thực hiện.
+Các chi tiết còn OPEN không làm thay đổi phạm vi chức năng đã phê duyệt; các ADR-001..008 đã ACCEPTED ở mức quyết định kiến trúc. Database/API/Module/Test Design trong `docs/design/` đã được duyệt ở mức tài liệu; chưa có mã nguồn, migration hay kiểm thử thực thi. Các chi tiết thuật toán/lưu trữ token, chuẩn hóa login và schema chính xác của `simulation_input` vẫn OPEN.
 
 ## 8. NFR v1.2 integration notes (binding requirements clarification)
 

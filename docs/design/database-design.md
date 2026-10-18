@@ -26,7 +26,7 @@ Authoritative inputs:
 - [Quality Attribute Scenarios](../architecture/quality-attributes.md): particularly QA-INT-01, QA-REL-01, QA-SEC-01, QA-DAT-01, QA-OBS-01.
 - [ADR-001](../architecture/decisions/ADR-001-modular-monolith.md), [ADR-002](../architecture/decisions/ADR-002-postgresql-access-boundaries.md), [ADR-003](../architecture/decisions/ADR-003-internal-communication.md), [ADR-004](../architecture/decisions/ADR-004-signed-result.md), [ADR-005](../architecture/decisions/ADR-005-retry-timeout-internal-auth.md), [ADR-006](../architecture/decisions/ADR-006-dispute-retention.md), [ADR-007](../architecture/decisions/ADR-007-load-test-configuration.md).
 
-**Explicit exclusions:** do not silently change the accepted 736-user, 23-day, 7-day Dispute and 18-hour CR baseline. The AD-090 exercise (99 users, 28-day operational data, 22-hour response, personal-data deletion and third-party adapter) remains separate. No new payment, real GPU execution, external provider or privacy-erasure product feature is introduced here. ADR-008 technology selection is still PROPOSED, whereas PostgreSQL and the three-process architecture are already accepted.
+**Explicit exclusions:** do not silently change the accepted 736-user, 23-day, 7-day Dispute and 18-hour CR baseline. The AD-090 exercise (99 users, 28-day operational data, 22-hour response, personal-data deletion and third-party adapter) remains separate. No new payment, real GPU execution, external provider or privacy-erasure product feature is introduced here. ADR-008 Option B technology selection is now ACCEPTED; PostgreSQL and the three-process architecture remain unchanged.
 
 ## 2. Domain ownership and approved 18-entity catalog
 

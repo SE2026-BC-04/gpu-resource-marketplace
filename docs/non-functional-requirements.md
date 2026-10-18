@@ -137,9 +137,9 @@ Use an injectable/fake clock for TTL and simulation-time tests; never wait 23 re
 
 These do NOT reopen approved MVP behavior:
 
-1. **Implementation stack:** PostgreSQL is APPROVED; API/frontend framework choices remain **ADR-008 PROPOSED**, and exact package/image versions require implementation lockfiles.
-2. **Process deployment:** separate API, Manager and Worker Simulator processes are APPROVED; ADR-005 fixes service-token behavior, while Compose packaging awaits ADR-008 approval. Signing keys remain secret.
-3. **Transactions and idempotency:** specify DB locking/unique constraints for allocation, result acceptance, dispute contributions and cleanup.
+1. **Implementation stack (ADR-008 ACCEPTED 2026-10-18):** Python 3.12/FastAPI/Pydantic 2, React 19/TypeScript/Vite, PostgreSQL 16 and Compose v2 are approved reference choices; exact compatible package/image versions still require implementation lockfiles.
+2. **Process deployment:** separate API, Manager and Worker Simulator processes and CPU-only five-service Compose packaging are APPROVED under ADR-001/002/008; ADR-005 fixes internal service-token behavior. Signing keys remain secret.
+3. **Transactions and idempotency:** the approved `design/database-design.md` specifies locking/uniqueness for allocation, result acceptance, dispute contributions and cleanup; implemented enforcement and tests remain `NOT_RUN`.
 4. **Crypto encoding (ADR-004 ACCEPTED):** RFC 8785 JCS, Ed25519, versioned V1 signed prefix and field/encoding contract are fixed for design; implement and independently verify the accepted test vectors before claiming interoperability.
 5. **Dispute/retention edge:** **APPROVED**: seven-day half-open filing window; unresolved evidence held until RESOLVED with no hard maximum; warning/retry/critical thresholds stated above. Only implementation details such as alert event schema and retry worker configuration remain design decisions.
 6. **Load-test measurement (ADR-007 ACCEPTED):** 736-VU role mix (552/147/37), two-minute ramp, ten-minute plateau, three independent runs, fixed request mix, reference machines and seeds are approved test design. Actual tool/image digests and measured evidence are still missing; all performance checks remain `NOT_RUN`.
