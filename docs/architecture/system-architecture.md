@@ -1,8 +1,8 @@
 # GPU Resource Marketplace - System Architecture
 
-**Version:** 0.3 - Section 2 Architecture Drivers approved; remaining architecture in review  
-**Date:** 2026-10-17  
-**Status:** Section 2 (14 Architecture Drivers and priorities) APPROVED on 2026-10-17. Other architecture sections remain in design/review. No implementation or benchmark is claimed.  
+**Version:** 0.9 - ADR-007 reproducible benchmark configuration accepted and synchronized (2026-10-18)  
+**Date:** 2026-10-18  
+**Status:** Existing architecture boundaries and 14 drivers APPROVED; ADR-003/004/005/006/007 ACCEPTED for design. ADR-008 remains OPEN; implementation and system tests remain `NOT_RUN`.  
 **Owner:** GPU Resource Marketplace development team  
 **Scope:** Simulation-only MVP
 
@@ -10,7 +10,7 @@
 
 This document explains *why* the system is structured as proposed and how its major components collaborate. It does not replace normative requirement statements or low-level schemas.
 
-- [Main Software Requirements Specification](../requirements.md) (SRS v1.1)
+- [Main Software Requirements Specification](../requirements.md) (SRS; use the latest synchronized requirements baseline)
 - [Functional Requirements](../functional-requirements.md) (21 P0 FRs across six business modules)
 - [Non-functional Requirements](../non-functional-requirements.md) (33 NFRs)
 - [Project Vision and Scope](../project-vision-and-scope.md)
@@ -45,12 +45,12 @@ flowchart LR
     UI <-->|Authenticated REST| API[Backend API]
     API <-->|Transactional SQL| DB[(PostgreSQL)]
     MGR[Automated Manager] <-->|Transactional SQL| DB
-    MGR -.->|Internal job dispatch - PROPOSED| SIM[Worker Simulator]
-    SIM -.->|Signed receipt callback - PROPOSED| API
+    MGR -->|Internal HTTP via Outbox - ACCEPTED| SIM[Worker Simulator]
+    SIM -->|Signed callback into Inbox - ACCEPTED| API
     style MGR stroke-width:2px
 ```
 
-The dotted transport edges are **proposed**, not yet an approved transport choice. Existing confirmed decisions are the logical process separation and database access boundaries.
+The internal HTTP dispatch and signed-result callback path, with PostgreSQL transactional Outbox/Inbox, is **APPROVED under ADR-003**. This is a design decision, not evidence of a working transport implementation.
 
 ### 1.3. Architectural invariants (mandatory)
 
@@ -166,8 +166,8 @@ flowchart TB
     UI --> API
     API <-->|SQL| DB
     MGR <-->|SQL| DB
-    MGR -.->|Dispatch proposed| SIM
-    SIM -.->|Callback proposed| API
+    MGR -->|Internal HTTP + Outbox accepted| SIM
+    SIM -->|Signed callback + Inbox accepted| API
 ```
 
 This is a **logical** view, not a mandate for one Python package per drawn box. Shared domain operations should have a single owning implementation, not duplicate business logic in API and Manager.
@@ -177,7 +177,7 @@ This is a **logical** view, not a mandate for one Python package per drawn box. 
 | Component | Owns | Must not own |
 |---|---|---|
 | **Web UI** | Role-specific views, inputs, client-side presentation | Authoritative job state, ownership checks, signing secrets or oracle |
-| **Backend API** | Authentication/RBAC, listing commands, job creation and queued cancellation, dispute submission, dashboards, proposed secure result-ingress endpoint | GPU allocation/finalization/reputation mutations outside Manager |
+| **Backend API** | Authentication/RBAC, listing commands, job creation and queued cancellation, dispute submission, dashboards, authenticated signed-result callback ingestion into durable Inbox | GPU allocation/finalization/reputation mutations outside Manager |
 | **Manager** | FIFO, allocation, durable execution tracking, receipt verification, finalization, dispute resolution, lifetime reputation and cleanup | Worker private key, Client impersonation, public user interfaces |
 | **Worker Simulator** | Deterministic mock execution and Ed25519 signing per Worker | Database mutations, Worker Registry public authority, dispute ground truth |
 | **PostgreSQL** | Committed source of truth for persistent application state | Computing job outcomes or storing Worker private keys in public tables |
@@ -186,20 +186,22 @@ This is a **logical** view, not a mandate for one Python package per drawn box. 
 
 ## 4. Runtime and communication view
 
-### 4.1. Approved vs proposed communication
+### 4.1. Accepted communication and remaining design details
 
 | Link | Status | Mechanism | Purpose |
 |---|---|---|---|
 | Browser <-> API | Baseline expectation | Authenticated HTTP/REST | Interactive user operations |
 | API <-> PostgreSQL | **APPROVED** | Transactions via shared repository code | Listing, job, auth and dispute persistence |
 | Manager <-> PostgreSQL | **APPROVED** | Transactions via shared repository code | Scheduling, finalization and retention |
-| Manager -> Worker Simulator | **PROPOSED** | Internal HTTP with stable `attempt_id`; durable `execution_outbox` | At-least-once job request delivery |
-| Worker Simulator -> API | **PROPOSED** | Authenticated internal HTTP signed-result callback; durable `result_inbox` | At-least-once result ingress |
+| Manager -> Worker Simulator | **APPROVED (ADR-003)** | Internal HTTP with stable `attempt_id`; durable transactional `execution_outbox` | At-least-once job request delivery |
+| Worker Simulator -> API | **APPROVED (ADR-003)** | Authenticated internal HTTP signed-result callback; durable `result_inbox` | At-least-once result ingress |
 | API/Manager -> users | **PROPOSED** | Read/poll job and dashboard endpoints | Avoid real-time infrastructure for MVP |
 
-The transport design is a **candidate ADR**, not already approved merely because it is documented here. A simpler reliable transport may be accepted after comparison, provided all FR/NFR invariants remain satisfied.
+The transport choice is **ACCEPTED in ADR-003** after explicit comparison with direct HTTP and an external message broker. **ADR-005 ACCEPTED** the exact retry intervals, hard execution deadline and scoped service-token authentication. Physical schema, SQL lock implementation, HTTP envelope contracts and measured performance remain OPEN. See [ADR-005](decisions/ADR-005-retry-timeout-internal-auth.md).
 
-### 4.2. Candidate job execution sequence
+**ADR-005 accepted execution settings:** Manager due-work poll `2s`; fenced claim lease `30s`; internal HTTP connect/total timeout `2s/5s`; persisted retry backoff `2, 4, 8, 16, 30, 30, ...s`; missing-receipt repair probe `finish_due_at + 10s`; hard deadline `finish_due_at + 120s`. Manager retries the **same `attempt_id`**. A callback is on time only when its DB-trusted Inbox `received_at < hard_deadline_at`, recorded after locking the Job; an already committed on-time Inbox receipt takes precedence over a subsequent timeout fallback even when Manager processes it late. These are design-approved settings, **not measured SLAs**.
+
+### 4.2. Accepted job execution communication sequence
 
 ```mermaid
 sequenceDiagram
@@ -226,25 +228,27 @@ sequenceDiagram
     M->>DB: Resolve via protected reference; update effective delta once
 ```
 
-The diagram shows the **proposed** outbox/inbox implementation of the approved business workflow. HTTP acknowledgment is **not** a final job outcome. Verification checks both cryptographic validity and expected worker/listing/attempt identity. Correctness of the signed claim is independently checked only by the mock dispute workflow.
+The diagram shows the **accepted ADR-003** outbox/inbox communication path of the approved business workflow. HTTP acknowledgment is **not** a final job outcome. Verification checks both cryptographic validity and expected worker/listing/attempt identity. Correctness of the signed claim is independently checked only by the mock dispute workflow.
 
 ### 4.3. Delivery semantics and idempotency
 
 - **At-least-once messages, exactly-once persistent business effect**: duplicate dispatch/callback may occur; final state changes must not repeat.
 - **Client -> API:** proposed per-Client idempotency key for job creation. Return the original job on a genuine retry.
-- **Manager -> Simulator:** stable `attempt_id` on retry; sending a new random attempt ID for the same logical retry is incorrect.
+- **Manager -> Simulator (ADR-005):** stable `attempt_id` on retry with persisted due instants and bounded backoff; sending a new random attempt ID for the same logical retry is incorrect. Dispatch `202` is not completion, and a missing callback after the probe instant triggers a same-attempt repair resend before the hard deadline.
 - **Simulator -> API:** deduplicate same `result_id`/identical payload. Same `result_id` but differing payload is an integrity conflict, not an overwrite.
 - **Manager -> DB:** unique accepted result per job and unique effective reputation contribution; terminal job and resource release committed once.
 - **Honest limitation:** a Simulator that loses in-memory attempt records may perform synthetic work twice after restart. This does **not** violate exactly-once *persistent effects* when the Manager and DB are idempotent; do not claim exactly-once physical execution.
 
 ### 4.4. Failure and race cases
 
-| Failure point | Required recovery invariant | Proposed tactic |
+| Failure point | Required recovery invariant | Recovery mechanism |
 |---|---|---|
 | Manager stops after allocating but before dispatch | No stuck, forgotten committed job | Persist attempt/outbox atomically with allocation |
 | HTTP request delivered; ACK lost | No second logical attempt or second finalization | Retry identical attempt ID |
 | Simulator restarted mid-job | Preserve manager-owned committed allocation and bounded completion | Retry with deterministic reference + deadline |
 | Result callback replayed | No double reputation/finish/release | Inbox dedup + finalization transaction |
+| On-time callback already committed, Manager processes after deadline | No false `SYSTEM_FAULT` | Prefer durable Inbox `received_at < hard_deadline_at` before terminal fallback |
+| Callback ingress races with fallback at deadline | Exactly one terminal decision/release | Lock Job in established order; winning committed transaction decides; `received_at == hard_deadline_at` is late |
 | Manager crashes just before/after commit | Either all finalization side effects commit, or none do | One ACID transaction and uniqueness constraints |
 | Cancel races with allocate | Either CANCELLED with no allocation or RUNNING with canceled request rejected | Conditional transition under consistent locks |
 | Pause races with allocate | No allocation newly committed after PAUSED commit | Lock listing and commit ordered transition |
@@ -256,7 +260,7 @@ The diagram shows the **proposed** outbox/inbox implementation of the approved b
 
 `users`, `roles`, `user_roles`, `workers`, `worker_public_keys`, `gpu_listings`, `jobs`, `allocations`, `simulation_references`, `signed_results`, `disputes`, `worker_reputation_aggregates`, `job_reputation_contributions`, `audit_events`.
 
-**PROPOSED optional delivery entities:** `execution_attempts`, `execution_outbox`, `result_inbox`. Their fields, indexes and constraints belong in `docs/design/database-design.md`, not in this architecture baseline.
+**ADR-003 REQUIRED logical delivery entities:** `execution_outbox` and `result_inbox`; `execution_attempts` is a recommended logical record (its separate physical table is still OPEN). Their fields, indexes and constraints belong in `docs/design/database-design.md`, not in this architecture baseline.
 
 ### 5.2. Write ownership
 
@@ -266,7 +270,7 @@ The diagram shows the **proposed** outbox/inbox implementation of the approved b
 | Worker/listing create, edit, pause/resume | API (registry domain) |
 | Job creation, queued cancellation | API (jobs domain) |
 | Allocation, transition to RUNNING, simulation deadlines | Manager (scheduling/execution domain) |
-| Receipt ingestion, if callback is chosen | API accepts into durable inbox, does not finalize |
+| Receipt ingestion via approved callback | API accepts into durable inbox, does not finalize |
 | Verified result and job terminalization | Manager (result/finalization domain) |
 | Dispute creation | API validates owner and inserts OPEN |
 | Dispute decision and effective classification | Manager (dispute domain) |
@@ -277,10 +281,10 @@ Physical shared DB access must never be interpreted as universal permission to m
 
 ### 5.3. Required ACID units
 
-- **TX-ALLOCATE:** Lock listing and eligible queued head; check `ACTIVE` and capacity; allocate; transition to `RUNNING`; persist attempt/deadline and, if adopted, outbox command. All-or-nothing.
+- **TX-ALLOCATE:** Lock listing and eligible queued head; check `ACTIVE` and capacity; allocate; transition to `RUNNING`; persist attempt/deadline and the outbox command. All-or-nothing.
 - **TX-CANCEL:** Check Client ownership and `QUEUED`, make conditional transition `QUEUED -> CANCELLED`; no allocation created.
 - **TX-PAUSE:** Lock listing; mark `PAUSED`. Allocation and pause use consistent locking order; running work remains valid.
-- **TX-FINALIZE:** Verify receipt/context *before* accepting; inside one transaction accept terminal outcome, release allocation, record one effective reputation contribution and mark inbox as handled, if present. If signing never yields valid receipt after bounded retry, `FAILED/SYSTEM_FAULT` may finish without penalizing Worker.
+- **TX-FINALIZE (ADR-005 deadline rule):** Verify receipt/context *before* accepting; inside one transaction accept terminal outcome, release allocation, record one effective reputation contribution and mark the inbox entry as handled. An already-committed valid Inbox receipt received strictly before `hard_deadline_at` wins over a later fallback. If no eligible valid receipt exists at the hard deadline, one `FAILED/SYSTEM_FAULT` fallback releases the allocation with zero Worker reputation effect. Retry and fallback never rewrite a terminal Job.
 - **TX-DISPUTE:** Compare protected reference; persist resolution; replace contribution via delta once; never mutate original signed bytes.
 - **TX-CLEANUP:** Remove only expired and eligible detail with linked evidence; retain lifetime aggregates and active resources; record unresolved-dispute exception.
 
@@ -294,18 +298,19 @@ Physical shared DB access must never be interpreted as universal permission to m
 4. **Separate dispute oracle:** protected `simulation_references` are created reproducibly before result submission; Client and Worker cannot edit/read them. Manager can compare the signed claim to the oracle when resolving an eligible dispute.
 5. **Signed but false is possible:** valid signature + false simulated claim is a meaningful dispute case. Bad signature is rejected and cannot directly penalize Worker.
 6. **No real attestation:** these process boundaries on one host do not establish independent third-party verification or prove execution on a physical GPU.
-7. **Internal channels, if HTTP chosen:** require service authentication, not only Docker network location. Rotate or restrict credentials using external configuration. Canonical byte encoding (e.g. RFC 8785) is a **proposal awaiting a crypto contract**.
+7. **Internal channels (ADR-003 / ADR-005 ACCEPTED):** require independent Bearer service tokens for Manager -> Simulator (`MANAGER_DISPATCH_TOKEN`) and Simulator -> API (`SIMULATOR_CALLBACK_TOKEN`), each with at least 256 bits of securely generated randomness, injected from untracked secret configuration. Invalid/missing/opposite-direction tokens are rejected before dispatch or Inbox persistence; do not expose credentials or Worker private keys in repository, logs, payloads or frontend. This HTTP-with-Bearer profile assumes an **isolated trusted single-host MVP network**; it does not claim confidentiality on an untrusted network, where TLS/mTLS is needed. **ADR-004 ACCEPTED:** RFC 8785 JCS + Ed25519 over the exact versioned V1 prefix and 11-field canonical payload; lowercase UUIDv4 identifiers, microsecond UTC `finished_at`, SHA-256 canonical-output digest, unpadded Base64url signatures and the V1 JSON Schema/public signature vector are fixed by [ADR-004](decisions/ADR-004-signed-result.md). HTTP service authentication does not replace Ed25519 verification. See [ADR-005](decisions/ADR-005-retry-timeout-internal-auth.md). These are design contracts; production authentication and signer/verifier tests remain `NOT_RUN`.
 
 ## 7. Performance, scale and load model
 
 - **Baseline:** 736 concurrent active virtual users in a replayable Client/Worker/Admin mix. This is not a count of concurrent GPU allocations.
-- **PROPOSED targets already recorded in NFR:** 10-minute steady load; read p95 <= 2 seconds; valid job submit p95 <= 3 seconds; unexpected 5xx <1%; Manager work recovery within 120 seconds of restart (DB available). These are **targets, not measured accomplishments**.
+- **Unmeasured NFR targets:** 10-minute steady load; read p95 <= 2 seconds; valid job submit p95 <= 3 seconds; unexpected 5xx <1%; Manager work recovery within 120 seconds of restart (DB available). These are **targets, not measured accomplishments**.
 - Keep `submit job` short: validate, persist `QUEUED`, return without waiting for a simulator.
 - Index listing state/owner and per-listing `(status, submitted_at, id)` queue access. Query optimization and batch size require measurement; do not optimize based on assumptions alone.
 - Enforce bounded Manager polling, DB connection pools and API rate limits; evaluate their impact on latency and fairness.
 - Scale API request handling and simulation dispatch separately if tests justify it. Beware of many Manager replicas polling the same queue; distributed claims require transactional locks/leases.
 - Strict FIFO may create head-of-line blocking. Backfilling is not MVP; adding it must be an explicit future policy change and must preserve the accepted baseline until approved.
 - Capture throughput, p95 latency, failure rates, DB lock waits, queue length/age and finalization delay during load tests.
+- **ADR-007 ACCEPTED (2026-10-18):** use [reproducible k6 load-test configuration](decisions/ADR-007-load-test-configuration.md) with 736 VUs (552 Client/147 Worker/37 Admin), 120-second ramp + 600-second plateau, 5-second per-VU think time, 3 independent baseline runs and paired `SCA-1X`/`SCA-5X` comparison. Fix a separate 4-vCPU/8-GiB load host, dedicated 8-vCPU/16-GiB+SSD SUT, 2 API execution units, 1 Manager process, 1 Simulator process (128 concurrent in-flight simulated attempts), and one PostgreSQL instance. Exact binary/image revisions are pinned only at implementation; `LDCFG-01..09`, all performance/scalability checks and any p95 claim remain `NOT_RUN`.
 
 ## 8. Retention, evidence lifecycle and lifetime reputation
 
@@ -316,7 +321,7 @@ Physical shared DB access must never be interpreted as universal permission to m
 - Audit events expire 23 days from *event creation* (not necessarily job terminal time).
 - Reputation persists two aggregate counters: `successful_jobs`, `worker_fault_jobs`; when denominator is zero, display `N/A`. Job detail deletion does **not** decrement lifetime counts.
 - If dispute is `UPHELD`, adjust the old contribution to the oracle-based effective classification exactly once while evidence exists; never rewrite the signed receipt.
-- Unresolved dispute at expiry is a **retention exception**, not permission to delete evidence silently. A submission cutoff and maximum exceptional hold period remain **OPEN**.
+- **APPROVED 2026-10-18:** A Dispute must be filed strictly before `terminal_at+7d`; normal Job evidence expires at `terminal_at+23d`. If a timely Dispute remains `OPEN` at expiry, create a durable evidence-hold exception and retain original signed receipt, verifier key, simulation reference and attribution until `RESOLVED` **without a hard maximum**. Issue an Admin-visible warning within 1h of exception detection, escalate to CRITICAL at 24h unresolved, and retry every 15m while Manager is healthy. When already expired evidence becomes resolved, clean it up within 1h under healthy conditions. Do not extend independent operational audit-log TTLs; never claim unconditional deletion of all evidence after exactly 23 days. See [ADR-006](decisions/ADR-006-dispute-retention.md).
 - Limits: after detailed evidence is deleted, individual historic outcomes cannot be fully reconstructed; late disputes/replayed results must be rejected or deduplicated using surviving safe metadata and missing job checks.
 
 ## 9. Observability and verification view
@@ -362,22 +367,22 @@ Core gates before MVP acceptance:
 |---|---|---|---|
 | ADR-001 | Modular Monolith, separate API/Manager/Simulator runtime processes | **APPROVED** | Capture rationale as a formal ADR if ADR files are introduced |
 | ADR-002 | API and Manager directly access PostgreSQL via shared domain/repository; Simulator cannot | **APPROVED** | Define schema roles, ownership and transaction protocols |
-| ADR-003 | Internal HTTP + PostgreSQL transactional Outbox/Inbox | **PROPOSED** | Decide before detailed execution schema or implementation |
-| ADR-004 | Canonical Ed25519 byte representation and versioned receipt schema | **OPEN** | Select and test reference fixtures |
-| ADR-005 | Bounded retry/timeout/backoff and transport authentication | **OPEN** | Define exact states, numbers and threat model |
-| ADR-006 | Dispute opening cutoff and maximum evidence exception hold | **OPEN** | Finalize before hard retention SLA claims |
-| ADR-007 | Load-test traffic mix, hardware, dataset and worker concurrency | **OPEN** | Establish repeatable benchmark profile |
-| ADR-008 | Framework versions and app packaging (FastAPI/React suggested) | **OPEN** | Confirm actual implementation stack |
+| ADR-003 | Internal HTTP + PostgreSQL transactional Outbox/Inbox | **ACCEPTED 2026-10-18** | [Decision and required verification](decisions/ADR-003-internal-communication.md); implementation `NOT_RUN` |
+| ADR-004 | RFC 8785 JCS + Ed25519 + versioned prefix; V1 signed fields, enum combinations, wire encodings, JSON Schema and fixed public vector | **ACCEPTED 2026-10-18** | [Signed Result V1 contract](decisions/ADR-004-signed-result.md); implementation/verification tests `NOT_RUN` |
+| ADR-005 | Persisted bounded retry/timeout/backoff, strict Inbox deadline ordering, scoped 256-bit service Bearer tokens | **ACCEPTED 2026-10-18** | [Approved decision and 18 deterministic test designs](decisions/ADR-005-retry-timeout-internal-auth.md); implementation `NOT_RUN` |
+| ADR-006 | Seven-day Dispute filing; unresolved evidence hold, warning/retry/escalation, post-resolution cleanup | **APPROVED** | [ADR-006](decisions/ADR-006-dispute-retention.md); no universal hard-delete guarantee |
+| ADR-007 | Reproducible k6 profile, fixed hardware, data 1x/5x, 128 in-flight Simulator attempts, nine config tests | **ACCEPTED 2026-10-18** | [Decision and verification](decisions/ADR-007-load-test-configuration.md); benchmark/tests `NOT_RUN` |
+| ADR-008 | Python/FastAPI API + Manager + Simulator, React/TypeScript SPA, PostgreSQL, Compose and test toolchain | **PROPOSED / REVIEW (not accepted)** | [Draft stack decision and ten test cases](decisions/ADR-008-technology-stack.md); await explicit approval |
 
 **No requirement to implement a real GPU, broker, blockchain or payment rail follows from any architecture driver.** Proposals become decisions only after explicit team review; revisions should update this register, related quality scenarios and affected SRS traces.
 
-## 13. Implementation and documentation roadmap
+## 13. Review status and later roadmap (no implementation begun)
 
 The recommended sequence minimizes design risk without creating documents solely for coursework:
 
 1. Validate this architecture and linked quality scenarios against SRS/FR/NFR.
-2. Decide ADR-003 (transport), ADR-004 (signature serialization), ADR-006 (retention exception). Record accepted ADRs if useful to future maintainers.
-3. Document detailed job execution and its retries only after communication is chosen.
+2. ADR-003 communication, ADR-004 Signed Result V1, ADR-005 execution retry/timeout/internal authentication, ADR-006 dispute retention and ADR-007 repeatable load-test configuration are accepted for design. ADR-008 technology stack remains OPEN, under separate review.
+3. Apply the accepted ADR-005 retry/deadline/authentication decisions when physical database/API design begins; no implementation has begun.
 4. Design database constraints/ERD according to transaction and retention rules.
 5. Specify API/internal protocols with auth, errors, idempotency and signed payload examples.
 6. Plan repeatable integration, security, crash-recovery and load tests before building UI polish.

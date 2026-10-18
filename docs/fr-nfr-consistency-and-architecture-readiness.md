@@ -1,8 +1,8 @@
 # GPU Resource Marketplace - FR/NFR Consistency and Architecture Readiness
 
-**Date:** 2026-10-17  
-**FR baseline:** `docs/functional-requirements.md` v1.0 (21 P0 FRs).  
-**NFR baseline:** `docs/non-functional-requirements.md` v1.0.  
+**Date:** 2026-10-18  
+**FR baseline:** `docs/functional-requirements.md` v1.2 (21 P0 FRs).  
+**NFR baseline:** `docs/non-functional-requirements.md` v1.2.  
 **Purpose:** protect consistency before detailed architecture, database, and API contracts.
 
 ## 1. Traceability matrix
@@ -29,7 +29,7 @@
 
 ### FR-DP-01 / FR-DP-03 - dispute lifetime
 
-**Clarify:** Only jobs with accepted signed receipts, retained evidence, and eligible terminal states may be disputed. The Manager normally resolves disputes deterministically without human arbitration. A dispute cannot be opened after evidence deletion. Failure to resolve before expiry is an explicit retention exception, never silent deletion of unresolved evidence.
+**Clarify:** Only jobs with accepted signed receipts, retained evidence, and eligible terminal states may be disputed. The Manager normally resolves disputes deterministically without human arbitration. A dispute cannot be opened after evidence deletion. The Client filing deadline is `[terminal_at,terminal_at+7d)`. A timely Dispute still OPEN at 23-day expiry causes a durable evidence hold until RESOLVED with no hard maximum; Admin warning <=1h after exception detection, CRITICAL at 24h OPEN, Manager retry every 15m when healthy, and cleanup of already-expired evidence <=1h after resolution. No silent deletion of unresolved evidence.
 
 ### FR-JL-05 / FR-SR-04 - invalid result behavior
 
@@ -54,7 +54,7 @@ history expiration = job.terminal_at + 23 days
 Worker lifetime counters outlive expired job histories
 ```
 
-## 4. Recommended MVP architecture (proposal, not yet formally chosen)
+## 4. Approved architecture boundaries and transport
 
 ```mermaid
 flowchart TB
@@ -69,14 +69,14 @@ flowchart TB
     UI --> API
     API <--> DB
     MGR <--> DB
-    MGR --> SIM
-    SIM --> MGR
+    MGR -->|Internal HTTP via Outbox| SIM
+    SIM -->|Signed callback via Inbox| API
     MGR --> REP
     REP <--> DB
     TTL <--> DB
 ```
 
-**Default stack recommendation:** React + TypeScript frontend; Python FastAPI backend; PostgreSQL for ACID, row locks and unique constraints; one repository; Docker Compose. Run API, Manager and Worker Simulator as separate processes when feasible (all remain one logical modular monolith). No Redis, Celery, Kubernetes, or real GPUs required to demonstrate the first MVP.
+**Approved:** one repository Modular Monolith; Backend API, Manager and Worker Simulator are separate processes; API and Manager directly use PostgreSQL via shared modules; Simulator has no application DB access. **Accepted (ADR-003, 2026-10-18):** internal HTTP Manager -> Simulator and signed callback Simulator -> API with PostgreSQL Outbox/Inbox. **Suggested framework stack (not yet approved):** React/TypeScript, FastAPI, Docker Compose. No Redis, Celery, Kubernetes or real GPUs required for MVP.
 
 **Why this split:** Worker Simulator holds signing keys; Manager verifies instead of signing its own Worker receipts. PostgreSQL is shared durable coordination state; Manager can resume jobs using stored deadlines. A distinct process is a demonstration trust boundary, NOT a production security guarantee if all services run on the same host under the same administrator.
 
@@ -110,12 +110,17 @@ audit_events
 6. Deterministic mock dispute and idempotent reputation deltas.
 7. Role dashboards, 23-day cleanup with fake-clock tests, load test with 736 VUs.
 
-## 7. Architecture decisions to confirm next
+## 7. Architecture Decision status (2026-10-18)
 
-- **ADR-001 Backend stack:** FastAPI + PostgreSQL + React/TypeScript, or another explicitly selected stack?
-- **ADR-002 Process boundary:** Separate Manager and Worker Simulator processes, or start co-located and split later?
-- **ADR-003 Scheduler persistence:** Periodic DB scanner (simplest) with per-listing locks and persisted job deadlines?
-- **ADR-004 Dispute cutoff:** Pick a bounded time window shorter than the 23-day evidence-retention window; confirm behavior for rare pending disputes at expiry.
-- **ADR-005 Deploy/test profile:** Specify machine size and user traffic mix for the 736-VU benchmark.
+- **ADR-001 ACCEPTED:** Modular Monolith with separate API, Manager and Worker Simulator processes.
+- **ADR-002 ACCEPTED:** API/Manager access PostgreSQL directly; Worker Simulator never accesses the application DB.
+- **ADR-003 ACCEPTED:** internal HTTP with PostgreSQL transactional Outbox/Inbox; see `architecture/decisions/ADR-003-internal-communication.md`.
+- **ADR-004 ACCEPTED:** RFC 8785 JCS + Ed25519 V1 signing bytes, 11-field schema, `key_id` policy and public signature vector; `architecture/decisions/ADR-004-signed-result.md`.
+- **ADR-005 ACCEPTED:** directional service Bearer authentication, persisted retry/lease, deadline and backoff; `architecture/decisions/ADR-005-retry-timeout-internal-auth.md`.
+- **ADR-006 ACCEPTED:** 7-day Dispute filing and unresolved evidence held until RESOLVED (no fixed maximum), including warning/CRITICAL/retry/cleanup; see `architecture/decisions/ADR-006-dispute-retention.md`.
+- **ADR-007 ACCEPTED:** 736-VU k6 profile, 1x/5x fixed data, specified reference hardware and 128 in-flight Simulator attempts; implementation benchmark still `NOT_RUN`.
+- **ADR-008 PROPOSED / REVIEW:** FastAPI/React/Compose stack and reference versions await user approval; see `architecture/decisions/ADR-008-technology-stack.md`.
+
+**Test designs:** all 11 QA scenarios reviewed, execution `NOT_RUN`; six newly proposed `DAT-EX-01..06` monitoring tests need separate test-design review. See `architecture/quality-attributes.md` v0.12.
 
 Do not begin an elaborate multi-service cluster before these decisions; prioritize one end-to-end job-to-signed-result-to-dispute path.

@@ -1,6 +1,6 @@
 # GPU Resource Marketplace — Functional Requirements (MVP)
 
-**Phiên bản:** Baseline v1.0 (đã chốt phạm vi chức năng; còn một số quyết định thiết kế chi tiết)  
+**Phiên bản:** Baseline v1.2 (Dispute 7 ngày; chính sách giữ bằng chứng OPEN và cảnh báo/retry đã chốt; 21 FR/6 modules không đổi)  
 **Phạm vi:** Marketplace GPU giả lập; không thực thi compute thật, không dùng tiền/token có giá trị.  
 **Kiến trúc nghiệp vụ:** Worker cung cấp listing; Client chọn listing và gửi job; Manager tự động lập lịch, xác minh kết quả có chữ ký, giải quyết dispute mock và cập nhật reputation; Admin giám sát.
 
@@ -54,9 +54,9 @@ Tất cả yêu cầu trong bảng là **P0 — bắt buộc trong MVP**. AC (Ac
 
 | ID | Yêu cầu | Acceptance Criteria |
 |---|---|---|
-| FR-DP-01 | A Client may open at most one dispute for their own eligible terminal job with accepted signed result and still-retained evidence. | Reject wrong owner, non-terminal job, duplicate dispute, absent verified receipt, or expired evidence. Store reason and creation timestamp; dispute submission cutoff remains a policy detail to confirm. |
+| FR-DP-01 | A Client may open **at most one** dispute for their own eligible terminal Job with accepted verified signed result, retained evidence and trusted DB decision instant in `[terminal_at, terminal_at + 604800 seconds)`. | Accept a properly authorized filing just **before** cutoff; reject at/after cutoff, wrong owner, non-terminal Job, duplicate or absent verified receipt; enforce unique `disputes.job_id` and atomic check/insert; persist server-issued decision timestamp. A timely `OPEN` dispute may resolve after day 7. |
 | FR-DP-02 | Manager **tự động** xét dispute dựa trên bằng chứng mô phỏng tham chiếu đã tạo trước và không do Worker/Client kiểm soát. | So sánh signed receipt với expected outcome/digest đã lưu từ kịch bản mô phỏng, không cho Worker/Client sửa; sai lệch → `UPHELD`, trùng khớp → `REJECTED`. |
-| FR-DP-03 | Manager persists dispute decision and justification without modifying original signed evidence. | `OPEN -> RESOLVED` with `UPHELD/REJECTED`; retry is idempotent; a pending dispute blocks silent evidence cleanup until resolved or an explicit retention exception is handled. |
+| FR-DP-03 | Manager persists dispute decision and justification without modifying original signed evidence. | `OPEN -> RESOLVED` with `UPHELD/REJECTED` including adjudication **after the seven-day filing window** for a timely filed dispute; retry is idempotent; pending dispute at the 23-day retention deadline creates an explicit evidence hold until RESOLVED (no hard maximum), with Admin WARNING within 1h of detection, CRITICAL at 24h OPEN, Manager retry each 15 minutes in healthy operation, then deletion of already-expired detail within 1h after resolution. |
 
 **Giải pháp demo tối giản:** Trước khi job chạy, backend lưu một `simulation_reference` bất biến (expected outcome/digest) từ fixture hoặc seed xác định. Worker Simulator nhận chỉ phần input cần để báo cáo, có thể được cấu hình trả về receipt chính xác hoặc receipt sai có chữ ký hợp lệ nhằm tạo tình huống dispute `UPHELD`. Manager so với reference khi giải quyết dispute. Cấu trúc này chỉ mô phỏng tính độc lập giữa nguồn báo cáo và nguồn đối soát, không phải attestation ngoài đời.
 
@@ -115,17 +115,17 @@ Compute GPU thực, container/SSH, thanh toán/token có giá trị, blockchain,
 - **DEC-01 — ĐÃ CHỐT:** MVP dùng **Deterministic Simulation** dựa trên fixture/seed tái lập. Expected outcome/digest được tạo và lưu trước khi nhận signed receipt; Client không thể chọn lỗi để hạ uy tín Worker.
 - **DEC-02 — ĐÃ CHỐT:** Mỗi job dùng một listing, FIFO theo listing, Pause đóng băng job chờ, chỉ hủy `QUEUED`; Manager tự động; Admin chỉ giám sát.
 - **OPEN-01 — Chi tiết thiết kế:** Chế độ lưu private key của Worker Simulator trong môi trường dev/test (secret hoặc dữ liệu fixture không commit).
-- **OPEN-02 — Chi tiết thiết kế:** Định dạng canonical serialization và cơ chế `key_id` cụ thể; phải thống nhất trước khi viết tests chữ ký.
+- **DEC-03 — ĐÃ CHỐT (ADR-004):** Signed Result V1 dùng RFC 8785 JCS + Ed25519, canonical 11-field payload và `key_id` UUIDv4 được ràng buộc với public key lịch sử; các test triển khai vẫn `NOT_RUN`.
 - **OPEN-03 — Chi tiết thiết kế:** Phạm vi tranh chấp với job thiếu receipt hợp lệ để sau MVP; dispute cho job có receipt hợp lệ duy trì quy tắc một dispute/job.
 - **NFR BASELINE (CONFIRMED AS PROVISIONAL TARGETS):** 736 concurrently active users in the load-test scenario; 23-day detailed-history retention from `terminal_at`; change-request first substantive response within 18 hours. API latency/recovery targets remain to be measured, not claims of achieved performance.
 
-Các chi tiết OPEN không làm thay đổi phạm vi chức năng đã phê duyệt nhưng cần được làm rõ trước khi khóa Database Design và API Contract.
+Các chi tiết còn OPEN không làm thay đổi phạm vi chức năng đã phê duyệt; những quyết định kỹ thuật ADR-003/004/005/006/007 đã ACCEPTED, ADR-008 còn PROPOSED. Database Design và API Contract chưa được thực hiện.
 
-## 8. NFR v1.0 integration notes (binding requirements clarification)
+## 8. NFR v1.2 integration notes (binding requirements clarification)
 
 - **Retention policy:** After 23 x 24 hours from a Job terminal timestamp, completed Job details, accepted signed receipts, simulation references, settled disputes, and per-job reputation contributions become eligible for coordinated deletion. `QUEUED`/`RUNNING` Jobs, active/paused listings, users, necessary verifier key metadata and lifetime Worker aggregates remain.
 - **Lifetime reputation:** Cleanup of an already-accounted Job changes no lifetime counters. After detailed evidence expires, lifetime reputation remains displayable but cannot be reconstructed from deleted Job-by-Job proof. This limitation must be visible in project documentation.
-- **Pending dispute at expiry:** Do not silently remove evidence for an unexpectedly unresolved dispute. Record and process an explicit retention exception. The normal opening cutoff and maximum exceptional hold duration must be specified before a strict hard-delete SLA can be claimed.
-- **Result submission and retries:** Transport may redeliver an execution command or receipt. The business effect must be idempotent: one accepted final result, one GPU release, and at most one effective reputation contribution per Job. Proposed transport (PostgreSQL Outbox/Inbox and internal HTTP) belongs to Architecture, not to the FR scope baseline until its ADR is approved.
+- **Pending dispute at expiry:** The **filing cutoff is APPROVED as 7 days** from `terminal_at` (half-open interval). Do not silently remove evidence for an unexpectedly unresolved dispute at 23-day history expiry. Record and process an explicit retention exception. An unresolved dispute is held until RESOLVED with no predetermined maximum. Admin warning <=1h after detection, CRITICAL at 24h still OPEN, and retries every 15m while Manager is healthy; expired evidence is cleaned within 1h after resolution. The system does not promise a universal hard 23-day deletion bound.
+- **Result submission and retries:** Transport may redeliver an execution command or receipt. The business effect must be idempotent: one accepted final result, one GPU release, and at most one effective reputation contribution per Job. Transport decision **ADR-003 ACCEPTED (2026-10-18)**: internal HTTP with PostgreSQL transactional Outbox/Inbox. This is an architecture decision, not an expansion of the 21 FRs; implementation tests remain NOT_RUN.
 - **Approved component separation:** Backend API and Manager share repository/domain modules and write PostgreSQL with clear module ownership; Worker Simulator is a separate process that holds Worker signing keys and has no direct application DB access.
-- **Traceability:** Detailed quantified targets, security controls, reliability and expiration tests are in `docs/non-functional-requirements.md` v1.0; the primary overview is `docs/requirements.md`.
+- **Traceability:** Detailed quantified targets, security controls, reliability and expiration tests are in `docs/non-functional-requirements.md` v1.2; the primary overview is `docs/requirements.md`.

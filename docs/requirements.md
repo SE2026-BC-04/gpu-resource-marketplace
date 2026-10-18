@@ -1,8 +1,8 @@
 # GPU Resource Marketplace — Software Requirements Specification (SRS)
 
 **Tệp chính:** `docs/requirements.md`  
-**Version:** 1.1 (documentation alignment only; no approved MVP scope change)  
-**Ngày:** 17/10/2026  
+**Version:** 1.3 (approved 7-day filing and unresolved-dispute evidence-hold operations; same six MVP modules)  
+**Ngày:** 18/10/2026 (đồng bộ trạng thái ADR; không thay đổi phạm vi MVP)  
 **Trạng thái:** Đã chốt *phạm vi nghiệp vụ và yêu cầu MVP*; chưa xác nhận sản phẩm đã triển khai/đạt kiểm thử.  
 **Dự án:** [SE2026-BC-04/gpu-resource-marketplace](https://github.com/SE2026-BC-04/gpu-resource-marketplace)
 
@@ -64,6 +64,7 @@ Không có: real GPU compute/provisioning, AI training thật, container executi
 | BL-02 | Retention | **23 ngày** cho dữ liệu lịch sử chi tiết sau khi job terminal; tài khoản, listing còn hoạt động và tổng hợp reputation được giữ |
 | BL-03 | Change Request | Phản hồi và đánh giá sơ bộ trong **18 giờ**, không phải hoàn thành triển khai trong 18 giờ |
 | BL-04 | Simulation | Deterministic, có fixture/seed tái lập; ground truth được tạo trước và bảo vệ khỏi Client/Worker |
+| BL-05 | Dispute filing deadline | Một Client chỉ được mở Dispute trong khoảng **`[terminal_at, terminal_at + 7 × 24 giờ)`**; Job phải có accepted verified signed receipt và bằng chứng còn lưu |
 
 Các con số BL-01..03 được nhóm **tạm sử dụng** làm baseline; chỉ tiêu p95/recovery là mục tiêu đề xuất, cần benchmark để xác nhận đạt hay không.
 
@@ -99,7 +100,7 @@ Các con số BL-01..03 được nhóm **tạm sử dụng** làm baseline; ch�
 | BR-08 | Không giảm Listing capacity dưới số GPU đang được cấp hoặc yêu cầu lớn nhất của một job `QUEUED`; không đổi GPU model/VRAM khi còn job chưa terminal. |
 | BR-09 | Worker Simulator ký Ed25519; Manager xác minh public key và đúng job/worker/listing trước khi chấp nhận receipt. |
 | BR-10 | Chữ ký chứng minh nguồn gốc khóa/tính toàn vẹn, **không** chứng minh kết quả mô phỏng đúng hay có compute thật. |
-| BR-11 | Dispute có trạng thái `OPEN → RESOLVED`, quyết định `UPHELD/REJECTED`; tối đa một dispute/job; receipt gốc bất biến. |
+| BR-11 | Dispute `OPEN → RESOLVED` (`UPHELD/REJECTED`); tối đa một dispute/job; chỉ mở trong **`[terminal_at, terminal_at + 7 ngày)`** khi có verified signed receipt; Dispute đã mở đúng hạn vẫn được giải quyết sau ngày thứ 7; receipt gốc bất biến. |
 | BR-12 | Reputation chỉ dựa vào kết quả đủ điều kiện; lifetime counters sống lâu hơn lịch sử chi tiết 23 ngày. |
 | BR-13 | Finalize job, release capacity, xử lý callback trùng, dispute decision và reputation adjustment phải idempotent. |
 | BR-14 | `WORKER_FAULT` có thể ảnh hưởng reputation; `JOB_FAULT`, `SYSTEM_FAULT`, `CANCELLED` và receipt không hợp lệ không được tự động phạt Worker. |
@@ -177,9 +178,9 @@ Một yêu cầu không hợp lệ bị từ chối trước khi tạo Job; khô
 
 ### 5.6. UC-C07 — Open Dispute
 
-- **Precondition:** Client sở hữu Job terminal và có **accepted signed result** còn bằng chứng trong thời hạn lưu; chưa có Dispute trước đó.
+- **Precondition:** Client sở hữu Job terminal và có **accepted verified signed result** còn bằng chứng; chưa có Dispute trước đó; **thời điểm quyết định tạo Dispute của DB** trong `[terminal_at, terminal_at + 7 ngày)`.
 - **Main Flow:** Client gửi lý do; hệ thống tạo Dispute `OPEN`; Manager đối chiếu immutable simulation reference với signed receipt; ghi `RESOLVED`, decision `UPHELD` hoặc `REJECTED`; nếu cần, điều chỉnh effective reputation classification đúng một lần.
-- **Exception Flows:** Bằng chứng hết hạn, đã có Dispute, job chưa đủ điều kiện hoặc Client không sở hữu job → reject; Manager restart → retry an toàn, không nhân đôi reputation.
+- **Exception Flows:** Tại/qua mốc `terminal_at + 7 ngày`, bằng chứng hết hạn, đã có Dispute, Job chưa đủ điều kiện hoặc Client không sở hữu Job → reject trước khi insert; Manager restart → retry an toàn, không nhân đôi Reputation. Tranh chấp đã mở đúng hạn vẫn được giải quyết sau hạn nộp.
 - **Postcondition:** Receipt gốc không bị sửa; chỉ classification có hiệu lực cho thống kê có thể được điều chỉnh.
 
 ### 5.7. Internal Workflow — Job Execution and Verification
@@ -205,9 +206,9 @@ Một yêu cầu không hợp lệ bị từ chối trước khi tạo Job; khô
 
 **Signed Result contract (summary):** an accepted receipt binds at least `schema_version`, `result_id`, `job_id`, `attempt_id`, `worker_id`, `listing_id`, `outcome`, `failure_reason`, `result_digest`, `finished_at` and `key_id` into a canonical signed payload. Manager verifies the expected execution `attempt_id` and registered Worker public key, not just a mathematically valid signature. Exact canonical byte serialization remains an architecture decision.
 
-**Dispute and retention (summary):** a Client can open at most one dispute for their own terminal Job with an accepted verified receipt and still-retained evidence. An upheld dispute adjusts the effective classification, not the original signed receipt. An unexpectedly unresolved dispute at expiration is an explicit retention exception; the final opening cutoff and maximum exception hold remain open policy details.
+**Dispute and retention (summary):** a Client can open at most one dispute for their own terminal Job with an accepted verified receipt and retained evidence **strictly before `terminal_at + 7 days`**, starting at `terminal_at`; the interval is half-open. A timely opened Dispute may be adjudicated after day 7. An upheld decision changes only the effective contribution, not the original signed receipt. An unexpectedly unresolved Dispute at 23-day history expiry is an explicit retention exception; **the exception now holds evidence until RESOLVED without a hard maximum**; warning <=1h from detection, CRITICAL at 24h unresolved, Manager retry every 15m in healthy conditions, and cleanup <=1h after resolution when expired. No strict deletion bound is promised for OPEN disputes.
 
-## 7. Non-functional Requirements — Baseline v1.0 index
+## 7. Non-functional Requirements — Baseline v1.2 index
 
 **Normative detail and acceptance tests:** [docs/non-functional-requirements.md](non-functional-requirements.md). All numeric API/recovery values below are **proposed measurable targets**, not achieved performance claims.
 
@@ -248,10 +249,11 @@ Một yêu cầu không hợp lệ bị từ chối trước khi tạo Job; khô
 ### 8.2. Retention Rules — Normative Clarification
 
 - `expires_at = terminal_at + 23 * 24 hours` đối với job `COMPLETED`, `FAILED` hoặc `CANCELLED`.
+- Client chỉ được tạo Dispute trong khoảng **`[terminal_at, terminal_at + 7 * 24 hours)`** và chỉ khi có accepted verified signed receipt; API phải lấy thời gian quyết định từ nguồn tin cậy phía server/DB, kiểm tra + insert nguyên tử. Hết hạn nộp không làm vô hiệu Dispute đã mở đúng hạn.
 - Job `QUEUED`/`RUNNING`, tài khoản, Worker Registry, GPU Listing đang quản lý và lifetime reputation **không** thuộc diện xóa theo TTL job.
 - Khi đủ điều kiện, xóa đồng bộ result/dispute/reference/audit phụ thuộc để không còn orphan records; audit logs có TTL riêng 23 ngày kể từ lúc sự kiện tạo.
 - Cleanup định kỳ theo giờ, mục tiêu dọn trong vòng một giờ sau mốc hết hạn (chỉ tiêu đề xuất).
-- Trường hợp dispute chưa giải quyết khi bằng chứng đến hạn: **ghi nhận retention exception**, ưu tiên hoàn tất resolution, không âm thầm xóa bằng chứng; thời gian gia hạn tối đa cần được chốt trước khi tuyên bố hard-delete SLA.
+- Trường hợp Dispute đã mở đúng hạn vẫn `OPEN` khi bằng chứng đến hạn: **ghi nhận retention exception** và giữ bằng chứng đến khi `RESOLVED` **không giới hạn thời gian giữ cứng**; WARNING trong 1 giờ từ khi phát hiện, CRITICAL ở mốc 24 giờ vẫn OPEN, Manager retry mỗi 15 phút khi hoạt động bình thường, cleanup trong 1 giờ sau giải quyết nếu đã quá hạn. Không cam kết hard-delete ở ngày 23 cho trường hợp này (ADR-006 ACCEPTED).
 
 **Traceability note:** Login/logout (`UC-G01`) is mandatory and is covered at the cross-cutting security level (`NFR-S01`, `NFR-S02`), but it has no dedicated numbered `FR-A*` entry among the 21 module FRs. Before API contract freeze, the team should either add a non-scope-expanding authentication FR ID to the detailed FR document (with a documented count/version update) or explicitly reference UC-G01 and NFR-S01 as its acceptance contract. Do not silently claim 21 FR IDs cover authentication as a separate module.
 
@@ -292,21 +294,24 @@ Một yêu cầu không hợp lệ bị từ chối trước khi tạo Job; khô
 - **Database access:** Backend API và Manager cùng truy cập trực tiếp **PostgreSQL**, dùng chung domain/repository modules; **Worker Simulator không có quyền truy cập database**.
 - **Ownership:** Backend API tạo/hủy Job và quản lý Worker/Listing theo RBAC; Manager điều phối, finalize receipt, dispute và reputation; Worker Simulator mô phỏng và ký bằng private key.
 - **Persistence:** Trạng thái job, allocation và simulation deadline phải persist; PostgreSQL là nguồn dữ liệu chuẩn.
+- **ADR-003 communication — APPROVED:** Manager → Worker Simulator bằng Internal HTTP với transactional Execution Outbox; Simulator → API bằng signed-result callback với durable Result Inbox; API/Manager phối hợp bằng PostgreSQL, bảo đảm idempotent persistent business effects. [ADR-003](architecture/decisions/ADR-003-internal-communication.md).
 
-### 11.2. Đang đề xuất, chưa được người dùng xác nhận (architecture design — OPEN)
+- **ADR-004 — ACCEPTED:** RFC 8785 JCS + Ed25519, 11-field V1 Signed Result, versioned prefix, JSON Schema, canonical encodings và test vector. [ADR-004](architecture/decisions/ADR-004-signed-result.md).
+- **ADR-005 — ACCEPTED:** Internal HTTP service tokens độc lập theo hướng, persisted retry/backoff, lease và result deadline. [ADR-005](architecture/decisions/ADR-005-retry-timeout-internal-auth.md).
+- **ADR-006 — ACCEPTED:** Cơ chế giữ bằng chứng cho Dispute `OPEN`, cảnh báo/retry và cleanup sau giải quyết. [ADR-006](architecture/decisions/ADR-006-dispute-retention.md).
+- **ADR-007 — ACCEPTED:** Kịch bản k6 736 VUs, fixture 1x/5x, môi trường tham chiếu, 128 in-flight Simulator attempts. Các mục tiêu p95/5xx **chưa đo**. [ADR-007](architecture/decisions/ADR-007-load-test-configuration.md).
 
-- **Internal communication:** Manager → Worker Simulator bằng internal HTTP; Worker → API bằng signed-result callback; **Transactional Outbox/Result Inbox** dựa trên PostgreSQL (at-least-once delivery + idempotent business effects).
-- **Crypto serialization:** exact canonical JSON encoding, signed payload version/schema, correlation và attempt ID.
-- **Failure policy:** timeout, số lần retry, backoff cụ thể, durable deduplication khi Worker Simulator restart.
-- **Retention edge:** dispute submission cutoff và hạn tối đa giữ bằng chứng khi có unresolved dispute.
-- **Load-test profile:** tỷ lệ loại request, dataset, máy chạy; mục tiêu latency vẫn phải đo.
-- **Framework selection:** React/TypeScript + FastAPI + PostgreSQL là **đề xuất**, PostgreSQL và process split đã chốt; framework chưa được xác nhận riêng.
+### 11.2. Quyết định còn chờ và phần thiết kế chi tiết chưa thực hiện
 
-> Các OPEN này không làm thiếu phạm vi FR/NFR của MVP. Đây là quyết định triển khai cần giải quyết trong tài liệu `docs/architecture.md`, `docs/database-design.md` và `docs/api-contract.md`.
+- **ADR-008 — PROPOSED / REVIEW:** Lựa chọn Python/FastAPI, React/TypeScript, PostgreSQL và Docker Compose chưa được phê duyệt. [ADR-008](architecture/decisions/ADR-008-technology-stack.md).
+- **Detailed design — NOT_STARTED:** Bảng/cột/index và DB transactions cụ thể; API endpoints, HTTP errors, fixtures và mã triển khai vẫn cần thiết kế/kiểm thử. Không coi các nội dung này đã được thực hiện chỉ vì ADR đã duyệt.
+- Các mục tiêu latency, recovery và load test vẫn là mục tiêu nghiệm thu/chỉ tiêu đo, **không phải kết quả PASS**.
+
+> Mục này chỉ đồng bộ trạng thái tài liệu đã phê duyệt tới 18/10/2026; không thay đổi SRS v1.3, 21 FRs hoặc 33 NFRs và không bổ sung phạm vi MVP.
 
 ## 12. Change Control & Document Ownership
 
 - Tài liệu này là bản **requirements baseline** dùng để chia việc, review code và lập acceptance tests.
 - Đề xuất thay đổi: ghi nhận mục tiêu, FR/NFR liên quan, đánh giá tác động phạm vi/thời gian/kiểm thử; phản hồi ban đầu trong 18 giờ.
 - Không thay đổi công thức reputation, quy tắc state machine, retention hoặc quyền Actor trong code mà không cập nhật tài liệu và acceptance tests liên quan.
-- **Version next:** 1.1 khi có thay đổi nghiệp vụ; kiến trúc tiếp tục có thể phát triển mà không làm đổi version của requirements nếu hành vi bên ngoài không đổi.
+- **Version next:** tăng từ 1.3 khi có thay đổi hành vi/phạm vi được phê duyệt; các quyết định thuần triển khai có thể phát triển trong ADR mà không tự làm đổi SRS.

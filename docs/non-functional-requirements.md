@@ -1,9 +1,9 @@
 # GPU Resource Marketplace - Non-functional Requirements (NFR)
 
-**Version:** 1.0 baseline  
-**Date:** 2026-10-17  
+**Version:** 1.2 baseline (7-day filing and explicit unresolved-dispute evidence-hold operations approved; existing 33 NFR IDs unchanged)  
+**Date:** 2026-10-18 (ADR status synchronization; no NFR baseline change)  
 **Status:** Requirements baseline; performance/recovery targets are proposed acceptance targets, NOT measured results.  
-**Related document:** `docs/functional-requirements.md` (FR baseline v1.0).  
+**Related document:** `docs/functional-requirements.md` (FR baseline v1.2).  
 **System:** Simulation-only GPU marketplace; no real GPU execution, valuable tokens, or real payments.
 
 ## 1. Confirmed business and operational decisions
@@ -17,6 +17,7 @@
 | BL-05 | Deterministic simulation | Reference outcomes are derived reproducibly, stored before worker receipts, and inaccessible for mutation by Client/Worker. |
 | BL-06 | Signed-result trust model | Worker Simulator signs Ed25519 receipts; Manager verifies against Worker Registry public keys. |
 | BL-07 | Approved job/listing behavior | FIFO per listing; `ACTIVE`/`PAUSED` freeze semantics; Client may cancel only `QUEUED` jobs. |
+| BL-08 | Dispute filing deadline | A Client can file at most one eligible Dispute during the **half-open** interval `[terminal_at, terminal_at + 7 days)`; a timely filed Dispute may resolve later. |
 
 ### NFR conventions
 
@@ -30,7 +31,7 @@
 
 | ID | Requirement | Acceptance criterion / test |
 |---|---|---|
-| NFR-P01 | The prototype SHOULD handle 736 concurrently active virtual users with representative Client/Worker/Admin traffic. | Perform a repeatable load test using 736 VUs for a proposed 10-minute steady-state period; record throughput, p95 latency, errors, DB contention, and queue growth. Fix the user-action mix and environment before declaring pass/fail. |
+| NFR-P01 | The prototype SHOULD handle 736 concurrently active virtual users with representative Client/Worker/Admin traffic. | Perform a repeatable load test using 736 VUs for the ADR-007-approved 10-minute steady-state test configuration; record throughput, p95 latency, errors, DB contention, and queue growth. Fix the user-action mix and environment before declaring pass/fail. |
 | NFR-P02 | Read APIs SHOULD be responsive at the target workload. | **Target:** at least 95% of successful catalog, listing, job-status, and dashboard reads finish within 2 seconds server-side. |
 | NFR-P03 | Job-submission API SHOULD remain responsive at target workload. | **Target:** p95 latency <= 3 seconds for valid submissions; the endpoint returns the created `QUEUED` job rather than waiting for simulation. |
 | NFR-P04 | Unexpected server errors SHOULD be rare under load. | **Target:** unexpected 5xx responses < 1% of requests; expected 4xx validation/conflict responses are reported separately. |
@@ -78,7 +79,7 @@
 | NFR-D05 | Persist lifetime reputation counters beyond job-detail retention. | Each Worker stores aggregate `successful_jobs` and `worker_fault_jobs`. `success_rate = successes/(successes+worker_faults)`; zero denominator -> `N/A`. Expiring an already-accounted job does NOT decrement lifetime counters. |
 | NFR-D06 | Apply dispute corrections before deleting their evidence. | An upheld dispute atomically changes the job's effective contribution (subtract old category, add corrected category) exactly once; original signed receipt is immutable. Cleanup must not silently delete an unresolved dispute. |
 | NFR-D07 | Cleanup MUST be restartable/idempotent. | Re-run a partially completed cleanup; no deleted account/active listing, dangling evidence, negative reputation counters, or duplicate adjustments. |
-| NFR-D08 | Disputes MUST be limited to retained evidence. | A Client cannot open a dispute after its job evidence has expired/deleted. Normal MVP disputes are deterministic and auto-resolved promptly; unexpected unresolved items at expiry are flagged as explicit retention exceptions until resolved. |
+| NFR-D08 | Disputes MUST be filed within 7 days of terminal time and only while accepted verified signed evidence is retained. | `decision_at` from a trusted server/DB clock must satisfy `terminal_at <= decision_at < terminal_at + 604800s`; at cutoff and later reject without insert. Enforce one Dispute/Job. A timely filed Dispute may resolve after cutoff. At 23-day history expiry, an OPEN dispute protects Job-linked evidence until RESOLVED with no fixed maximum; WARNING <=1h after exception detection, CRITICAL at 24h unresolved, durable retries every 15m during healthy Manager operation, and cleanup <=1h after resolution if already expired. |
 
 ### Reputation accounting invariant
 
@@ -100,7 +101,7 @@ reputation = successful_jobs / eligible_jobs  otherwise
 
 ### Retention edge case (explicit exception)
 
-If an unexpected unresolved dispute remains when its job reaches expiration, do NOT silently delete its reference/evidence. Record the exception and resolve/retry the deterministic dispute workflow as a priority. Define a maximum exception-hold duration and a final dispute-submission cutoff before claiming a strict hard-delete guarantee of exactly 23 days. This is a narrow policy detail to finalize with the architecture, not a change to the 23-day default history window.
+If an unexpected unresolved Dispute remains when its Job reaches expiration, do NOT silently delete its reference/evidence. Record the exception and resolve/retry the deterministic workflow as a priority. The **filing cutoff is now fixed at 7 days after `terminal_at`**. The exception-hold duration is **until RESOLVED, with no fixed maximum** (APPROVED 2026-10-18). Persist the hold marker and detection time; show an Admin WARNING within 1h of detection, change to CRITICAL at 24h if still OPEN, and attempt adjudication every 15 minutes while Manager/DB are healthy. When a dispute resolves after the history expiry, purge eligible evidence within 1h, without replaying reputation effects. Admin remains read-only; never automatically falsify an adjudication to enable deletion. This does not change normal 23-day Job history retention and means there is **no strict universal hard-delete guarantee** for OPEN-dispute evidence.
 
 Any backups containing historical data require a corresponding expiry policy if backups are added later; backups are not an MVP feature.
 
@@ -136,12 +137,12 @@ Use an injectable/fake clock for TTL and simulation-time tests; never wait 23 re
 
 These do NOT reopen approved MVP behavior:
 
-1. **Implementation stack:** select API framework, DB, and frontend framework.
-2. **Process boundary:** decide whether Manager and Worker Simulator run as separate Docker Compose processes (recommended) or modules in one process for the earliest demo; maintain distinct ownership of signing keys regardless.
+1. **Implementation stack:** PostgreSQL is APPROVED; API/frontend framework choices remain **ADR-008 PROPOSED**, and exact package/image versions require implementation lockfiles.
+2. **Process deployment:** separate API, Manager and Worker Simulator processes are APPROVED; ADR-005 fixes service-token behavior, while Compose packaging awaits ADR-008 approval. Signing keys remain secret.
 3. **Transactions and idempotency:** specify DB locking/unique constraints for allocation, result acceptance, dispute contributions and cleanup.
-4. **Crypto encoding:** choose a documented canonical Ed25519 payload byte format and verification library.
-5. **Dispute/retention edge:** pick a bounded submission window and retention-exception deadline; the 23-day default is fixed, but a hard legal deletion SLA is NOT claimed.
-6. **Load-test profile:** fix operation distribution, dataset size, and test-machine specification before asserting that latency targets are met.
+4. **Crypto encoding (ADR-004 ACCEPTED):** RFC 8785 JCS, Ed25519, versioned V1 signed prefix and field/encoding contract are fixed for design; implement and independently verify the accepted test vectors before claiming interoperability.
+5. **Dispute/retention edge:** **APPROVED**: seven-day half-open filing window; unresolved evidence held until RESOLVED with no hard maximum; warning/retry/critical thresholds stated above. Only implementation details such as alert event schema and retry worker configuration remain design decisions.
+6. **Load-test measurement (ADR-007 ACCEPTED):** 736-VU role mix (552/147/37), two-minute ramp, ten-minute plateau, three independent runs, fixed request mix, reference machines and seeds are approved test design. Actual tool/image digests and measured evidence are still missing; all performance checks remain `NOT_RUN`.
 
 ## 9. Scope exclusions
 
