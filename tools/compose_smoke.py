@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from urllib.request import urlopen
@@ -69,10 +70,28 @@ def make_smoke_env_file(values: dict[str, str | int]) -> Path:
 
 
 def check_http(url: str) -> bytes:
-    with urlopen(url, timeout=8) as response:
-        if response.status != 200:
-            raise RuntimeError(f"HTTP check failed for {url}: status {response.status}")
-        return response.read()
+    last_error: OSError | None = None
+    for _ in range(10):
+        try:
+            with urlopen(url, timeout=8) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"HTTP check failed for {url}: status {response.status}")
+                return response.read()
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.5)
+    raise RuntimeError(f"Host HTTP check failed for {url}: {last_error}") from last_error
+
+
+def published_host_port(env_file: Path, project: str, service: str, container_port: int) -> int:
+    result = compose(env_file, project, "port", service, str(container_port))
+    if result.returncode:
+        raise RuntimeError(f"Could not inspect published port for {service}: {result.stderr.strip()}")
+    binding = result.stdout.strip().splitlines()[0]
+    try:
+        return int(binding.rsplit(":", 1)[1])
+    except (IndexError, ValueError) as exc:
+        raise RuntimeError(f"Unexpected published-port mapping for {service}: {binding!r}") from exc
 
 
 def main() -> int:
@@ -102,6 +121,7 @@ def main() -> int:
             "API_HOST_PORT": available_port(used_ports),
             "POSTGRES_HOST_PORT": available_port(used_ports),
         }
+        print(f"Smoke host ports reserved: {ports}", flush=True)
         smoke_env = make_smoke_env_file(
             {
                 **ports,
@@ -157,8 +177,15 @@ def main() -> int:
         ):
             raise RuntimeError(f"Compose services did not all become healthy: {state}")
 
-        frontend_url = f"http://127.0.0.1:{ports['FRONTEND_HOST_PORT']}"
-        api_url = f"http://127.0.0.1:{ports['API_HOST_PORT']}"
+        frontend_port = published_host_port(smoke_env, PROJECT, "frontend", 5173)
+        api_port = published_host_port(smoke_env, PROJECT, "api", 8000)
+        if frontend_port != ports["FRONTEND_HOST_PORT"] or api_port != ports["API_HOST_PORT"]:
+            raise RuntimeError(
+                "Compose host-port mapping differs from the isolated build configuration: "
+                f"frontend={frontend_port}, API={api_port}, requested={ports}"
+            )
+        frontend_url = f"http://127.0.0.1:{frontend_port}"
+        api_url = f"http://127.0.0.1:{api_port}"
         html = check_http(f"{frontend_url}/").decode("utf-8")
         if '<div id="root"></div>' not in html:
             raise RuntimeError("Frontend root did not serve the generated production index.html")
