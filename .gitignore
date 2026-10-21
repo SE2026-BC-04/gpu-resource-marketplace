@@ -11,10 +11,20 @@ venv/
 # Build outputs and caches
 dist/
 build/
+backend/.uv-cache/
+simulator/.uv-cache/
+backend/.alembic-cache/
+frontend/.vite/
+frontend/coverage/
+*.tsbuildinfo
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 coverage/
+
+# Local tool/runtime caches
+.codex-tools/
 
 # Logs
 *.log

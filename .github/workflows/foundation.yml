@@ -1,0 +1,61 @@
+name: Project foundation checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.13.4
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12.15
+      - run: uv sync --project backend --locked --group dev
+      - run: uv run --project backend --locked --group dev pytest backend/tests tests
+      - run: uv sync --project simulator --locked --group dev
+      - run: uv run --project simulator --locked --group dev pytest simulator/tests
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.0
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+      - run: npm run typecheck
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-compose-action@v1
+        with:
+          version: v2.39.4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.13.4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12.15
+      - run: docker compose --env-file .env.example config --quiet
+      - run: python tools/compose_smoke.py
