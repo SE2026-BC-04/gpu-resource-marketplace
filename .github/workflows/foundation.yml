@@ -59,4 +59,13 @@ jobs:
           python-version: 3.12.15
       - run: uv sync --project backend --locked
       - run: docker compose --env-file .env.example config --quiet
+      - name: Start a local stack to verify smoke cleanup isolation
+        env:
+          FRONTEND_HOST_PORT: "25173"
+          API_HOST_PORT: "28000"
+          POSTGRES_HOST_PORT: "25432"
+        run: docker compose --env-file .env.example -p gpu-resource-marketplace up --build --detach --wait --wait-timeout 240
       - run: uv run --project backend --locked python tools/compose_smoke.py
+      - name: Stop the CI local stack
+        if: always()
+        run: docker compose --env-file .env.example -p gpu-resource-marketplace down
