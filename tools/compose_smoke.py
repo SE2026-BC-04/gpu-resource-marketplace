@@ -83,15 +83,38 @@ def check_http(url: str) -> bytes:
     raise RuntimeError(f"Host HTTP check failed for {url}: {last_error}") from last_error
 
 
-def published_host_port(env_file: Path, project: str, service: str, container_port: int) -> int:
-    result = compose(env_file, project, "port", service, str(container_port))
-    if result.returncode:
-        raise RuntimeError(f"Could not inspect published port for {service}: {result.stderr.strip()}")
-    binding = result.stdout.strip().splitlines()[0]
-    try:
-        return int(binding.rsplit(":", 1)[1])
-    except (IndexError, ValueError) as exc:
-        raise RuntimeError(f"Unexpected published-port mapping for {service}: {binding!r}") from exc
+def published_host_port(
+    services: list[dict[str, object]], service_name: str, container_port: int, project: str
+) -> int:
+    service = next(
+        (
+            item for item in services
+            if item.get("Service") == service_name
+            or item.get("Name") == f"{project}-{service_name}-1"
+        ),
+        None,
+    )
+    if service is None:
+        raise RuntimeError(f"Could not inspect running Compose service {service_name}: {services}")
+
+    publishers = service.get("Publishers")
+    if isinstance(publishers, list):
+        for publisher in publishers:
+            if not isinstance(publisher, dict) or int(publisher.get("TargetPort", -1)) != container_port:
+                continue
+            if publisher.get("URL") != "127.0.0.1":
+                raise RuntimeError(f"{service_name} is not bound to loopback only: {publisher}")
+            return int(publisher["PublishedPort"])
+
+    # Retain compatibility with Compose versions that expose a Ports string instead
+    # of the structured Publishers array in `ps --format json`.
+    ports_text = str(service.get("Ports", ""))
+    match = re.search(rf"127\.0\.0\.1:(\d+)->{container_port}/tcp", ports_text)
+    if match:
+        return int(match.group(1))
+    raise RuntimeError(
+        f"No loopback host mapping found for {service_name}:{container_port}; service state: {service}"
+    )
 
 
 def main() -> int:
@@ -145,6 +168,21 @@ def main() -> int:
             raise RuntimeError(
                 f"API CORS origins {configured_origins!r} do not match isolated frontend origin {expected_origins!r}"
             )
+        for service_name, target, host_port in (
+            ("frontend", 5173, ports["FRONTEND_HOST_PORT"]),
+            ("api", 8000, ports["API_HOST_PORT"]),
+            ("postgres", 5432, ports["POSTGRES_HOST_PORT"]),
+        ):
+            mappings = rendered_config["services"][service_name].get("ports", [])
+            mapping = next((item for item in mappings if int(item["target"]) == target), None)
+            if (
+                mapping is None
+                or int(mapping.get("published", -1)) != host_port
+                or mapping.get("host_ip") != "127.0.0.1"
+            ):
+                raise RuntimeError(
+                    f"Compose {service_name} port mapping is not the requested isolated loopback port: {mappings}"
+                )
 
         # A UUID project name plus an empty-project check prevents cleanup from
         # targeting any pre-existing containers, networks, or named volumes.
@@ -177,8 +215,8 @@ def main() -> int:
         ):
             raise RuntimeError(f"Compose services did not all become healthy: {state}")
 
-        frontend_port = published_host_port(smoke_env, PROJECT, "frontend", 5173)
-        api_port = published_host_port(smoke_env, PROJECT, "api", 8000)
+        frontend_port = published_host_port(state, "frontend", 5173, PROJECT)
+        api_port = published_host_port(state, "api", 8000, PROJECT)
         if frontend_port != ports["FRONTEND_HOST_PORT"] or api_port != ports["API_HOST_PORT"]:
             raise RuntimeError(
                 "Compose host-port mapping differs from the isolated build configuration: "
