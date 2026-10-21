@@ -1,8 +1,8 @@
 # GPU Resource Marketplace - System Architecture
 
-**Version:** 0.10 - ADR-008 Option B accepted and document statuses synchronized (2026-10-18)  
-**Date:** 2026-10-18  
-**Status:** Existing architecture boundaries and 14 drivers APPROVED; ADR-001..008 **ACCEPTED** as design decisions. API Auth and `simulation_input` details remain OPEN; implementation and system tests remain `NOT_RUN`.  
+**Version:** 0.11 - API decision status synchronized (2026-10-21)<br>
+**Date:** 2026-10-21<br>
+**Status:** Existing architecture boundaries and 14 drivers APPROVED; ADR-001..008 **ACCEPTED** as design decisions. Owner-approved API decisions `API-OPEN-01/02/06` are synchronized in API Contract v0.6. Additional Auth profile details are `NEEDS_OWNER_DECISION` before Authentication implementation; they do not block GPU-001 foundation when Auth is out of scope. Implementation and system tests remain `NOT_RUN`.<br>
 **Owner:** GPU Resource Marketplace development team  
 **Scope:** Simulation-only MVP
 
@@ -20,7 +20,7 @@ This document explains *why* the system is structured as proposed and how its ma
 **Status convention:**
 - **APPROVED:** Explicitly agreed project decision or existing SRS baseline.
 - **PROPOSED:** Recommended architecture or measurement target, not yet approved as an ADR.
-- **OPEN:** Must be resolved before freezing detailed database/API/design contracts.
+- **OPEN:** Must be resolved before freezing or implementing the affected detail; unrelated approved design work may continue.
 - **VERIFIED:** Requires objective test evidence; nothing in this document is marked verified merely by design.
 
 ## 1. Architectural context

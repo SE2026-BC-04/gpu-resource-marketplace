@@ -1,8 +1,8 @@
 # GPU Resource Marketplace - API Contract Design
 
-**Document version:** v0.5 — accepted API decisions synchronized; Markdown only<br>
+**Document version:** v0.6 — review findings resolved; approved decisions and pending details separated; Markdown only<br>
 **Date:** 2026-10-21<br>
-**Status:** **APPROVED_DESIGN** for the described public/internal API routes, DTOs, 100 contract-test designs, and the owner-approved resolutions of `API-OPEN-01`, `API-OPEN-02`, and `API-OPEN-06` (decision date 2026-10-18). ADR-008 Option B is **ACCEPTED** (2026-10-18). All implementation/API/database tests remain `NOT_RUN`; this document makes no claim that application code or migrations exist.
+**Status:** **APPROVED_DESIGN** for the described API routes/DTOs, the 100 API contract-test IDs, and the owner-approved scope of `API-OPEN-01`, `API-OPEN-02`, and `API-OPEN-06` (2026-10-18). Additional JWT claim/header details, NumericDate fractional precision, and the precise Unicode login-normalization policy are **PROPOSED / NEEDS_OWNER_DECISION** in §§4.5 and 14.3. They block Authentication implementation, but not GPU-001 foundation if Authentication is excluded. ADR-008 Option B is **ACCEPTED** (2026-10-18). All implementation/API/database tests remain `NOT_RUN`; this document makes no claim that application code or migrations exist.
 **Target repository path:** `docs/design/api-contract.md`  
 **Output scope:** Markdown documentation only; no source code, SQL migration, OpenAPI generator, Docker file, or CI workflow.  
 **Product scope:** Real GPU Marketplace simulation-only MVP. NOT the separate AD-090 assignment variant.
@@ -11,7 +11,7 @@
 
 ### 1.1 Goal for this iteration
 
-Define a reviewable API interface against the **approved 18-table Database Design** without silently changing business rules or runtime responsibilities. v0.1 specified common conventions and Authentication/RBAC; v0.2 recorded the **approved 15-minute stateless access-token decision** and designed **Worker GPU Listings** contracts. v0.3 drafted the remaining API groups; v0.4 records their acceptance as a design baseline. v0.5 synchronizes the owner's 2026-10-18 approval of the JWT profile, login normalization, and exact `simulation_input` allowlist. No endpoint or test is claimed implemented or verified.
+Define a reviewable API interface against the **approved 18-table Database Design** without silently changing business rules or runtime responsibilities. v0.1 specified common conventions and Authentication/RBAC; v0.2 recorded the **approved 15-minute stateless access-token decision** and designed **Worker GPU Listings** contracts. v0.3 drafted the remaining API groups; v0.4 records their acceptance as a design baseline. v0.5 synchronized the owner's approval of the broad JWT policy, trimmed case-sensitive login matching, and exact `simulation_input` allowlist. v0.6 separates those approved decisions from extra Authentication details that still need owner review. No endpoint or test is claimed implemented or verified.
 
 ### 1.2 Design and review workflow
 
@@ -19,9 +19,9 @@ Define a reviewable API interface against the **approved 18-table Database Desig
 2. Define consistent public HTTP/JSON semantics, authorization error categories and audit/correlation practices.
 3. Specify Login, Logout and Current-User contract candidates, including data ownership and security boundaries.
 4. Define reproducible API contract test cases with binary PASS/FAIL oracles.
-5. Record the 2026-10-18 approval of the documented API contracts and the resolved `API-OPEN-01/02/06` decisions; never claim executable verification without a code commit and test evidence.
+5. Record the 2026-10-18 approval of the documented API contracts and the owner-approved scope of `API-OPEN-01/02/06`; keep additional implementation choices explicit and never claim executable verification without a code commit and test evidence.
 
-**Review record:** The user approved the v0.4 API design baseline on 2026-10-18. On 2026-10-18 the owner also resolved `API-OPEN-01` (HS256 JWT and volatile-memory-only browser storage), `API-OPEN-02` (trimmed, case-sensitive login names), and `API-OPEN-06` (the exact `simulation_input` allowlist); v0.5 records those decisions without changing the approved API routes or business behavior. ADR-008 was accepted separately on 2026-10-18. This documentation records design decisions only; implementation and test status remain separate.
+**Review record:** The user approved the v0.4 API design baseline on 2026-10-18. The owner separately approved the broad `API-OPEN-01` policy (HS256 JWT, dedicated API secret of at least 256 bits, 900-second lifetime, volatile-memory-only browser storage, no refresh token and no immediate server-side Logout revocation), `API-OPEN-02` (trim surrounding login whitespace, case-sensitive matching, and the same rule for seeding/provisioning and login), and `API-OPEN-06` (the exact `simulation_input` allowlist). Those approvals do not specify every JWT claim/header or every Unicode normalization detail; see §§4.5 and 14.3. ADR-008 was accepted separately and does not itself approve these API details. This documentation records design decisions only; implementation and test status remain separate.
 
 ### 1.3 Normative references
 
@@ -37,9 +37,9 @@ Define a reviewable API interface against the **approved 18-table Database Desig
 
 ## 2. API surfaces and design status
 
-| Surface / planned group | Access path | Owning component | v0.5 design status |
+| Surface / planned group | Access path | Owning component | v0.6 design status |
 |---|---|---|---|
-| Authentication / current account | Public HTTPS-facing API | Backend API / Identity | **APPROVED_DESIGN**, including the accepted HS256/900-second/volatile-memory token profile and trimmed case-sensitive login matching |
+| Authentication / current account | Public HTTPS-facing API | Backend API / Identity | **APPROVED_DESIGN** for owner-approved HS256/900-second/volatile-memory policy and trimmed case-sensitive login rule; additional profile details need owner decision (§4.5) |
 | Worker GPU Listings | Public API | Backend API / Registry | **APPROVED_DESIGN**: six endpoints and 18 tests (Section 7) |
 | Client Jobs and cancellation | Public API | Backend API / Jobs | **APPROVED_DESIGN** in Section 8 |
 | Signed Result viewing | Public read-only API | Backend API / Results | **APPROVED_DESIGN** in Section 9 |
@@ -113,7 +113,7 @@ All controlled public HTTP errors return this **candidate** structure (fields no
 - Every state-changing request evaluates actual server-side account role and object ownership; client-sent user ID/role must not override the authenticated principal.
 - Secrets are never returned in error bodies, audit metadata, frontend bundles or documentation fixtures. Redacted request IDs and error classes are safe to record.
 
-## 4. Authentication / RBAC endpoint group (APPROVED_DESIGN; accepted token profile)
+## 4. Authentication / RBAC endpoint group (APPROVED_DESIGN; extra profile details pending)
 
 ### 4.1 Scope and required accounts
 
@@ -121,7 +121,7 @@ All controlled public HTTP errors return this **candidate** structure (fields no
 
 **Owner:** Backend API Identity boundary. Authentication reads `users`, `user_roles` and `roles`; login/logout may write redacted `audit_events`. Neither caller nor frontend may write `user_roles` or change authorization identity.
 
-**APPROVED authentication policy (2026-10-18):** use a signed **JWT with HS256**, valid for exactly **900 seconds**, with no refresh token or user-session table. The API uses a dedicated secret of at least 256 bits. The browser keeps the token in volatile memory only; it must not persist it to Web Storage, IndexedDB, cookies, URLs, or service-worker caches. Logout causes the client to discard the token but **does not revoke an issued token on the server**; an unexpired token can still authenticate until expiry unless the account is disabled or rejected by fresh server-side checks. Login trims only ASCII space, tab, line feed, and carriage return from the supplied login name, then matches case-sensitively without case-folding. The detailed JWT profile is in §4.5. Do not conflate end-user access tokens with ADR-005 service tokens.
+**Owner-approved authentication policy (2026-10-18):** use a signed **JWT with HS256** and a dedicated API secret of at least 256 bits, valid for exactly **900 seconds**. There is no refresh token or user-session table. The browser keeps the token in volatile memory only; it must not persist it to Web Storage, IndexedDB, cookies, URLs, or service-worker caches. Logout causes the client to discard the token but **does not revoke an issued token on the server**; an unexpired token can still authenticate until expiry unless the account is disabled or rejected by fresh server-side checks. Login trims surrounding whitespace and matches case-sensitively; seeding/provisioning and Login use the same rule. The exact JWT claim/header profile and login normalization repertoire are not included in that approval (§4.5). Do not conflate end-user access tokens with ADR-005 service tokens.
 
 ### 4.2 `POST /api/v1/auth/login` - sign in to a preseeded account
 
@@ -130,8 +130,8 @@ All controlled public HTTP errors return this **candidate** structure (fields no
 | Access | Public (unauthenticated request allowed) |
 | Owner / reads | API Identity; `users` + `user_roles` (`roles` catalog) |
 | Body | Required `login_name` and `password` strings; no `role` or `user_id` accepted |
-| Input validation | `login_name` length 1..128 after trimming only ASCII space, tab, line feed, and carriage return; `password` nonempty; malformed JSON or unexpected fields -> `400`; missing/empty/wrong-type required fields -> `422` |
-| Login name matching | Trim only surrounding ASCII space, tab, line feed, and carriage return; match case-sensitively with no case-folding or Unicode normalization; seeded `users.login_name` values follow the same rule |
+| Input validation | `login_name` length 1..128 after applying the owner-approved surrounding-whitespace trim rule; `password` nonempty; malformed JSON or unexpected fields -> `400`; missing/empty/wrong-type required fields -> `422`; the exact whitespace code-point set is `NEEDS_OWNER_DECISION` (§4.5) |
+| Login name matching | Trim surrounding whitespace and match case-sensitively; seeding/provisioning and Login use the same approved rule. Exact Unicode whitespace handling and Unicode normalization are `NEEDS_OWNER_DECISION` (§4.5); do not infer them from this broad approval |
 | Authentication | Verify password against stored **hash**, require `users.status='ACTIVE'` and exactly one valid assigned role; never compare/store plaintext password |
 | Success | `200 OK`, `Cache-Control: no-store`, response JSON containing authenticated `user` and credential info (shape below) |
 | Wrong name/password/disabled account | `401 INVALID_CREDENTIALS` with the same generic message; do not reveal which condition failed |
@@ -168,7 +168,7 @@ All controlled public HTTP errors return this **candidate** structure (fields no
 
 | Contract property | Proposed value |
 |---|---|
-| Access | Valid end-user HS256 JWT using `Authorization: Bearer <user-token>`; validate the approved profile in §4.5 |
+| Access | End-user JWT signed with approved HS256 policy using `Authorization: Bearer <user-token>` and within the approved 900-second lifetime; additional claim/header requirements are listed in §4.5 |
 | Owner / reads | API Identity; current account/role record |
 | Success | `200 OK`, `Cache-Control: no-store` |
 | Success body | `id` UUIDv4, `login_name`, `role`; only the account identified by the validated credential |
@@ -201,16 +201,20 @@ An end-user token's role claim, if one exists, is not permission to ignore the a
 
 **Do not label a stateless logout response as proof of immediate token invalidation.** The UI must disclose this approved limitation. The API cannot force a client to delete a copied credential. No automatic account deletion or personal-data-erasure behavior is implied by Logout.
 
-### 4.5 Approved end-user credential profile (2026-10-18)
+### 4.5 Approved end-user credential policy and pending profile details
 
 | Candidate | Fits approved 18-table data model? | Login/Logout properties | Main drawback |
 |---|---|---|---|
 | **A. Short-lived HS256 JWT, no refresh token for MVP (APPROVED)** | Yes, if a dedicated signing secret is injected outside DB and account/role/status are validated server-side | Login returns a 15-minute Bearer token; `/me` uses it; the browser keeps it in volatile memory only; Logout clears client-held token and may record a redacted event | Already issued tokens remain usable until expiry unless account disabled; no immediate logout revocation |
 | **B. Revocable server-side session** | **No, not without a separately approved physical-model change or existing sanctioned external session store** | Immediate session invalidation on Logout is possible with session state | Requires additional storage/session model and tests, modifying the approved 18-table scope or introducing a new approved component |
 
-**Approved profile (2026-10-18):** use a signed JWT whose protected header requires `alg=HS256` and `typ=JWT`; reject any other algorithm or token type. The API-side signing secret is dedicated, at least 256 bits, and distinct from the two internal service Bearer tokens and Worker Ed25519 signing keys. Required claims are `iss=gpu-marketplace-api`, `aud=gpu-marketplace-web`, a valid UUID `sub`, a server-trusted `iat`, and `exp=iat+900` seconds. Reject when `now >= exp`; apply no expiry grace period and do not trust a client-supplied issue time. Revalidate the account's ACTIVE status and authoritative role mapping on protected requests; a signed role claim does not supersede database permissions.
+**Owner-approved policy (2026-10-18):** the credential is an HS256-signed JWT with a dedicated API secret of at least 256 bits. The trusted issue instant is authoritative, `exp = iat + 900 seconds`, a token is valid only before `exp`, and the API rejects when `now >= exp`; no expiry tolerance is part of this contract. Protected requests revalidate the account's ACTIVE status and authoritative role mapping; a signed role claim does not supersede database permissions. There is no refresh token, user-session table, or immediate server-side Logout revocation. The browser holds the token only in volatile memory. The signing key remains distinct from the two internal service Bearer tokens and Worker Ed25519 signing keys. These are the approved scopes of `API-OPEN-01` and `API-OPEN-02`; they do not establish every claim/header or Unicode detail below.
 
-The browser may keep the end-user token **only in volatile memory**. It must not persist it in `localStorage`, `sessionStorage`, IndexedDB, cookies, URLs, or service-worker caches. The token expires exactly 900 seconds after issue; there is no refresh token, user-session table, or server-side immediate logout revocation. Logout asks the client to discard its token but does not invalidate a copied, unexpired token. No new DB table is authorized. These accepted choices close `API-OPEN-01` and `API-OPEN-02`; Login/Me/Logout route and DTO details remain as documented in §§4.2–4.4.
+**Additional JWT profile — PROPOSED / NEEDS_OWNER_DECISION before Authentication implementation:** exact `iss` and `aud` values, whether to require `typ=JWT`, and the precise `sub` format were added in earlier draft text without separate owner-approval evidence. A candidate is `iss=gpu-marketplace-api`, `aud=gpu-marketplace-web`, `typ=JWT`, and UUID `sub`. These are technical hardening/representation choices, not part of the approved HS256/TTL policy. They do not block GPU-001 foundation when Authentication is excluded; they must be decided before implementing token issuance or validation.
+
+**NumericDate precision — PROPOSED / NEEDS_OWNER_DECISION before Authentication implementation:** JWT NumericDate is a JSON number of seconds since the Unix epoch, and its definition permits non-integer values ([RFC 7519 §2](https://www.rfc-editor.org/rfc/rfc7519.html#section-2)); the `exp` rule requires current time to be before expiration and permits optional leeway, which this project does not approve ([RFC 7519 §4.1.4](https://www.rfc-editor.org/rfc/rfc7519.html#section-4.1.4)). To preserve the approved exact 900-second lifetime, the proposed representation retains six fractional decimal places for trusted `iat`/`exp`, sets `exp = iat + 900.000000`, and compares using equivalent exact microsecond/decimal precision without truncation, rounding, or tolerance. Under that proposal `T0+899.999999s` is valid and `T0+900.000000s` is expired. Integer-second truncation or rounding can change the actual elapsed lifetime from the issuance instant; therefore the representation itself remains for owner decision even though the 900-second policy and strict expiry boundary are approved.
+
+**Login normalization repertoire — PROPOSED / NEEDS_OWNER_DECISION before Authentication implementation:** the owner approved trimming surrounding whitespace, case-sensitive matching, and applying one consistent rule to seeded/provisioned names and Login. The approval did not specify the full Unicode whitespace repertoire or Unicode normalization. Candidate behavior: trim ASCII space, tab, line feed, and carriage return only; preserve other Unicode whitespace as part of the name; do not apply NFC/NFD or case folding. This avoids silently treating all Unicode whitespace as trim characters. The proposal affects Authentication only and does not block a foundation-only GPU-001 slice.
 
 ## 5. Authorization and error decision matrix (APPROVED_DESIGN)
 
@@ -233,17 +237,17 @@ The planned resource mutations in this table are **authorization requirements**,
 - One `DISABLED` account `D1`; one nonexistent `login_name`; wrong-password fixture; a deliberately corrupted account missing its role association in a controlled negative test database.
 - Distinct service-only tokens for Manager dispatch and Simulator callback; neither is an end-user credential.
 - Separate Worker Listing owned by `W1`, private Job owned by `C1`, and a second Client `C2` (future resource-group fixtures).
-- Fixed fake clock `T0` for JWT expiry checks; capture API status, redacted JSON, DB before/after snapshots and structured audit with no secrets.
+- Fixed fake clock `T0` for JWT expiry checks; capture API status, redacted JSON, DB before/after snapshots and structured audit with no secrets. Use canonical and whitespace-wrapped login fixtures, a space-only value, a case variant, U+00A0-wrapped input, and precomposed/decomposed Unicode fixtures; the last two use proposed oracles pending the decision in §4.5.
 - For every case: set implementation version, test fixture ID, command, elapsed time, observed HTTP status/body, and PASS/FAIL/NOT_RUN. No behavior is asserted to have executed here.
 
 | ID | Action | Binary PASS oracle | Prerequisite |
 |---|---|---|---|
-| `API-AUTH-01-ROLES` | Login separately with valid C1/W1/A1 credentials | Three `200`s; returned account IDs and respective `CLIENT/WORKER/ADMIN` roles exactly match DB; 0 secret fields in replies | Auth decision accepted |
+| `API-AUTH-01-ROLES` | Login separately with valid C1/W1/A1 canonical credentials; repeat C1 with the same login surrounded by U+0020 spaces; seed/provision a whitespace-wrapped C1 name and login with its canonical form; try a U+0020-only login and a mixed-case variant | Canonical and U+0020-wrapped C1 requests return `200` with the same C1 identity; provisioning and Login resolve the same canonical name; U+0020-only input returns `422` after trim; mixed-case variant returns generic `401`; three role identities match DB; 0 secret fields in replies | Owner-approved trim/case/seed consistency rules; Unicode-specific subcases below remain proposed |
 | `API-AUTH-02-GENERIC-FAIL` | Unknown login, wrong password and disabled D1 with otherwise valid password | All return `401 INVALID_CREDENTIALS` with equivalent public message; 0 role or account existence disclosure | Auth decision accepted |
 | `API-AUTH-03-BAD-BODY` | Missing `login_name`, empty password, malformed JSON and injected `role='ADMIN'` in login body | Malformed JSON and injected unknown `role` -> `400`; missing `login_name` or empty `password` -> `422`; no account/role mutation | Validation contract approved |
 | `API-AUTH-04-ME-OWN` | GET `/auth/me` with valid C1 credential | `200` and C1 identity only; no password hash/token contents, other users or secrets | Auth decision accepted |
-| `API-AUTH-05-NO-AUTH` | GET `/auth/me` without a credential, with a malformed or tampered JWT, or with an unsupported algorithm/type or mismatched issuer/audience/subject | `401` for every invalid credential; no identity body | Accepted JWT profile |
-| `API-AUTH-06-EXPIRED` | Issue token at trusted fake `T0`; call `/auth/me` at `T0+899.999999s` and `T0+900s` | `200` strictly before expiry and `401` at expiry; lifetime exactly 900s | 900-second policy APPROVED; test NOT_RUN |
+| `API-AUTH-05-NO-AUTH` | GET `/auth/me` without a credential; with malformed/tampered JWT; with `exp` changed to a future value while keeping the original signature; or with an unsupported signing algorithm such as `none` or `HS384` | `401` for every invalid credential, including the modified-`exp` token and any `alg` other than HS256; no identity body | Owner-approved HS256 and expiry policy |
+| `API-AUTH-06-EXPIRED` | Issue token at trusted fake `T0`; call `/auth/me` at `T0+899.999999s` and `T0+900.000000s` | Approved oracle: reject at exactly `now >= exp` with no tolerance. Under the proposed microsecond NumericDate representation in §4.5, `+899.999999s` returns `200` and `+900.000000s` returns `401`; the representation-dependent fractional subcase is `NEEDS_OWNER_DECISION` | Exact 900-second policy APPROVED; fractional NumericDate representation pending owner decision; test `NOT_RUN` |
 | `API-AUTH-07-DISABLED-AFTER-ISSUE` | Disable C1 after issuing an access credential; call `/auth/me` | Request rejected at 401; server-side account status not bypassed by a still-well-signed token | Auth decision accepted |
 | `API-AUTH-08-MISSING-ROLE` | Try login for account with no valid unique role mapping | Login rejected; 0 default role and 0 Admin escalation | Controlled negative DB fixture |
 | `API-AUTH-09-CROSS-ROLE` | C1 requests Worker write; W1 requests Client write; A1 requests any business write | `403` for each wrong-role request; no domain mutation | Related routes subsequently defined |
@@ -254,6 +258,12 @@ The planned resource mutations in this table are **authorization requirements**,
 | `API-AUTH-14-NO-SIGNUP` | Probe public account-registration/role-assignment routes | No route allows creating user or changing role; unimplemented `/api/v1/auth/register` and role-assignment paths respond `404`; no account or role mutation | Public API routing implemented |
 
 **Approval vs execution:** All rows are proposed test *designs*, currently `NOT_RUN`. An auth group cannot be called `VERIFIED` until every applicable approved mandatory check actually runs with evidence. A deferred test is not silently assumed to PASS.
+
+**Additional normalization subcases under existing `API-AUTH-01-ROLES` (no new test ID):**
+
+- **Unicode whitespace (`U+00A0` NO-BREAK SPACE):** fixture uses `\u00A0demo_client\u00A0` against a seeded canonical ASCII `demo_client`. Proposed oracle if the owner selects the ASCII-only trim proposal in §4.5: treat U+00A0 as part of the login name and return generic `401`, not `200`. Status: `PROPOSED / NEEDS_OWNER_DECISION`; do not count this as an approved oracle yet.
+- **Unicode normalization-sensitive name:** seed the exact precomposed `caf\u00E9` login and verify that exact sequence succeeds. Under the proposed no-normalization rule, decomposed `cafe\u0301` is a distinct name and returns generic `401`. Status: `PROPOSED / NEEDS_OWNER_DECISION`; no NFC/NFD equivalence is assumed.
+- **Provisioning/Login consistency:** apply the same selected normalization function once when writing the seeded `users.login_name` and when parsing Login input. For the approved U+0020 boundary fixture above, a seed input of `  demo_client  ` and login input `demo_client` must resolve to the same account. Extend the same oracle to any additional characters only after their trim/normalization decision is approved.
 
 ## 7. Worker GPU Listings contract (v0.2 design baseline; tests `NOT_RUN`)
 
@@ -280,7 +290,7 @@ The planned resource mutations in this table are **authorization requirements**,
 | `POST` | `/api/v1/gpu-listings/{listing_id}/pause` | Owner `WORKER` | `200` with PAUSED Listing | Atomic state transition; running Jobs preserved |
 | `POST` | `/api/v1/gpu-listings/{listing_id}/resume` | Owner `WORKER` | `200` with ACTIVE Listing | Atomic state transition; Manager resumes FIFO asynchronously |
 
-Use `Authorization: Bearer <user-access-token>` for protected endpoints per Section 4.5: validate the approved HS256 JWT profile and 900-second lifetime. No Listing mutation authorizes users by trusting a `worker_id` in the JSON.
+Use `Authorization: Bearer <user-access-token>` for protected endpoints per Section 4.5: validate the owner-approved HS256 signature and 900-second lifetime; apply additional claim/header checks only after the decisions in §4.5 are approved. No Listing mutation authorizes users by trusting a `worker_id` in the JSON.
 
 ### 7.3. Read DTO, price precision and computed availability
 
@@ -483,7 +493,7 @@ All errors use the Section 3.3 shape `{ "error": { "code", "message", "request_i
 | ADR-001/002/003/005; NFR-S02 | API Registry owns Listings; Manager alone allocates; service tokens distinct | API-LIST-04, 08, 16 plus API-AUTH-11 |
 | Approved Database Design (18 tables) | `gpu_listings`, `workers`, `jobs`, `worker_reputation_aggregates` | DB constraints and transaction test design (`NOT_RUN`) |
 
-**Review outcome (2026-10-18):** the Listings group was first reviewed in v0.2; the user subsequently approved the consolidated v0.4 Markdown design baseline. The six Listing endpoints and 18 `API-LIST` tests are **APPROVED_DESIGN** and `NOT_RUN`. The same design-level approval applies to the other documented API groups. The owner-approved v0.5 synchronization closes `API-OPEN-01/02/06`; ADR-008 is already ACCEPTED. Future code evidence may require an explicit contract revision.
+**Review outcome (2026-10-18):** the Listings group was first reviewed in v0.2; the user subsequently approved the consolidated v0.4 Markdown design baseline. The six Listing endpoints and 18 `API-LIST` tests are **APPROVED_DESIGN** and `NOT_RUN`. The same design-level approval applies to the other documented API groups. The owner-approved API decisions `API-OPEN-01/02/06` are synchronized at their approved scope; the additional Auth profile details listed in §§4.5 and 14.3 remain pending. ADR-008 is already ACCEPTED. Future code evidence may require an explicit contract revision.
 
 
 ## 8. Client Jobs API (APPROVED_DESIGN; implementation `NOT_RUN`)
@@ -830,21 +840,31 @@ The example `signature` is a documentation placeholder **not a valid signed fixt
 | `API-COM-07` | Repeat resource commands with retry and concurrency | Only intended idempotent effects, no bypass of DBTX/ADR invariants |
 | `API-COM-08` | API error path under DB disconnect | `503` or safe failure, no fabricated success or sensitive stack trace |
 
-### 14.2. Bounded implementation decisions and review outcomes
+### 14.2. Owner-approved API decisions
 
-The user approved the documented contract baseline. `API-OPEN-01/02/06` are retained as traceable decision identifiers and were resolved by the owner on 2026-10-18. No row authorizes changes to approved MVP behavior:
+The user approved the documented contract baseline. `API-OPEN-01/02/06` are retained as traceable decision identifiers and were resolved by the owner on 2026-10-18 at the scope stated below. No row authorizes changes to approved MVP behavior. Additional Auth details are listed separately in §14.3 and must not be inferred from these approvals:
 
-| ID | Accepted implementation-facing policy | Approval status / effect |
+| ID | Owner-approved policy scope | Approval status / effect |
 |---|---|---|
-| `API-OPEN-01` | End-user token and browser storage | **APPROVED 2026-10-18**: HS256 JWT, dedicated API-side secret of at least 256 bits, 900-second lifetime, volatile-memory-only browser storage, no refresh/session or server-side logout revocation. |
-| `API-OPEN-02` | Login-name normalization | **APPROVED 2026-10-18**: trim only surrounding ASCII space/tab/line-feed/carriage-return; match case-sensitively with no case-folding or Unicode normalization. |
-| `API-OPEN-03` | Shared REST conventions/errors and detailed Auth endpoint request/response structures (§3-6) | **APPROVED_DESIGN** as documented, including the resolved `API-OPEN-01/02` profile. |
+| `API-OPEN-01` | End-user token policy and browser storage | **APPROVED 2026-10-18**: HS256 JWT; dedicated API-side secret of at least 256 bits; 900-second lifetime; volatile-memory-only browser storage; no refresh token, user-session table, or immediate server-side Logout revocation. Extra claims/header and fractional NumericDate details remain under §14.3. |
+| `API-OPEN-02` | Login-name normalization rule | **APPROVED 2026-10-18**: trim surrounding whitespace; match case-sensitively; use the same rule for seeding/provisioning and Login. Exact Unicode whitespace repertoire and Unicode normalization remain under §14.3. |
+| `API-OPEN-03` | Shared REST conventions/errors and Auth endpoint request/response structures (§3-6) | **APPROVED_DESIGN** as documented, subject to the additional Auth profile decisions in §§4.5 and 14.3. |
 | `API-OPEN-04` | Jobs read/submit/cancel request DTO, required Idempotency-Key policy, read scoping (§8) | **APPROVED_DESIGN** as documented; existing DB FIFO and retention remain binding. |
 | `API-OPEN-05` | Exact reason length and redacted Worker projection for Disputes (§10) | **APPROVED_DESIGN**: 1000 Unicode characters, redacted Worker projection, no manual adjudication. |
-| `API-OPEN-06` | Internal dispatch `simulation_input` allowlist schema and concrete route bodies (§13) | **APPROVED 2026-10-18**: exactly `{ "workload_profile": "demo-v1" }`; no extra keys, alternate values, or oracle data. ADR-004 unchanged. |
+| `API-OPEN-06` | Internal dispatch `simulation_input` allowlist schema and concrete route bodies (§13) | **APPROVED 2026-10-18**: exactly `{ "workload_profile": "demo-v1" }`; no extra keys, alternate values, seed/expected result, or protected oracle data may reach Simulator. ADR-004 unchanged. |
 | `API-OPEN-07` | Exact dashboards/read projections and ratio/price string rendering (§7,11,12) | **APPROVED_DESIGN** as documented; future implementation tests `NOT_RUN`. |
 
 **Out-of-scope:** refresh tokens, DB login sessions, immediate user-token revocation, payment/billing, third-party adapter, PII erasure, real GPU execution, websocket/subscription protocol, automatic Worker selection, Admin manual dispute resolution, arbitrary code execution or a 19th database table.
+
+### 14.3. Additional Authentication details requiring an owner decision
+
+These choices are not silently approved by the 2026-10-18 decisions or by ADR-008. They do not block GPU-001 foundation when that slice excludes Authentication; they block the Authentication implementation and any test claiming the corresponding unresolved behavior as an approved oracle.
+
+| Detail | Status and candidate | Effect |
+|---|---|---|
+| JWT header/claims | `NEEDS_OWNER_DECISION`: the earlier draft's exact `iss=gpu-marketplace-api`, `aud=gpu-marketplace-web`, `typ=JWT`, and UUID-form `sub` were not in the owner-approved decision list. Candidate: keep those values as a strict profile; add validation cases within existing `API-AUTH-05` only after approval. | Authentication implementation only |
+| Fractional NumericDate representation | `NEEDS_OWNER_DECISION`: candidate is trusted UTC `iat`/`exp` as JSON NumericDate numbers with six decimal places, exact microsecond comparison, `exp=iat+900.000000`, and no truncation, rounding, or expiry tolerance. RFC 7519 permits non-integer NumericDate values; see §4.5. | Authentication implementation only; exact 900-second policy is already approved |
+| Login whitespace and Unicode normalization | `NEEDS_OWNER_DECISION`: candidate trims ASCII SP/HT/LF/CR only, preserves other Unicode whitespace, applies no NFC/NFD normalization, and retains case-sensitive matching. The exact code-point set and normalization rule were not in the owner approval. Proposed U+00A0 and composed/decomposed fixture oracles are documented under the existing `API-AUTH-01-ROLES` ID. | Authentication implementation only |
 
 ## 15. Traceability: API contract → requirements → storage/transactions → test evidence
 
@@ -862,14 +882,15 @@ The user approved the documented contract baseline. `API-OPEN-01/02/06` are reta
 
 ## 16. Review record and handoff — documentation only
 
-| Item | Status at v0.5 (2026-10-21) |
+| Item | Status at v0.6 (2026-10-21) |
 |---|---|
 | Logical/physical/transaction Database Design (18 tables) | **APPROVED_DESIGN**; no SQL migration run |
-| Stateless 900-second token / no server-side Logout revocation | **APPROVED_DESIGN** (previously approved policy preserved) |
+| Stateless HS256 JWT / 900-second lifetime / volatile-memory storage / no refresh and no server-side Logout revocation | **APPROVED_DESIGN** at the owner-approved policy scope |
 | Public API — Auth, Listings, Jobs, Results, Disputes, Reputation, Dashboard | **APPROVED_DESIGN** as described; 100 contract cases are `NOT_RUN` |
 | Internal HTTP dispatch / callback | **APPROVED_DESIGN**; exact `simulation_input` allowlist is `{ "workload_profile": "demo-v1" }`; ADR-004 V1 remains authoritative |
-| Resolved API decisions | `API-OPEN-01/02/06` **APPROVED (2026-10-18)** and recorded in this v0.5 synchronization |
+| Resolved API decisions | `API-OPEN-01/02/06` **APPROVED (2026-10-18)** at their scopes in §14.2 and recorded in this synchronization |
+| Additional Authentication profile details | **PROPOSED / NEEDS_OWNER_DECISION**; blocks Authentication implementation only, not GPU-001 foundation without Auth |
 | ADR-008 technology stack | **ACCEPTED (2026-10-18)** in its own ADR; no implementation/test evidence |
 | Actual API code, DB migrations, test runners, benchmarks | **NOT_STARTED / NOT_RUN**; this document records design only |
 
-**Handoff:** `API-OPEN-01/02/06` are resolved; no API contract decision in this set remains open. Any implementation must follow a separately authorized coding slice and the normal branch/PR gates. This document approval validates design text, not executable behavior or measured performance.
+**Handoff:** `API-OPEN-01/02/06` are resolved at the owner-approved scope in §14.2. The extra Auth profile details in §§4.5 and 14.3 still need owner decisions before Authentication implementation; they do not block a foundation-only GPU-001 slice. Any implementation must follow a separately authorized coding slice and the normal branch/PR gates. This document approval validates design text, not executable behavior or measured performance.

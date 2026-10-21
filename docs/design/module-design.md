@@ -237,7 +237,7 @@ If Worker signs a **valid but false** claim, keep original accepted receipt. Onl
 | V1 Ed25519 result and retained evidence | **ACCEPTED ADR-004/006** | Preserve as hard boundary |
 | 18-table data model and lock order | **APPROVED DESIGN**, tests `NOT_RUN` | No physical schema changes without review |
 | Logical module responsibilities, dependency directions and interface boundaries | **APPROVED_DESIGN** | Preserve single policy owner; package names can evolve with explicit review |
-| Documented API route/DTO design | **APPROVED_DESIGN** with bounded Auth/internal payload choices OPEN | Resolve open details in [API Contract](api-contract.md) before coding |
+| Documented API route/DTO design | **APPROVED_DESIGN**; owner-approved `API-OPEN-01/02/06` decisions are recorded in [API Contract](api-contract.md) §14.2 | Additional JWT claim profile, NumericDate precision and Unicode login-normalization details in §14.3 are `NEEDS_OWNER_DECISION` before Authentication implementation; they do not block a foundation-only GPU-001 slice |
 | Concrete Python/FastAPI+React toolchain | **ADR-008 ACCEPTED (2026-10-18)** | Pin compatible dependency/image digests at implementation; no coding before separate authorization |
 | Production code, migration, automated tests, DB benchmark | **NOT_STARTED / NOT_RUN** | **Do not implement without explicit user authorization** |
 
