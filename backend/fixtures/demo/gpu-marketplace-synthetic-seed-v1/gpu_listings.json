@@ -1,0 +1,82 @@
+[
+  {
+    "id": "72a2b517-4675-40a6-932b-bc39530c365e",
+    "worker_id": "ab3a370e-d0f6-418d-b737-2e2621b883d4",
+    "gpu_model": "NVIDIA A100 (simulated)",
+    "vram_gb": 80,
+    "total_gpu_count": 4,
+    "allocated_gpu_count": 0,
+    "status": "ACTIVE",
+    "mock_price_per_hour": "7.50"
+  },
+  {
+    "id": "abf6b6a7-4184-4a01-8ae1-8dc7c1a325c2",
+    "worker_id": "ab3a370e-d0f6-418d-b737-2e2621b883d4",
+    "gpu_model": "NVIDIA RTX 4090 (simulated)",
+    "vram_gb": 24,
+    "total_gpu_count": 8,
+    "allocated_gpu_count": 0,
+    "status": "ACTIVE",
+    "mock_price_per_hour": "3.00"
+  },
+  {
+    "id": "adb5a1b6-341f-460b-8211-b03cd2921c1a",
+    "worker_id": "ab3a370e-d0f6-418d-b737-2e2621b883d4",
+    "gpu_model": "NVIDIA T4 (simulated)",
+    "vram_gb": 16,
+    "total_gpu_count": 6,
+    "allocated_gpu_count": 0,
+    "status": "PAUSED",
+    "mock_price_per_hour": "1.20"
+  },
+  {
+    "id": "c4b0c469-97df-4ce9-b19a-8e5193615484",
+    "worker_id": "f7e6c778-8258-4c8f-8fd2-df6fded6397a",
+    "gpu_model": "NVIDIA H100 (simulated)",
+    "vram_gb": 80,
+    "total_gpu_count": 2,
+    "allocated_gpu_count": 0,
+    "status": "ACTIVE",
+    "mock_price_per_hour": "12.00"
+  },
+  {
+    "id": "4252eb55-ca1c-4509-81d2-0a8d60317ff4",
+    "worker_id": "f7e6c778-8258-4c8f-8fd2-df6fded6397a",
+    "gpu_model": "NVIDIA L40S (simulated)",
+    "vram_gb": 48,
+    "total_gpu_count": 4,
+    "allocated_gpu_count": 0,
+    "status": "ACTIVE",
+    "mock_price_per_hour": "4.50"
+  },
+  {
+    "id": "e8b848fe-9b3c-4254-9ea9-6110121e201f",
+    "worker_id": "98825ff2-b273-4e0e-a763-3fc4474a265d",
+    "gpu_model": "NVIDIA RTX A6000 (simulated)",
+    "vram_gb": 48,
+    "total_gpu_count": 2,
+    "allocated_gpu_count": 0,
+    "status": "ACTIVE",
+    "mock_price_per_hour": "4.25"
+  },
+  {
+    "id": "01cb27fb-8ae0-4b1e-9bc8-44697b2db4e7",
+    "worker_id": "98825ff2-b273-4e0e-a763-3fc4474a265d",
+    "gpu_model": "AMD Instinct MI300X (simulated)",
+    "vram_gb": 192,
+    "total_gpu_count": 2,
+    "allocated_gpu_count": 0,
+    "status": "ACTIVE",
+    "mock_price_per_hour": "13.40"
+  },
+  {
+    "id": "0cbc476d-3c04-4ba3-8074-6e3826717b3b",
+    "worker_id": "98825ff2-b273-4e0e-a763-3fc4474a265d",
+    "gpu_model": "NVIDIA A100 (simulated)",
+    "vram_gb": 80,
+    "total_gpu_count": 2,
+    "allocated_gpu_count": 0,
+    "status": "ACTIVE",
+    "mock_price_per_hour": null
+  }
+]

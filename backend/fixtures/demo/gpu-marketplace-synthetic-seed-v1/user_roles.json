@@ -1,0 +1,34 @@
+[
+  {
+    "user_id": "8bf66294-daf8-42fa-a167-50a3a43b7b66",
+    "role_code": "CLIENT"
+  },
+  {
+    "user_id": "6700e838-040d-4e9f-96a1-0f1e7668171b",
+    "role_code": "CLIENT"
+  },
+  {
+    "user_id": "4ec0d9ac-42cc-4d24-a71e-f9efa60e1db4",
+    "role_code": "CLIENT"
+  },
+  {
+    "user_id": "0cbce840-2b5b-4eb8-83dc-968e5d47871b",
+    "role_code": "WORKER"
+  },
+  {
+    "user_id": "271a4dce-7615-4bf7-9990-379165a418ce",
+    "role_code": "WORKER"
+  },
+  {
+    "user_id": "f8626ccf-34a7-4328-948e-abae44a4bac6",
+    "role_code": "WORKER"
+  },
+  {
+    "user_id": "9d9907cc-12b3-4386-bdbe-9e53f24150b5",
+    "role_code": "ADMIN"
+  },
+  {
+    "user_id": "2d0b8645-eb40-4584-9fb8-119bb68e3448",
+    "role_code": "CLIENT"
+  }
+]

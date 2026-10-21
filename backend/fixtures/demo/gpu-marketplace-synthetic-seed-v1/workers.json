@@ -1,0 +1,20 @@
+[
+  {
+    "id": "ab3a370e-d0f6-418d-b737-2e2621b883d4",
+    "user_id": "0cbce840-2b5b-4eb8-83dc-968e5d47871b",
+    "role_code": "WORKER",
+    "display_name": "Demo GPU Lab North"
+  },
+  {
+    "id": "f7e6c778-8258-4c8f-8fd2-df6fded6397a",
+    "user_id": "271a4dce-7615-4bf7-9990-379165a418ce",
+    "role_code": "WORKER",
+    "display_name": "Demo GPU Lab Central"
+  },
+  {
+    "id": "98825ff2-b273-4e0e-a763-3fc4474a265d",
+    "user_id": "f8626ccf-34a7-4328-948e-abae44a4bac6",
+    "role_code": "WORKER",
+    "display_name": "Demo GPU Lab South"
+  }
+]

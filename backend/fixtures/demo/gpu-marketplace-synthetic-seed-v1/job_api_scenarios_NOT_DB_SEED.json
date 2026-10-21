@@ -1,0 +1,92 @@
+[
+  {
+    "scenario_id": "SC-01",
+    "client_fixture_alias": "C1",
+    "client_id": "8bf66294-daf8-42fa-a167-50a3a43b7b66",
+    "method": "POST",
+    "path": "/api/v1/jobs",
+    "idempotency_key": "demo-submit-c1-l1-001",
+    "request_body": {
+      "listing_id": "72a2b517-4675-40a6-932b-bc39530c365e",
+      "gpu_count": 2,
+      "duration_seconds": 60
+    },
+    "intent": "201 CREATED expected on first valid submission",
+    "status": "DESIGN_FIXTURE_NOT_RUN"
+  },
+  {
+    "scenario_id": "SC-02",
+    "client_fixture_alias": "C2",
+    "client_id": "6700e838-040d-4e9f-96a1-0f1e7668171b",
+    "method": "POST",
+    "path": "/api/v1/jobs",
+    "idempotency_key": "demo-submit-c2-l4-001",
+    "request_body": {
+      "listing_id": "c4b0c469-97df-4ce9-b19a-8e5193615484",
+      "gpu_count": 1,
+      "duration_seconds": 120
+    },
+    "intent": "201 CREATED expected on first valid submission",
+    "status": "DESIGN_FIXTURE_NOT_RUN"
+  },
+  {
+    "scenario_id": "SC-03",
+    "client_fixture_alias": "C1",
+    "client_id": "8bf66294-daf8-42fa-a167-50a3a43b7b66",
+    "method": "POST",
+    "path": "/api/v1/jobs",
+    "idempotency_key": "demo-submit-c1-l3-001",
+    "request_body": {
+      "listing_id": "adb5a1b6-341f-460b-8211-b03cd2921c1a",
+      "gpu_count": 1,
+      "duration_seconds": 60
+    },
+    "intent": "409 LISTING_PAUSED (L3 initially PAUSED)",
+    "status": "DESIGN_FIXTURE_NOT_RUN"
+  },
+  {
+    "scenario_id": "SC-04",
+    "client_fixture_alias": "C3",
+    "client_id": "4ec0d9ac-42cc-4d24-a71e-f9efa60e1db4",
+    "method": "POST",
+    "path": "/api/v1/jobs",
+    "idempotency_key": "demo-submit-c3-l6-001",
+    "request_body": {
+      "listing_id": "e8b848fe-9b3c-4254-9ea9-6110121e201f",
+      "gpu_count": 3,
+      "duration_seconds": 60
+    },
+    "intent": "422 validation error: requested GPUs > listing total (2)",
+    "status": "DESIGN_FIXTURE_NOT_RUN"
+  },
+  {
+    "scenario_id": "SC-05",
+    "client_fixture_alias": "C1",
+    "client_id": "8bf66294-daf8-42fa-a167-50a3a43b7b66",
+    "method": "POST",
+    "path": "/api/v1/jobs",
+    "idempotency_key": "demo-submit-c1-l1-001",
+    "request_body": {
+      "listing_id": "72a2b517-4675-40a6-932b-bc39530c365e",
+      "gpu_count": 2,
+      "duration_seconds": 60
+    },
+    "intent": "Replay SC-01 unchanged: original Job, not second insert",
+    "status": "DESIGN_FIXTURE_NOT_RUN"
+  },
+  {
+    "scenario_id": "SC-06",
+    "client_fixture_alias": "C1",
+    "client_id": "8bf66294-daf8-42fa-a167-50a3a43b7b66",
+    "method": "POST",
+    "path": "/api/v1/jobs",
+    "idempotency_key": "demo-submit-c1-l1-001",
+    "request_body": {
+      "listing_id": "72a2b517-4675-40a6-932b-bc39530c365e",
+      "gpu_count": 2,
+      "duration_seconds": 90
+    },
+    "intent": "409 IDEMPOTENCY_KEY_REUSED if SC-01 succeeded",
+    "status": "DESIGN_FIXTURE_NOT_RUN"
+  }
+]

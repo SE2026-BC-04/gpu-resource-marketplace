@@ -1,0 +1,14 @@
+[
+  {
+    "code": "CLIENT",
+    "description": "Client user"
+  },
+  {
+    "code": "WORKER",
+    "description": "GPU resource provider"
+  },
+  {
+    "code": "ADMIN",
+    "description": "System administrator"
+  }
+]
