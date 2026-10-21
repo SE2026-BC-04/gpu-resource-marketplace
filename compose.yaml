@@ -25,7 +25,7 @@ services:
       GPU_MARKETPLACE_LOG_LEVEL: ${GPU_MARKETPLACE_LOG_LEVEL:-INFO}
     ports:
       - "127.0.0.1:${API_HOST_PORT:-8000}:8000"
-    networks: [app, database]
+    networks: [app, database, api-host]
     depends_on:
       postgres:
         condition: service_healthy
@@ -75,9 +75,11 @@ services:
 
 networks:
   frontend:
-    internal: true
+    driver: bridge
   app:
     internal: true
+  api-host:
+    driver: bridge
   database:
     internal: true
 
