@@ -19,7 +19,7 @@ An executable verification result must eventually include: Git commit SHA; appro
 - [SRS](../requirements.md), [21 Functional Requirements](../functional-requirements.md), [33 Non-functional Requirements](../non-functional-requirements.md).
 - [System Architecture](../architecture/system-architecture.md) and [Quality Attribute Scenarios](../architecture/quality-attributes.md) — **11 approved scenario test designs** (all runtime tests NOT_RUN).
 - [Database Design](database-design.md) — **18 approved tables**, physical schema and transactions; reference `DBP-01..12`, `DBTX-01..18` and other listed DB invariants (`NOT_RUN`).
-- [API Contract](api-contract.md) — **14 Auth + 18 Listing + 68 other public/internal/general tests = 100 `APPROVED_DESIGN` API cases**, all `NOT_RUN`. `API-OPEN-01/02` and the precise dispatch `simulation_input` allowlist are still OPEN; the approved 900s token policy is binding.
+- [API Contract](api-contract.md) — **14 Auth + 18 Listing + 68 other public/internal/general tests = 100 API test IDs**, all runtime execution `NOT_RUN`. Owner-approved `API-OPEN-01/02/06` decisions are synchronized; extra JWT claim, NumericDate precision and Unicode normalization details are separately marked `NEEDS_OWNER_DECISION` and do not block GPU-001 foundation without Auth implementation.
 - [Module Design](module-design.md) — `MODOWN-01..08` **APPROVED_DESIGN** boundary checks, all `NOT_RUN`.
 - [ADR-001..007](../architecture/decisions/ADR-001-modular-monolith.md) (use their individual files for exact acceptance), especially ADR-003 Outbox/Inbox, ADR-004 Signed Result V1, ADR-005 retry and auth, ADR-006 evidence holds, ADR-007 load configuration. [ADR-008](../architecture/decisions/ADR-008-technology-stack.md) is **ACCEPTED** with `STACK-01..10` approved as test designs; all `NOT_RUN`.
 
@@ -110,14 +110,14 @@ Authentication/Logout `UC-G01` is cross-cutting rather than a separately numbere
 
 | Group | Count | Status of **test design** | Typical gate |
 |---|---:|---|---|
-| `API-AUTH-01..14` | 14 | APPROVED_DESIGN; 900s token lifetime already APPROVED; algorithm/storage OPEN | Login/Me/Logout, role/token limits |
+| `API-AUTH-01..14` | 14 | APPROVED_DESIGN for owner-approved Auth policy; extra claim profile, NumericDate fractional precision, and Unicode normalization/repertoire are `NEEDS_OWNER_DECISION`; all `NOT_RUN` | Login/Me/Logout, role/token limits and normalization subcases |
 | `API-LIST-01..18` | 18 | Reviewed design baseline; tests `NOT_RUN` | 6 Listing endpoints, ownership/capacity/races |
 | `API-JOB-01..16` | 16 | APPROVED_DESIGN | QUEUED submit, persisted idempotency, cancel, FIFO |
 | `API-RES-01..06` | 6 | APPROVED_DESIGN | Immutable verified Signed Result read only |
 | `API-DSP-01..12` | 12 | APPROVED_DESIGN | One Dispute before strict 7d cutoff, auto-resolution |
 | `API-REP-01..05` | 5 | APPROVED_DESIGN | Lifetime counters and N/A representation |
 | `API-DASH-01..09` | 9 | APPROVED_DESIGN | Role-safe retained history snapshots |
-| `API-INT-01..12` | 12 | APPROVED_DESIGN (transport invariants in ADRs approved; payload allowlist OPEN) | Authenticated 202 dispatch/callback + Inbox |
+| `API-INT-01..12` | 12 | APPROVED_DESIGN; exact `simulation_input` allowlist is owner-approved; all `NOT_RUN` | Authenticated 202 dispatch/callback + Inbox |
 | `API-COM-01..08` | 8 | APPROVED_DESIGN | Shared HTTP, correlation, timestamps, error safety |
 | **Total** | **100** | **0 executed in this documentation phase** | Do not convert designs into implementation PASS |
 
@@ -207,7 +207,8 @@ A valid load-test run that misses p95 or server-error targets is a real performa
 | 11 QA scenarios and associated deterministic tests | **APPROVED designs**, actual execution all `NOT_RUN` |
 | ADR-001..007 policies | **ACCEPTED**, implementation still `NOT_RUN` |
 | API Listings group and approved 900s token lifetime | Previously reviewed; maintain that baseline |
-| API endpoints/DTO/errors; token algorithm/storage and workload allowlist | **APPROVED_DESIGN** for documented contracts; bounded Auth/workload details OPEN; see [API Contract](api-contract.md) §14.2 |
+| API endpoints/DTO/errors and owner-approved token/storage/workload policies | **APPROVED_DESIGN**; `API-OPEN-01/02/06` broad decisions are resolved; see [API Contract](api-contract.md) §14.2 |
+| Additional Auth profile details | `NEEDS_OWNER_DECISION` before Authentication implementation; not a blocker for GPU-001 foundation when Auth is excluded; see [API Contract](api-contract.md) §14.3 |
 | Logical module responsibilities/dependency/ports | **APPROVED_DESIGN**; implementation package names may be reviewed as needed |
 | ADR-008 Python/FastAPI/React reference stack | **ACCEPTED (2026-10-18)**; implementation still requires separate coding authorization |
 | Physical migrations, executable SQL/Python/TypeScript, generated OpenAPI, CI, benchmark | **NOT_STARTED/NOT_RUN**; user has expressly prohibited coding until separate authorization |
