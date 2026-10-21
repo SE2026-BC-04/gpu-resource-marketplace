@@ -30,3 +30,19 @@ def test_simulator_has_no_database_driver_or_access_configuration() -> None:
     ).lower()
     assert "sqlalchemy" not in pyproject and "psycopg" not in pyproject and "alembic" not in pyproject
     assert "database_url" not in source and "postgres" not in source
+
+
+def test_frontend_compose_builds_production_bundle_for_selected_api_host_port() -> None:
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    frontend = compose["services"]["frontend"]
+    dockerfile = (ROOT / "frontend" / "Dockerfile").read_text(encoding="utf-8")
+    production_server = (ROOT / "frontend" / "server.mjs").read_text(encoding="utf-8")
+
+    assert frontend["build"]["args"]["VITE_API_BASE_URL"] == "http://localhost:${API_HOST_PORT:-8000}"
+    assert frontend["ports"] == ["127.0.0.1:${FRONTEND_HOST_PORT:-5173}:5173"]
+    assert "AS build" in dockerfile and "AS runtime" in dockerfile
+    assert "RUN npm run build" in dockerfile
+    assert 'CMD ["node", "server.mjs"]' in dockerfile
+    assert 'CMD ["npm", "run", "dev"' not in dockerfile
+    assert "VITE_API_BASE_URL=${VITE_API_BASE_URL}" in dockerfile
+    assert "file = indexFile;" in production_server
