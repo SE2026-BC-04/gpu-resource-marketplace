@@ -11,15 +11,18 @@ def test_compose_has_exactly_five_expected_services_and_isolated_networks() -> N
     services = compose["services"]
     assert set(services) == {"frontend", "api", "manager", "simulator", "postgres"}
     assert set(services["simulator"]["networks"]) == {"app"}
-    assert set(services["postgres"]["networks"]) == {"database"}
+    assert set(services["postgres"]["networks"]) == {"database", "postgres-host"}
     assert set(services["frontend"]["networks"]) == {"frontend"}
     assert set(services["api"]["networks"]) == {"app", "database", "api-host"}
     assert set(services["manager"]["networks"]) == {"app", "database"}
+    assert services["postgres"]["ports"] == ["127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"]
     networks = compose["networks"]
     assert networks["frontend"].get("internal", False) is False
     assert networks["api-host"].get("internal", False) is False
+    assert networks["postgres-host"].get("internal", False) is False
     assert networks["app"]["internal"] is True
     assert networks["database"]["internal"] is True
+    assert {name for name, config in services.items() if "postgres-host" in config["networks"]} == {"postgres"}
     assert "ports" not in services["simulator"]
     assert "volumes" not in services["simulator"]
     assert "env_file" not in services["simulator"]
