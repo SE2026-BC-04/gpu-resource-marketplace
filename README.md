@@ -49,10 +49,10 @@ Validate and exercise the Compose topology with:
 
 ```powershell
 docker compose --env-file .env.example config --quiet
-python tools/compose_smoke.py
+uv run --project backend --locked python tools/compose_smoke.py
 ```
 
-The smoke check starts a uniquely named Compose project, waits for all services to become healthy, verifies that the Simulator cannot reach PostgreSQL, then removes only that temporary project's containers, network, and volume.
+The smoke check starts a uniquely named Compose project on dynamically allocated loopback ports, waits for all services to become healthy, and runs `SELECT 1` from the host through PostgreSQL's published port. It also checks API and Manager database readiness, verifies that the Simulator cannot reach PostgreSQL, and confirms cleanup removes only the smoke project's resources while preserving any existing local stack.
 
 ## Repository map
 

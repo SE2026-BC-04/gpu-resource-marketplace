@@ -13,6 +13,8 @@ import uuid
 from pathlib import Path
 from urllib.request import urlopen
 
+import psycopg
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = f"gpu-marketplace-smoke-{uuid.uuid4().hex}"
@@ -31,6 +33,22 @@ def compose(env_file: Path, project: str, *args: str) -> subprocess.CompletedPro
         capture_output=True,
         check=False,
     )
+
+
+def docker_resource_ids(project: str) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """Return container, network and volume identities carrying a Compose project label."""
+    resources: list[tuple[str, ...]] = []
+    for resource, format_string in (
+        ("ps -a", "{{.ID}}"),
+        ("network ls", "{{.ID}}"),
+        ("volume ls", "{{.Name}}"),
+    ):
+        command = ["docker", *resource.split(), "--filter", f"label=com.docker.compose.project={project}", "--format", format_string]
+        result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
+        if result.returncode:
+            raise RuntimeError(f"Could not inspect Docker {resource} for project {project}: {result.stderr.strip()}")
+        resources.append(tuple(sorted(line.strip() for line in result.stdout.splitlines() if line.strip())))
+    return resources[0], resources[1], resources[2]
 
 
 def parse_services(raw: str) -> list[dict[str, object]]:
@@ -67,6 +85,16 @@ def make_smoke_env_file(values: dict[str, str | int]) -> Path:
     ) as env_file:
         env_file.write(source)
         return Path(env_file.name)
+
+
+def read_env_values(env_file: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            name, value = line.split("=", 1)
+            values[name] = value
+    return values
 
 
 def check_http(url: str) -> bytes:
@@ -117,15 +145,45 @@ def published_host_port(
     )
 
 
+def check_postgres_from_host(port: int, env_file: Path) -> None:
+    config = read_env_values(env_file)
+    last_error = "no connection attempt"
+    for _ in range(20):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=3):
+                pass
+            with psycopg.connect(
+                host="127.0.0.1",
+                port=port,
+                dbname=config["POSTGRES_DB"],
+                user=config["POSTGRES_USER"],
+                password=config["POSTGRES_PASSWORD"],
+                connect_timeout=3,
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT 1")
+                    if cursor.fetchone() != (1,):
+                        raise RuntimeError("Host PostgreSQL SELECT 1 returned an unexpected result")
+            return
+        except (OSError, psycopg.OperationalError) as exc:
+            # Do not include connection exception text, which can contain DSN details.
+            last_error = type(exc).__name__
+            time.sleep(0.5)
+    raise RuntimeError(f"Host PostgreSQL SELECT 1 failed on the allocated loopback port ({last_error})")
+
+
 def main() -> int:
     smoke_env: Path | None = None
     smoke_project_created = False
+    local_resources_before: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None = None
+    exit_code = 1
     try:
         # Inspect the normal local project first. It is never started, stopped, or cleaned here.
         local = compose(ROOT / ".env.example", LOCAL_PROJECT, "ps", "--all", "--format", "json")
         if local.returncode:
             raise RuntimeError(f"Could not inspect the existing local Compose stack: {local.stderr.strip()}")
         local_services = parse_services(local.stdout)
+        local_resources_before = docker_resource_ids(LOCAL_PROJECT)
         running_local = [
             str(service.get("Service") or service.get("Name"))
             for service in local_services
@@ -184,12 +242,9 @@ def main() -> int:
                     f"Compose {service_name} port mapping is not the requested isolated loopback port: {mappings}"
                 )
 
-        # A UUID project name plus an empty-project check prevents cleanup from
-        # targeting any pre-existing containers, networks, or named volumes.
-        existing = compose(smoke_env, PROJECT, "ps", "--all", "--format", "json")
-        if existing.returncode:
-            raise RuntimeError(f"Could not inspect isolated smoke project: {existing.stderr.strip()}")
-        if parse_services(existing.stdout):
+        # A UUID project name plus an all-resource emptiness check prevents cleanup
+        # from targeting any pre-existing containers, networks, or named volumes.
+        if any(docker_resource_ids(PROJECT)):
             raise RuntimeError(f"Refusing to reuse non-empty smoke project {PROJECT}")
 
         smoke_project_created = True
@@ -199,7 +254,7 @@ def main() -> int:
         if result.returncode:
             print(result.stdout, end="")
             print(result.stderr, end="", file=sys.stderr)
-            return result.returncode
+            raise RuntimeError(f"Compose smoke project did not become healthy (exit {result.returncode})")
 
         state_result = compose(smoke_env, PROJECT, "ps", "--format", "json")
         if state_result.returncode:
@@ -217,11 +272,17 @@ def main() -> int:
 
         frontend_port = published_host_port(state, "frontend", 5173, PROJECT)
         api_port = published_host_port(state, "api", 8000, PROJECT)
-        if frontend_port != ports["FRONTEND_HOST_PORT"] or api_port != ports["API_HOST_PORT"]:
+        postgres_port = published_host_port(state, "postgres", 5432, PROJECT)
+        if (
+            frontend_port != ports["FRONTEND_HOST_PORT"]
+            or api_port != ports["API_HOST_PORT"]
+            or postgres_port != ports["POSTGRES_HOST_PORT"]
+        ):
             raise RuntimeError(
                 "Compose host-port mapping differs from the isolated build configuration: "
-                f"frontend={frontend_port}, API={api_port}, requested={ports}"
+                f"frontend={frontend_port}, API={api_port}, PostgreSQL={postgres_port}, requested={ports}"
             )
+        check_postgres_from_host(postgres_port, smoke_env)
         frontend_url = f"http://127.0.0.1:{frontend_port}"
         api_url = f"http://127.0.0.1:{api_port}"
         html = check_http(f"{frontend_url}/").decode("utf-8")
@@ -248,6 +309,16 @@ def main() -> int:
         api = json.loads(check_http(f"{api_url}/health/live"))
         if api != {"status": "ok"}:
             raise RuntimeError(f"Backend API returned unexpected liveness response: {api}")
+        readiness = json.loads(check_http(f"{api_url}/health/ready"))
+        if readiness != {"status": "ready", "components": {"database": "ok"}}:
+            raise RuntimeError(f"Backend API database readiness returned an unexpected response: {readiness}")
+
+        manager_db = compose(
+            smoke_env, PROJECT, "exec", "--no-TTY", "manager",
+            "python", "-m", "gpu_marketplace.manager.healthcheck",
+        )
+        if manager_db.returncode:
+            raise RuntimeError(f"Manager PostgreSQL readiness check failed: {manager_db.stderr.strip()}")
 
         run_result = compose(
             smoke_env, PROJECT, "exec", "--no-TTY", "simulator", "python", "-c",
@@ -267,25 +338,49 @@ def main() -> int:
         print("PASS: host can fetch the production frontend index and built JavaScript bundle")
         print("PASS: frontend SPA route falls back to the production index")
         print(f"PASS: frontend image build received API host URL {expected_api_url}")
+        print(f"PASS: host TCP and PostgreSQL SELECT 1 via loopback port {postgres_port}")
+        print("PASS: API /health/ready and Manager healthcheck can query PostgreSQL")
         print("PASS: host can access Backend API /health/live")
         print("PASS: Simulator can reach API but cannot resolve/connect to PostgreSQL")
-        return 0
+        exit_code = 0
     except (OSError, subprocess.SubprocessError, RuntimeError, json.JSONDecodeError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
-        return 1
     finally:
         if smoke_project_created and smoke_env is not None:
             try:
                 cleanup = compose(smoke_env, PROJECT, "down", "--volumes", "--remove-orphans")
                 if cleanup.returncode:
                     print(f"Smoke-project cleanup failed: {cleanup.stderr.strip()}", file=sys.stderr)
+                    exit_code = 1
+                elif not any(docker_resource_ids(PROJECT)):
+                    print("PASS: cleanup removed only smoke-project containers, networks and volumes")
+                else:
+                    print("FAIL: smoke-project Docker resources remain after cleanup", file=sys.stderr)
+                    exit_code = 1
             except OSError as exc:
                 print(f"Smoke-project cleanup unavailable: {exc}", file=sys.stderr)
+                exit_code = 1
+            except RuntimeError as exc:
+                print(f"Smoke-project cleanup verification failed: {exc}", file=sys.stderr)
+                exit_code = 1
+            if local_resources_before is not None:
+                try:
+                    local_resources_after = docker_resource_ids(LOCAL_PROJECT)
+                    if local_resources_after != local_resources_before:
+                        print("FAIL: smoke cleanup changed local-stack Docker resources", file=sys.stderr)
+                        exit_code = 1
+                    else:
+                        print("PASS: local-stack containers, networks and volumes are unchanged")
+                except (OSError, RuntimeError) as exc:
+                    print(f"Local-stack cleanup verification failed: {exc}", file=sys.stderr)
+                    exit_code = 1
         if smoke_env is not None:
             try:
                 smoke_env.unlink(missing_ok=True)
             except OSError as exc:
                 print(f"Could not remove temporary smoke env file: {exc}", file=sys.stderr)
+
+    return exit_code
 
 
 if __name__ == "__main__":

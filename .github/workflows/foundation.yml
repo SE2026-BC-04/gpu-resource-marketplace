@@ -57,5 +57,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: 3.12.15
+      - run: uv sync --project backend --locked
       - run: docker compose --env-file .env.example config --quiet
-      - run: python tools/compose_smoke.py
+      - run: uv run --project backend --locked python tools/compose_smoke.py
