@@ -1,0 +1,58 @@
+[
+  {
+    "fixture_alias": "C1",
+    "id": "8bf66294-daf8-42fa-a167-50a3a43b7b66",
+    "login_name": "demo_client_01",
+    "role_code": "CLIENT",
+    "status": "ACTIVE"
+  },
+  {
+    "fixture_alias": "C2",
+    "id": "6700e838-040d-4e9f-96a1-0f1e7668171b",
+    "login_name": "demo_client_02",
+    "role_code": "CLIENT",
+    "status": "ACTIVE"
+  },
+  {
+    "fixture_alias": "C3",
+    "id": "4ec0d9ac-42cc-4d24-a71e-f9efa60e1db4",
+    "login_name": "demo_client_03",
+    "role_code": "CLIENT",
+    "status": "ACTIVE"
+  },
+  {
+    "fixture_alias": "W1",
+    "id": "0cbce840-2b5b-4eb8-83dc-968e5d47871b",
+    "login_name": "demo_worker_01",
+    "role_code": "WORKER",
+    "status": "ACTIVE"
+  },
+  {
+    "fixture_alias": "W2",
+    "id": "271a4dce-7615-4bf7-9990-379165a418ce",
+    "login_name": "demo_worker_02",
+    "role_code": "WORKER",
+    "status": "ACTIVE"
+  },
+  {
+    "fixture_alias": "W3",
+    "id": "f8626ccf-34a7-4328-948e-abae44a4bac6",
+    "login_name": "demo_worker_03",
+    "role_code": "WORKER",
+    "status": "ACTIVE"
+  },
+  {
+    "fixture_alias": "A1",
+    "id": "9d9907cc-12b3-4386-bdbe-9e53f24150b5",
+    "login_name": "demo_admin_01",
+    "role_code": "ADMIN",
+    "status": "ACTIVE"
+  },
+  {
+    "fixture_alias": "D1",
+    "id": "2d0b8645-eb40-4584-9fb8-119bb68e3448",
+    "login_name": "demo_disabled_01",
+    "role_code": "CLIENT",
+    "status": "DISABLED"
+  }
+]
