@@ -1,0 +1,208 @@
+# Phase 1D — GPU Listings Management (GPU-004)
+
+> **Dự án:** GPU Resource Marketplace<br>
+> **Đường dẫn dự kiến:** `docs/architecture/phases/phase1d_gpu_listings.md`<br>
+> **Ngày:** 21/10/2026<br>
+> **Owner:** Thành viên 4 — Listings / Registry<br>
+> **Trạng thái tài liệu:** `APPROVED DESIGN` — chủ dự án phê duyệt ngày 21/10/2026; chưa commit/merge tài liệu lên GitHub<br>
+> **Trạng thái triển khai:** `PLANNED / NOT_IMPLEMENTED` — phê duyệt kiến trúc không đồng nghĩa tính năng đã có code<br>
+> **Baseline kiểm tra:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b` — GPU-001 đã merge; GPU-002 và GPU-003 mới được chủ dự án duyệt **thiết kế**, chưa merge code trên `main`.<br>
+> **Nguồn chuẩn:** [API Contract v0.6](../../design/api-contract.md) §7, [Database Design v0.4](../../design/database-design.md) §§9, 11, [Module Design](../../design/module-design.md) §§2–5, [Test Design](../../design/test-design.md), [Functional Requirements](../../functional-requirements.md) `FR-WR-01..04`, ADR-001/002/008 và [Team Contribution Rules](../../development/team-contribution-rules.md). Quy tắc mới: [Inter-Phase Change Control](../../development/interphase-change-control.md) (được owner chấp thuận nhưng chưa merge lên Git tại lúc lập draft).
+
+## 1. MỤC TIÊU
+
+### 1.1. Mục đích và kết quả kỳ vọng
+
+Hiện thực **M1 — Worker Registry & Listings** theo Evolutionary Architecture: Worker đã được cấp tài khoản đăng thông tin GPU **giả lập**, cập nhật hoặc tạm dừng/khôi phục Listing; Client duyệt catalogue; Admin xem tất cả dưới dạng **read-only**. Giao diện React sử dụng **API và PostgreSQL thật**, không dữ liệu hardcode làm kết quả nghiệm thu.
+
+**Tiêu chí hoàn thành Phase 1D:**
+
+1. Đúng **6 endpoint** Listing của API Contract §7 vận hành với JWT + role guard (GPU-003) và dữ liệu PostgreSQL (GPU-002).
+2. Quyền Worker owner, trạng thái `ACTIVE`/`PAUSED` và các ràng buộc chỉnh sửa/capacity được bảo vệ trong backend + transaction, không dựa vào UI.
+3. DTO read bao gồm thông số GPU giả lập, snapshot khả dụng, giá mock dạng decimal string và read-only reputation projection; tuyệt đối không rò rỉ token/key/oracle.
+4. UI tối thiểu cho `CLIENT`, `WORKER`, `ADMIN`; một vòng thao tác tạo → xem → chỉnh sửa → pause → resume được kiểm thử qua API thật.
+5. Các kiểm thử áp dụng được của `API-LIST-01..18` có bằng chứng chạy thật; phần cần GPU-005 hoặc Phase 2 giữ `BLOCKED/NOT_RUN`.
+6. **Inter-Phase Impact & Dual Acknowledgement** được kiểm tra ở PR/handoff; không còn impact blocker chưa được hai phía xác nhận.
+
+### 1.2. Phạm vi loại trừ
+
+Không triển khai Worker public signup/onboarding/key provisioning, Job submission/cancellation, Manager allocation, FIFO scheduler runtime, Simulator execution, signed receipts, disputes, payment/real pricing, GPU thật, dashboard nghiệp vụ hoặc bảng DB/service mới. `available_gpu_count` **không phải** GPU reservation; Resume **không** tự cấp phát Job.
+
+## 2. THIẾT KẾ
+
+### 2.1. Kế thừa và thay đổi
+
+| Nguồn | Đã có / thiết kế đã duyệt | Phase 1D sử dụng hoặc bổ sung |
+|---|---|---|
+| GPU-001 — Foundation (`IMPLEMENTED`) | FastAPI app/health, frontend skeleton, PostgreSQL service, shared backend, CI/Compose; 5 services | Tích hợp router/UI vào app hiện hữu; không thay đổi runtime topology |
+| GPU-002 — Database (`APPROVED DESIGN`, chưa merged) | `workers`, `gpu_listings`, `jobs`, `worker_reputation_aggregates`, UoW/repositories, constraints | Read/insert/update Listing; truy vấn role-safe ownership và queued/nonterminal Jobs trong transaction |
+| GPU-003 — Authentication (`APPROVED DESIGN`, chưa merged) | `AuthenticatedPrincipal`, HS256 JWT, role guard, Login UI và frontend volatile session | Áp dụng `WORKER` mutation guards; bảo vệ GET dành cho user đã đăng nhập; tái sử dụng Auth API client |
+| GPU-004 — **MỚI** (`PLANNED`) | Chưa có nghiệp vụ Listing trên `main`; `listings/` mới có stub | Registry use cases, routes, DTO, Listing UI, tests và handoff GPU-005 |
+
+```mermaid
+flowchart LR
+    UI[React: Browse / My Listings / Admin read] -->|User Bearer JWT| API[FastAPI Listing Router]
+    API --> AUTH[GPU-003: trusted principal / RBAC]
+    API --> REG[Listing use cases + policies]
+    REG --> UOW[GPU-002: repositories / UoW]
+    UOW --> PG[(PostgreSQL: workers / gpu_listings / jobs / reputation)]
+    JOB[GPU-005: future TX-SUBMIT] -.->|Same Listing lock + admission rules| PG
+    MAN[Phase 2 Manager] -.->|Future allocation_count writer| PG
+    SIM[Simulator] -.->|No direct DB access| PG
+```
+
+**Phân quyền ghi:** API Listings chỉ tạo Listing và sửa metadata/status; **Manager là writer duy nhất** của `allocated_gpu_count` khi Phase 2 được triển khai. `users`/`roles` và Worker profiles đã provisioned, không được sửa trong Listing routes. Queries của module không expose `worker_public_keys.public_key_raw`, mật khẩu, internal Bearer, `simulation_references` hoặc execution evidence.
+
+### 2.2. Bộ 6 endpoint cố định
+
+| Method | Path | Caller / kết quả | Bất biến |
+|---|---|---|---|
+| `GET` | `/api/v1/gpu-listings` | Authenticated `CLIENT`/`WORKER`/`ADMIN`; `200` paginated | `scope=marketplace` (mặc định) chỉ ACTIVE; `mine` Worker-only; `all` Admin-only |
+| `GET` | `/api/v1/gpu-listings/{listing_id}` | Ba role; `200` / `404` | PAUSED vẫn xem chi tiết được; `accepting_jobs=false` |
+| `POST` | `/api/v1/gpu-listings` | `WORKER`; `201` + `Location` | Worker ID suy từ user đã xác thực; ACTIVE, allocated=0 |
+| `PATCH` | `/api/v1/gpu-listings/{listing_id}` | Worker **owner**; `200` | Chỉ 4 field được PATCH; Listing lock trước khi kiểm tra jobs/capacity |
+| `POST` | `/api/v1/gpu-listings/{listing_id}/pause` | Worker owner; `200` | `ACTIVE→PAUSED`; lặp PAUSED là no-op thành công |
+| `POST` | `/api/v1/gpu-listings/{listing_id}/resume` | Worker owner; `200` | `PAUSED→ACTIVE`; lặp ACTIVE là no-op thành công |
+
+**Không** đưa `worker_id` từ body/query để quyết định quyền. Worker account không có profile → `409 WORKER_PROFILE_MISSING` khi tạo. Client/Admin tạo/sửa/pause/resume → `403`; Worker truy cập Listing của Worker khác để sửa → uniform `404 LISTING_NOT_FOUND`. GET scope trái quyền → `403`, không trả dữ liệu nhạy cảm.
+
+### 2.3. DTO, filter và frontend contract
+
+**Listing response theo API Contract §7.3:**
+
+```json
+{
+  "id": "22222222-2222-4222-8222-222222222222",
+  "worker": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "display_name": "Demo Worker",
+    "reputation": {
+      "successful_jobs": 7,
+      "worker_fault_jobs": 3,
+      "success_rate": "0.7000"
+    }
+  },
+  "gpu_model": "NVIDIA A100 (simulated)",
+  "vram_gb": 80,
+  "total_gpu_count": 8,
+  "allocated_gpu_count": 3,
+  "available_gpu_count": 5,
+  "status": "ACTIVE",
+  "accepting_jobs": true,
+  "mock_price_per_hour": "12.50",
+  "created_at": "2026-10-18T08:00:00.000000Z",
+  "updated_at": "2026-10-18T08:00:00.000000Z"
+}
+```
+
+- **Snapshot:** `available_gpu_count = total_gpu_count - allocated_gpu_count`; `accepting_jobs = (status == ACTIVE)`; cả hai chỉ mang tính hiển thị. Admission thật phải được GPU-005 kiểm tra lại dưới Listing lock.
+- **Reputation:** đọc từ `worker_reputation_aggregates`, không tự cập nhật theo API; nếu tổng eligible = 0, counts = 0 và `success_rate=null`; còn lại tỷ lệ string **4 chữ số thập phân**. UI hiển thị `N/A` khi null.
+- **Giá:** `mock_price_per_hour` là string decimal chính xác 2 chữ số hoặc null, `0..9999999999.99`, PostgreSQL `numeric(12,2)`; **không** chuyển sang float khiến làm tròn sai và không thực hiện thanh toán.
+- **Các trường cấm** trong request create/PATCH: `worker_id`, `id`, `allocated_gpu_count`, `status`, `created_at`, `updated_at`, owner/client/role và field ngoài allowlist; trả `400 UNKNOWN_FIELD`.
+- **Browse:** `scope=marketplace|mine|all` (default marketplace), `status=ACTIVE|PAUSED` tùy scope; marketplace + PAUSED → `400 INVALID_FILTER`. `limit` default 20, 1..100; opaque cursor bound scope/filter/user; sort `created_at DESC,id DESC`; tampered/mismatched cursor → `400 INVALID_CURSOR`; output `{ "items": [...], "next_cursor": null|string }`. Không hứa có snapshot cố định giữa các trang.
+- **Detail:** cả ba role xem metadata an toàn của PAUSED; unknown → `404`, sai định dạng UUID → `422`.
+
+**Create body chỉ gồm** `gpu_model` (trim outer whitespace, 1..160, giữ case), `vram_gb` và `total_gpu_count` (strict positive JSON integers, không nhận bool/float/string; PostgreSQL int32), `mock_price_per_hour` (optional null / decimal string 2 chữ số). Body tạo giống nhau gửi hai lần có thể tạo **hai Listing**; không tự đưa Listing idempotency key chưa được phê duyệt.
+
+**PATCH body:** chỉ `gpu_model`, `vram_gb`, `total_gpu_count`, `mock_price_per_hour`; ít nhất một field. `mock_price_per_hour: null` nghĩa là xóa giá hiển thị. Không cho đổi `status` bằng PATCH; Pause/Resume có endpoint riêng.
+
+### 2.4. Transaction `TX-PAUSE-EDIT`: quy tắc bắt buộc
+
+Dùng PostgreSQL `READ COMMITTED` và row-level locks như Database Design §11. Cho Create dùng repository/UoW hiện có, validate Worker profile/FK; cho PATCH/Pause/Resume:
+
+1. Xác thực account và role từ GPU-003; resolve `workers.id` server-side; xác định Listing, kiểm tra ownership (không leak non-owned).
+2. `SELECT gpu_listings[listing_id] FOR UPDATE`; **sau lock** mới recheck status/capacity và truy vấn `jobs` liên quan. Đảm bảo không lấy Job lock trước Listing. Giữ transaction ngắn; không gọi HTTP trong lock.
+3. **Hardware edit:** nếu giá trị `gpu_model` hoặc `vram_gb` thực sự thay đổi, từ chối khi bất kỳ Job của Listing còn `QUEUED` hoặc `RUNNING`: `409 LISTING_HARDWARE_LOCKED`; no-op cùng giá trị được chấp nhận.
+4. **Giảm capacity:** yêu cầu new total `>= allocated_gpu_count` và `>= MAX(requested_gpu_count)` của mọi Job `QUEUED`. Nếu cả hai fail, ưu tiên `409 LISTING_CAPACITY_BELOW_ALLOCATED`; nếu riêng queued max fail → `409 LISTING_CAPACITY_BELOW_QUEUED_MAX`. Không dùng snapshot UI để phán quyết.
+5. **Pause:** đổi ACTIVE sang PAUSED hoặc no-op; Job RUNNING tiếp tục, QUEUED giữ hàng đợi; submit/allocate lấy lock **sau commit pause** phải bị chặn bởi chính use case sở hữu tương ứng. **Resume:** đổi PAUSED sang ACTIVE hoặc no-op; không tự allocate.
+6. Commit metadata/status trong một transaction, cập nhật `updated_at` bằng trusted DB time khi có thay đổi. Rollback giữ nguyên tất cả cột nếu một điều kiện fail.
+
+**Concurrency boundary:** cả GPU-005 `TX-SUBMIT` và Phase 2 Manager `TX-ALLOCATE` phải dùng **cùng Listing lock trước Job**. Hai PATCH metadata hợp lệ thực hiện nối tiếp; last-committed value wins đối với field cùng tên (không có ETag/version column trong thiết kế duyệt). Không thêm column mới để giải quyết lost-update mà chưa có change control.
+
+### 2.5. Cấu trúc module và UI tối thiểu
+
+```text
+backend/src/gpu_marketplace/
+  listings/               # Listing policy + use cases + HTTP router + DTO
+  repositories/            # Reuse GPU-002 Listing/Worker/Job read + UoW
+  identity/                # Reuse GPU-003 AuthenticatedPrincipal / guards
+  api/app.py               # Team-lead integration: include approved router
+backend/tests/             # Listing API, DB invariants, guarded transaction tests
+frontend/src/
+  api/                     # Reuse auth-aware client; Listing requests/types
+  ui/                      # Browse, detail, Worker manage, Admin read-only
+```
+
+Frontend tối thiểu: `CLIENT` duyệt catalogue ACTIVE/chi tiết; `WORKER` duyệt hoặc vào `mine`, tạo/chỉnh sửa/pause/resume Listing của mình; `ADMIN` dùng `all` read-only; loading, empty/error state, pagination. Không bổ sung dashboard nghiệp vụ, thanh toán, nút chạy GPU/Job hay frontend DB access. UI **không** tự quyết định quyền; Backend là authority. Sử dụng JWT volatile-memory từ GPU-003 (không localStorage/cookies/IndexedDB).
+
+## 3. NHIỆM VỤ, KIỂM THỬ VÀ KẾT QUẢ
+
+### 3.1. Nhiệm vụ giao Thành viên 4 (đã duyệt về thiết kế)
+
+| Task | Deliverable | Phụ thuộc / gate |
+|---|---|---|
+| `GPU-004-A` | Đối chiếu API §7, DB/ownership, chốt interfaces với các owner liên quan | GPU-002/003 baseline; Inter-Phase impact review |
+| `GPU-004-B` | Listing DTO/router/query; 6 endpoints; validation, scopes, pagination/read projections | GPU-003 JWT/principal; GPU-002 ORM/repos |
+| `GPU-004-C` | `TX-PAUSE-EDIT`: guarded update, pause/resume, hardware/queued/allocated checks, rollback | GPU-002 `jobs`/Listing lock + UoW |
+| `GPU-004-D` | React minimal Listing UI + auth-aware API client | GPU-003 Login/session; shared UI owner coordination |
+| `GPU-004-E` | Pytest real PostgreSQL, Vitest, end-to-end flows/fixtures; regression | GPU-002/003 implemented/integrated |
+| `GPU-004-F` | Document evidence, migration/compatibility notes (nếu có), Inter-Phase ACK và PR reviewed | Human reviewer + cross-phase gate |
+
+**Không giao TV4:** thay quyết định JWT/role, sửa physical schema không được review, tạo Job hoặc reference, thay Manager allocation logic, tự nâng `allocated_gpu_count` hoặc tự đổi API Contract.
+
+### 3.2. Acceptance criteria và test traceability
+
+| Gate | Oracle bắt buộc | Trạng thái hiện tại |
+|---|---|---|
+| `P1D-AC-01` | 6 endpoints đúng method/path/status/DTO; không tạo API ngoài approved scope; error format + `X-Request-ID` | `NOT_RUN` |
+| `P1D-AC-02` | Read scopes & paging: ACTIVE-only marketplace, mine gồm PAUSED, Admin all read-only, 403 forbidden scope, detail PAUSED 200 (`API-LIST-01..05,18`) | `NOT_RUN` |
+| `P1D-AC-03` | Worker tạo Listing hợp lệ 201, server-owned fields, strict validation, wrong role 403 (`API-LIST-06..08`) | `NOT_RUN` |
+| `P1D-AC-04` | PATCH metadata & hardware no-op; block edit khi nonterminal Jobs; capacity bound, không partial update (`API-LIST-09..12`) | `NOT_RUN` |
+| `P1D-AC-05` | Pause/resume đúng state, lặp idempotent, owner guard 404, không tự đổi Job/counter (`API-LIST-16..17`) | `NOT_RUN` |
+| `P1D-AC-06` | Concurrency Listing-only dưới row lock; fixtures Job QUEUED/RUNNING chứng minh guard. Full race `API-LIST-13..15` cần GPU-005/Phase 2 cho submit/allocate path | **Phần Phase 1D `NOT_RUN`**, full E2E `BLOCKED` |
+| `P1D-AC-07` | Reputation, decimal, availability snapshot, no secrets; Auth/JWT protected; UI Client/Worker/Admin chạy với API thật | `NOT_RUN` |
+| `P1D-AC-08` | Baseline regression: PostgreSQL migration, pytest/Vitest, React build, Docker Compose 5 services, network isolation | `NOT_RUN` |
+| `P1D-AC-09` | Mọi cross-phase impact thực tế có **source owner + affected owner ACK** và evidence; PR có human independent review | `NOT_RUN` |
+
+**Tách test Phase 1D vs Phase sau:** `API-LIST-10..12` có thể sử dụng **test fixtures** có Job `QUEUED/RUNNING` trong 10 bảng Phase 1B để kiểm tra guard, nhưng không có nghĩa Job Submit/Manager đã chạy thật. Với `API-LIST-13`, Phase 1E sẽ kiểm thử pause-versus-submit; với `API-LIST-14/15`, phần Manager allocate/FIFO thuộc Phase 2. Không đánh dấu PASS các bước chưa thực thi. Dữ liệu reference dùng trong fixture (nếu DB FK yêu cầu) chỉ là test-only compliant values, **không** được mô tả như thuật toán `DEC-P1-04` đã hoàn thành.
+
+### 3.3. Inter-Phase Impact & Dual Acknowledgement — **BẮT BUỘC**
+
+**Quy trình:** theo [Inter-Phase Change Control](../../development/interphase-change-control.md). Áp dụng ngay cả khi sửa file `.md`, không đợi thay code. `NO_IMPACT` cho chỉnh sửa thuần trình bày có lý do; `POTENTIAL_IMPACT` phải cảnh báo và chờ làm rõ; `CONFIRMED_IMPACT` yêu cầu **hai phía xác nhận** và hoàn tất remediation/tests trước merge hoặc dùng baseline. Chưa ACK hay conflict → `BLOCKED_INTERPHASE`. Independent human reviewer/CR L0–L3 vẫn bắt buộc riêng, không được tính một trong các ACK thay cho PR review.
+
+| Phụ thuộc hoặc đầu ra thay đổi | Owner nguồn ↔ owner nhận ảnh hưởng | Cần review / cảnh báo khi nào |
+|---|---|---|
+| GPU-002 schema, Listing/Job repositories, FK, UoW, migration | TV2 ↔ TV4 | Cột, signature, query semantics, locks, permission thay đổi làm Listing code/test phải sửa |
+| GPU-003 JWT, `AuthenticatedPrincipal`, Worker guard, token client | TV3 ↔ TV4 | Token/role/profile mapping hoặc frontend Auth client thay đổi |
+| GPU-001 app/router/CORS/config/frontend shell/CI | Trưởng nhóm ↔ TV4 | Thay shared integration khiến module khác bị ảnh hưởng |
+| GPU-004 Listing DTO, `ACTIVE/PAUSED`, accepting_jobs, capacity & ownership | TV4 ↔ TV5 (GPU-005) | Thay hợp đồng mà Job Submit phải dùng; thông báo trước khi TV5 dựa vào revision mới |
+| GPU-004 semantics cho Manager future allocation | TV4 ↔ owner Phase 2 **khi được giao** | Có diff thực sự tác động scheduler; không tự dựng người xác nhận |
+
+**Trạng thái tại thời điểm lập tài liệu:** `NO_CHANGE_ASSESSED` (chưa có diff implementation/contract Phase 1D nào để hai bên đối chiếu); **chưa có ACK thực tế**. Mọi `XPH-GPU-004-nn` chỉ được mở khi có thay đổi thật; chủ dự án phê duyệt *quy trình* không đồng nghĩa xác nhận một diff cụ thể. GPU-002/003 chưa merge nên không được tự khẳng định compatibility với code chưa tồn tại.
+
+**Mẫu record khi có diff ảnh hưởng:**
+
+```text
+XPH-GPU-004-01
+Source phase/owner: ...; changed file + old SHA -> new SHA: ...
+Classification: POTENTIAL_IMPACT | CONFIRMED_IMPACT | NO_IMPACT
+Changed contract/assumption: trước -> sau ...
+Affected phase/consumer owner(s): ...
+Notification / discussion evidence: ...
+Source owner ACK (người/ngày/link): ...
+Consumer owner ACK_COMPATIBLE | ACK_WITH_ACTIONS | REJECTED (người/ngày/link): ...
+Remediation + tests + command + actual verdict: ...
+Gate: AWAITING_CROSS_PHASE_ACK | BLOCKED_INTERPHASE | CLOSED
+```
+
+**Điều kiện đóng gate Phase 1D:** ghi `NO_OPEN_CROSS_PHASE_IMPACT` chỉ khi đã rà diff/PR và không có việc tồn; với mỗi impact thật phải có nguồn/đích xác nhận **riêng từng Phase nhận ảnh hưởng**, nội dung trước/sau, evidence regression và liên kết PR. Không được tự điền ACK thay thành viên khác.
+
+### 3.4. Kết quả thực tế và handoff
+
+- **`IMPLEMENTED` kế thừa:** GPU-001 foundation, 5-service Compose, empty Listing package, frontend placeholder, API health và CI foundation đã PASS trên PR #3. Đây **không** phải Listing implementation PASS.
+- **`APPROVED DESIGN`:** API Contract Listing §7; physical/transaction rules trong Database Design; quy tắc kiểm soát ảnh hưởng liên Phase do chủ dự án xác nhận. Thiết kế Phase 1B/1C đã được chủ dự án duyệt trong trao đổi nhưng code chưa có trên `main` tại baseline đã kiểm tra.
+- **`PLANNED`:** toàn bộ GPU-004-A..F, UI thật, Listing API và test evidence; không tuyên bố hoàn thành cho đến khi có SHA/migration revision, command/log PASS, human review, inter-phase ACK và PR merge.
+- **Handoff cho GPU-005:** TV4 giao cho TV5 Listing read/ownership contract, DTO, `ACTIVE/PAUSED`, cách check `requested_gpu_count <= total_gpu_count` và Listing-first locking. TV5 triển khai riêng `TX-SUBMIT` và atomic Job+protected reference; không được lấy `available_gpu_count` phía UI làm thẩm quyền cấp phát.
+- **Handoff cho Phase 2:** API Listings không ghi `allocated_gpu_count`; Manager sau này chỉ cập nhật count cùng Allocation trong transaction, tôn trọng trạng thái PAUSED và Listing-first locking.
+
+**Review gate:** chủ dự án đã phê duyệt **thiết kế** GPU-004 trong trao đổi ngày 21/10/2026. Trạng thái code và test vẫn là `PLANNED / NOT_RUN`; chỉ đánh dấu `IMPLEMENTED` sau PR có review, test evidence và merge hợp lệ. Chưa có xác nhận hai phía cho bất kỳ diff kỹ thuật cụ thể nào. Không tự tạo branch, code, sửa approved contracts, commit, push, mở PR hoặc merge khi chưa có yêu cầu tương ứng.
