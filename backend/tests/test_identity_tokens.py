@@ -187,7 +187,7 @@ def test_malformed_token_shape_is_rejected(codec: AccessTokenCodec, token: objec
 @pytest.mark.parametrize("position", [0, 1, 2])
 def test_non_ascii_segment_is_rejected_not_raised(codec: AccessTokenCodec, position: int) -> None:
     segments = codec.issue(SUBJECT).token.split(".")
-    segments[position] = "é" + segments[position]
+    segments[position] = "\u00e9" + segments[position]
     with pytest.raises(InvalidTokenError) as excinfo:
         codec.verify(".".join(segments))
     assert excinfo.value.reason == "malformed"

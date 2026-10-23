@@ -81,10 +81,18 @@ def test_non_string_inputs_fail_closed(hasher: ScryptPasswordHasher) -> None:
     assert hasher.verify_password("pw", None) is False  # type: ignore[arg-type]
 
 
-def test_lone_surrogate_password_fails_closed(hasher: ScryptPasswordHasher) -> None:
+@pytest.mark.parametrize("password", ["\ud800", "pw\udfff", chr(0xD83D) + chr(0xDE00)])
+def test_lone_surrogate_password_fails_closed(hasher: ScryptPasswordHasher, password: str) -> None:
+    # CR-GPU-003-UNICODE-01 R3: a generic mismatch (401 at the endpoint), never an exception.
     encoded = hasher.hash_password("pw")
-    assert hasher.verify_password("\ud800", encoded) is False
-    hasher.burn_verification("\ud800")
+    assert hasher.verify_password(password, encoded) is False
+    hasher.burn_verification(password)
+
+
+def test_non_bmp_password_round_trips(hasher: ScryptPasswordHasher) -> None:
+    encoded = hasher.hash_password("p\U0001F600ss")
+    assert hasher.verify_password("p\U0001F600ss", encoded)
+    assert not hasher.verify_password("pss", encoded)
 
 
 def test_empty_password_cannot_be_hashed(hasher: ScryptPasswordHasher) -> None:
