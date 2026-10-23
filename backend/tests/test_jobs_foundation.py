@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -39,7 +40,7 @@ from gpu_marketplace.jobs.ports import (
     JobRecord,
 )
 from gpu_marketplace.jobs.projections import project_job
-from gpu_marketplace.jobs.router import _parse_limit
+from gpu_marketplace.jobs.router import _parse_job_id, _parse_limit, _request_id
 from gpu_marketplace.jobs.service import JobsReadService
 
 
@@ -130,6 +131,14 @@ def test_submit_request_maps_malformed_json_to_bad_request_domain_error() -> Non
         submit_request_from_json(b'{"listing_id":')
 
 
+def test_submit_request_requires_uuid_v4_listing_id() -> None:
+    with pytest.raises(ValidationFailed):
+        submit_request_from_json(
+            b'{"listing_id":"22222222-2222-1222-8222-222222222222",'
+            b'"gpu_count":2,"duration_seconds":60}'
+        )
+
+
 def test_idempotency_key_validation_is_ascii_and_length_bounded() -> None:
     assert validate_idempotency_key("retry-01") == "retry-01"
     with pytest.raises(IdempotencyKeyRequired):
@@ -150,6 +159,22 @@ def test_pydantic_model_directly_forbids_extra_fields() -> None:
                 "duration_seconds": 5,
                 "client_id": str(CLIENT_ID),
             }
+        )
+
+
+def test_response_public_ids_must_be_uuid_v4() -> None:
+    with pytest.raises(ValidationError):
+        ClientJobResponse(
+            id=UUID("33333333-3333-1333-8333-333333333333"),
+            listing_id=LISTING_ID,
+            worker_id=WORKER_ID,
+            gpu_count=1,
+            duration_seconds=5,
+            status=JobStatus.QUEUED,
+            failure_reason=None,
+            submitted_at=NOW,
+            started_at=None,
+            terminal_at=None,
         )
 
 
@@ -277,6 +302,12 @@ def test_hmac_cursor_codec_round_trip_tamper_and_context_binding() -> None:
     token = codec.encode(position, context=context)
 
     assert codec.decode(token, context=context) == position
+    payload_part = token.split(".", maxsplit=1)[0]
+    decoded_payload = base64.urlsafe_b64decode(payload_part + "=" * (-len(payload_part) % 4))
+    assert str(CLIENT_ID).encode() not in decoded_payload
+    assert b'"role"' not in decoded_payload
+    assert b'"scope"' not in decoded_payload
+    assert b'"status"' not in decoded_payload
     with pytest.raises(ValueError):
         codec.decode(token[:-1] + ("A" if token[-1] != "A" else "B"), context=context)
     with pytest.raises(ValueError):
@@ -328,22 +359,62 @@ def test_router_limit_parser_rejects_invalid_input(raw: str) -> None:
         _parse_limit(raw)
 
 
+def test_router_job_id_parser_requires_canonical_uuid_v4() -> None:
+    assert _parse_job_id(str(JOB_ID)) == JOB_ID
+    for invalid in (
+        "33333333-3333-1333-8333-333333333333",
+        "33333333333343338333333333333333",
+        "not-a-uuid",
+    ):
+        with pytest.raises(ValueError):
+            _parse_job_id(invalid)
+
+
+def test_request_id_ignores_caller_supplied_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    from starlette.requests import Request
+
+    server_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    monkeypatch.setattr("gpu_marketplace.jobs.router.uuid4", lambda: UUID(server_id))
+    request = Request(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/api/v1/jobs",
+            "raw_path": b"/api/v1/jobs",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [(b"x-request-id", b"attacker-chosen")],
+            "client": ("test", 1),
+            "server": ("test", 80),
+            "state": {},
+        }
+    )
+    assert _request_id(request) == server_id
+
+
 def test_http_error_adapter_uses_contract_envelope_without_internal_details() -> None:
-    response = job_error_response(InvalidCursor(), request_id="req-123")
+    request_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    response = job_error_response(InvalidCursor(), request_id=request_id)
     body = json.loads(response.body)
     assert response.status_code == 400
-    assert response.headers["X-Request-ID"] == "req-123"
+    assert response.headers["X-Request-ID"] == request_id
+    assert response.headers["Cache-Control"] == "no-store"
     assert body == {
         "error": {
             "code": JobErrorCode.INVALID_CURSOR.value,
             "message": "The pagination cursor is invalid.",
-            "request_id": "req-123",
+            "request_id": request_id,
         }
     }
     assert "secret" not in response.body.decode().lower()
 
 
 def test_dependency_error_maps_to_service_unavailable() -> None:
-    response = job_error_response(DependencyUnavailable(), request_id="req-db")
+    response = job_error_response(
+        DependencyUnavailable(), request_id="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    )
     assert response.status_code == 503
     assert json.loads(response.body)["error"]["code"] == "DEPENDENCY_UNAVAILABLE"

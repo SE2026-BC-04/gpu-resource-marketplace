@@ -17,10 +17,7 @@ _VERSION = 1
 _MAX_TOKEN_LENGTH = 2048
 _REQUIRED_FIELDS = {
     "v",
-    "user_id",
-    "role",
-    "scope",
-    "status",
+    "context_tag",
     "submitted_at",
     "job_id",
 }
@@ -43,12 +40,11 @@ class HmacCursorCodec:
         timestamp = position.submitted_at
         if timestamp.tzinfo is None or timestamp.utcoffset() is None:
             raise ValueError("cursor timestamp must be timezone-aware")
+        if context.user_id.version != 4 or position.job_id.version != 4:
+            raise ValueError("cursor identifiers must be UUIDv4")
         claims = {
             "v": _VERSION,
-            "user_id": str(context.user_id),
-            "role": context.role.value,
-            "scope": context.scope,
-            "status": context.status.value if context.status is not None else None,
+            "context_tag": self._context_tag(context),
             "submitted_at": timestamp.astimezone(timezone.utc)
             .isoformat(timespec="microseconds")
             .replace("+00:00", "Z"),
@@ -62,7 +58,9 @@ class HmacCursorCodec:
             allow_nan=False,
         ).encode("utf-8")
         payload_part = _b64encode(payload)
-        signature_part = _b64encode(hmac.new(self._key, payload, hashlib.sha256).digest())
+        signature_part = _b64encode(
+            hmac.new(self._key, b"jobs-cursor-signature\x00" + payload, hashlib.sha256).digest()
+        )
         token = f"{payload_part}.{signature_part}"
         if len(token) > _MAX_TOKEN_LENGTH:
             raise ValueError("cursor exceeds maximum length")
@@ -76,7 +74,9 @@ class HmacCursorCodec:
             raise ValueError("invalid cursor encoding")
         payload = _b64decode(parts[0])
         signature = _b64decode(parts[1])
-        expected = hmac.new(self._key, payload, hashlib.sha256).digest()
+        expected = hmac.new(
+            self._key, b"jobs-cursor-signature\x00" + payload, hashlib.sha256
+        ).digest()
         if not hmac.compare_digest(signature, expected):
             raise ValueError("invalid cursor signature")
 
@@ -86,20 +86,10 @@ class HmacCursorCodec:
                 raise ValueError("invalid cursor claims")
             if type(claims["v"]) is not int or claims["v"] != _VERSION:
                 raise ValueError("unsupported cursor version")
-            if not all(
-                isinstance(claims[name], str)
-                for name in ("user_id", "role", "scope", "submitted_at", "job_id")
-            ):
+            if not all(isinstance(claims[name], str) for name in ("context_tag", "submitted_at", "job_id")):
                 raise ValueError("cursor claims have invalid types")
-            if claims["status"] is not None and not isinstance(claims["status"], str):
-                raise ValueError("cursor status has invalid type")
-            expected_status = context.status.value if context.status is not None else None
-            if (
-                claims["user_id"] != str(context.user_id)
-                or claims["role"] != context.role.value
-                or claims["scope"] != context.scope
-                or claims["status"] != expected_status
-            ):
+            expected_context_tag = self._context_tag(context)
+            if not hmac.compare_digest(claims["context_tag"], expected_context_tag):
                 raise ValueError("cursor does not match this query context")
 
             timestamp_text = claims["submitted_at"]
@@ -112,13 +102,30 @@ class HmacCursorCodec:
             if canonical_timestamp != timestamp_text:
                 raise ValueError("cursor timestamp is not canonical")
             job_id = UUID(claims["job_id"])
-            if str(job_id) != claims["job_id"]:
+            if str(job_id) != claims["job_id"] or job_id.version != 4:
                 raise ValueError("cursor Job ID is not canonical")
             return CursorPosition(submitted_at=timestamp, job_id=job_id)
         except ValueError:
             raise
         except (TypeError, KeyError, AttributeError, OverflowError) as exc:
             raise ValueError("invalid cursor claims") from exc
+
+    def _context_tag(self, context: CursorContext) -> str:
+        context_bytes = json.dumps(
+            {
+                "user_id": str(context.user_id),
+                "role": context.role.value,
+                "scope": context.scope,
+                "status": context.status.value if context.status is not None else None,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        return hmac.new(
+            self._key, b"jobs-cursor-context\x00" + context_bytes, hashlib.sha256
+        ).hexdigest()
 
 
 def _b64encode(value: bytes) -> str:

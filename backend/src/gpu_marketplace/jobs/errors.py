@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from uuid import UUID, uuid4
 
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
@@ -146,14 +147,25 @@ def validate_idempotency_key(value: str | None) -> str:
 
 def job_error_response(error: JobDomainError, *, request_id: str) -> JSONResponse:
     status_code, message = _ERRORS[error.code]
+    try:
+        parsed_request_id = UUID(request_id)
+    except (TypeError, ValueError, AttributeError):
+        parsed_request_id = None
+    safe_request_id = (
+        request_id
+        if parsed_request_id is not None
+        and parsed_request_id.version == 4
+        and str(parsed_request_id) == request_id
+        else str(uuid4())
+    )
     return JSONResponse(
         status_code=status_code,
         content={
             "error": {
                 "code": error.code.value,
                 "message": message,
-                "request_id": request_id,
+                "request_id": safe_request_id,
             }
         },
-        headers={"X-Request-ID": request_id},
+        headers={"X-Request-ID": safe_request_id, "Cache-Control": "no-store"},
     )

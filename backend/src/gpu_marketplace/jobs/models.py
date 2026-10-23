@@ -5,9 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Annotated
-from uuid import UUID
-
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+from pydantic import UUID4, BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 
 MAX_POSTGRES_INTEGER = 2_147_483_647
@@ -42,7 +40,7 @@ class SubmitJobRequest(StrictDTO):
 
     # UUID is a JSON string in the wire contract; Pydantic strict mode still
     # rejects coercions for numeric fields while accepting this UUID spelling.
-    listing_id: UUID = Field(strict=False)
+    listing_id: UUID4 = Field(strict=False)
     gpu_count: Annotated[int, Field(gt=0, le=MAX_POSTGRES_INTEGER)]
     duration_seconds: Annotated[int, Field(gt=0, le=MAX_POSTGRES_INTEGER)]
 
@@ -52,8 +50,8 @@ class JobResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    id: UUID
-    listing_id: UUID
+    id: UUID4
+    listing_id: UUID4
     gpu_count: Annotated[int, Field(gt=0, le=MAX_POSTGRES_INTEGER)]
     duration_seconds: Annotated[int, Field(gt=0, le=MAX_POSTGRES_INTEGER)]
     status: JobStatus
@@ -82,7 +80,7 @@ class JobResponse(BaseModel):
 class ClientJobResponse(JobResponse):
     """Client's own Job view includes the assigned Worker ID per API §8."""
 
-    worker_id: UUID
+    worker_id: UUID4
 
 
 # Put the subtype first so response-model union selection does not erase the

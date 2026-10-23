@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 
 from gpu_marketplace.jobs.errors import (
     JobDomainError,
@@ -25,6 +25,7 @@ def create_jobs_router(
     @router.get("", response_model=JobCollectionResponse)
     def list_jobs(
         request: Request,
+        response: Response,
         scope: str | None = None,
         status: str | None = None,
         limit: str = "20",
@@ -32,6 +33,8 @@ def create_jobs_router(
         principal: JobPrincipal = Depends(principal_provider),
     ) -> JobCollectionResponse:
         request_id = _request_id(request)
+        response.headers["X-Request-ID"] = request_id
+        response.headers["Cache-Control"] = "no-store"
         try:
             parsed_limit = _parse_limit(limit)
             return service.list_jobs(
@@ -48,12 +51,15 @@ def create_jobs_router(
     def get_job(
         job_id: str,
         request: Request,
+        response: Response,
         principal: JobPrincipal = Depends(principal_provider),
     ) -> PublicJobResponse:
         request_id = _request_id(request)
+        response.headers["X-Request-ID"] = request_id
+        response.headers["Cache-Control"] = "no-store"
         try:
-            parsed_id = UUID(job_id)
-        except (ValueError, TypeError, AttributeError):
+            parsed_id = _parse_job_id(job_id)
+        except ValueError:
             return job_error_response(ValidationFailed(), request_id=request_id)  # type: ignore[return-value]
         try:
             return service.get_job(principal=principal, job_id=parsed_id)
@@ -75,6 +81,25 @@ def _parse_limit(raw: str) -> int:
     return value
 
 
+def _parse_job_id(raw: str) -> UUID:
+    try:
+        value = UUID(raw)
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError("Job ID must be UUIDv4") from exc
+    if value.version != 4 or str(value) != raw:
+        raise ValueError("Job ID must be canonical UUIDv4")
+    return value
+
+
 def _request_id(request: Request) -> str:
-    supplied = request.headers.get("X-Request-ID")
-    return supplied if supplied else str(uuid4())
+    # Only trust a UUIDv4 previously attached by server middleware. Never echo
+    # the caller-controlled X-Request-ID header as a server correlation ID.
+    candidate = getattr(request.state, "request_id", None)
+    if isinstance(candidate, str):
+        try:
+            parsed = UUID(candidate)
+        except ValueError:
+            parsed = None
+        if parsed is not None and parsed.version == 4 and str(parsed) == candidate:
+            return candidate
+    return str(uuid4())
