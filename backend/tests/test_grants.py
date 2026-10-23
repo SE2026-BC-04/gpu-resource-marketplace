@@ -258,18 +258,24 @@ def test_migration_stops_with_a_clear_message_when_the_groups_are_missing(conn: 
         module.require_groups(conn, ["gpm_group_that_does_not_exist"])
 
 
-def test_downgrade_removes_grants_but_never_drops_roles(
-    baseline_database: Engine, alembic_config: Config, monkeypatch: pytest.MonkeyPatch
+def public_database_acl(connection: Connection) -> str:
+    return connection.execute(
+        text("SELECT coalesce(datacl::text, '') FROM pg_database WHERE datname = current_database()")
+    ).scalar_one()
+
+
+def test_downgrade_removes_grants_never_drops_roles_and_never_widens_public(
+    baseline_database: Engine, alembic_config: Config
 ) -> None:
     command.downgrade(alembic_config, "0001_phase1b_baseline")
     try:
         with baseline_database.connect() as connection:
             assert column_privileges(connection, API_GROUP, "SELECT") == {}
-            acl = connection.execute(
-                text("SELECT coalesce(datacl::text, '') FROM pg_database WHERE datname = current_database()")
-            ).scalar_one()
+            acl = public_database_acl(connection)
             assert API_GROUP not in acl and MANAGER_GROUP not in acl
-            assert "=Tc/" in acl or acl == "", "downgrade must restore the default PUBLIC CONNECT/TEMPORARY"
+            # PUBLIC had its database privileges removed by the upgrade; a downgrade must not hand them back,
+            # because the migration cannot know whether the operator had restricted them before.
+            assert "=Tc/" not in acl and "=c/" not in acl and "=T/" not in acl
             roles = connection.execute(
                 text("SELECT count(*) FROM pg_roles WHERE rolname IN (:a, :b, :c, :d)"),
                 {"a": API_GROUP, "b": MANAGER_GROUP, "c": API_LOGIN, "d": MANAGER_LOGIN},
@@ -277,3 +283,30 @@ def test_downgrade_removes_grants_but_never_drops_roles(
             assert roles == 4
     finally:
         command.upgrade(alembic_config, "head")
+
+
+def test_upgrade_after_a_restricted_downgrade_is_repeatable(baseline_database: Engine, alembic_config: Config) -> None:
+    command.downgrade(alembic_config, "0001_phase1b_baseline")
+    command.upgrade(alembic_config, "head")
+    with baseline_database.connect() as connection:
+        assert column_privileges(connection, API_GROUP, "SELECT") != {}
+        assert "=Tc/" not in public_database_acl(connection)
+
+
+def test_p2_runtime_roles_have_no_create_on_schema_public(conn: Connection) -> None:
+    for role in (API_GROUP, MANAGER_GROUP, API_LOGIN, MANAGER_LOGIN):
+        for privilege in ("CREATE", "USAGE"):
+            expected = privilege == "USAGE"
+            granted = conn.execute(
+                text("SELECT has_schema_privilege(:role, 'public', :privilege)"), {"role": role, "privilege": privilege}
+            ).scalar_one()
+            assert granted is expected, f"{role} {privilege} on schema public"
+
+
+def test_p2_migration_fails_closed_when_public_can_create_in_schema_public(conn: Connection) -> None:
+    """Clusters upgraded from PostgreSQL 14 or older can still grant CREATE on schema public to PUBLIC."""
+    module = grants_module()
+    module.require_schema_closed(conn, (API_GROUP, MANAGER_GROUP))
+    conn.execute(text("GRANT CREATE ON SCHEMA public TO PUBLIC"))
+    with pytest.raises(RuntimeError, match="CREATE on schema public"):
+        module.require_schema_closed(conn, (API_GROUP, MANAGER_GROUP))

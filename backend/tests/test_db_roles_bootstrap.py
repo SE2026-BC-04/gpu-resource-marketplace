@@ -174,3 +174,73 @@ def test_cli_exposes_rotate_password_only_as_an_explicit_flag() -> None:
 
     with pytest.raises(SystemExit):
         db_roles.main(["--rotate"])  # abbreviations of a destructive flag must not be accepted
+
+
+def test_p1_unauthorized_direct_member_of_a_group_is_reported_and_left_alone(cluster) -> None:
+    names = unique_names()
+    stranger = f"gpm_t{secrets.token_hex(4)}_stranger"
+    with cluster() as connection, connection.begin():
+        bootstrap_roles(connection, password(), password(), names=names)
+        connection.execute(text(f'CREATE ROLE "{stranger}" LOGIN'))
+        connection.execute(text(f'GRANT "{names.api_group}" TO "{stranger}"'))
+        with pytest.raises(RoleDriftError, match="unexpected member"):
+            bootstrap_roles(connection, password(), password(), names=names)
+        assert members(connection, names.api_group) == {names.api_login, stranger}
+
+
+def test_p1_unauthorized_member_of_the_manager_group_is_reported(cluster) -> None:
+    names = unique_names()
+    stranger = f"gpm_t{secrets.token_hex(4)}_stranger"
+    with cluster() as connection, connection.begin():
+        bootstrap_roles(connection, password(), password(), names=names)
+        connection.execute(text(f'CREATE ROLE "{stranger}" LOGIN'))
+        connection.execute(text(f'GRANT "{names.manager_group}" TO "{stranger}"'))
+        with pytest.raises(RoleDriftError, match="unexpected member"):
+            bootstrap_roles(connection, password(), password(), names=names)
+
+
+def test_p1_indirect_member_through_a_login_role_is_reported(cluster) -> None:
+    """A role granted membership in the expected login role inherits the group's privileges indirectly."""
+    names = unique_names()
+    stranger = f"gpm_t{secrets.token_hex(4)}_stranger"
+    with cluster() as connection, connection.begin():
+        bootstrap_roles(connection, password(), password(), names=names)
+        connection.execute(text(f'CREATE ROLE "{stranger}" LOGIN'))
+        connection.execute(text(f'GRANT "{names.api_login}" TO "{stranger}"'))
+        with pytest.raises(RoleDriftError, match="unexpected member"):
+            bootstrap_roles(connection, password(), password(), names=names)
+
+
+def test_p1_group_nested_inside_another_group_is_reported(cluster) -> None:
+    names = unique_names()
+    nested = f"gpm_t{secrets.token_hex(4)}_nested"
+    with cluster() as connection, connection.begin():
+        bootstrap_roles(connection, password(), password(), names=names)
+        connection.execute(text(f'CREATE ROLE "{nested}" NOLOGIN'))
+        connection.execute(text(f'GRANT "{nested}" TO "{names.manager_group}"'))
+        with pytest.raises(RoleDriftError):
+            bootstrap_roles(connection, password(), password(), names=names)
+
+
+def test_p2_plaintext_password_never_reaches_a_statement_or_its_parameters(db_engine: Engine) -> None:
+    from sqlalchemy import event
+
+    names = unique_names()
+    secret_api = f"plain-{secrets.token_hex(8)}"
+    secret_manager = f"plain-{secrets.token_hex(8)}"
+    seen: list[str] = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        seen.append(f"{statement} {parameters}")
+
+    event.listen(db_engine, "before_cursor_execute", capture)
+    try:
+        with db_engine.begin() as connection:
+            bootstrap_roles(connection, secret_api, secret_manager, names=names)
+            bootstrap_roles(connection, secret_api, secret_manager, names=names, rotate_password=True)
+            stored = stored_password(connection, names.api_login)
+    finally:
+        event.remove(db_engine, "before_cursor_execute", capture)
+    assert seen, "the capture hook did not observe any statement"
+    assert not any(secret_api in line or secret_manager in line for line in seen)
+    assert stored.startswith("SCRAM-SHA-256$")

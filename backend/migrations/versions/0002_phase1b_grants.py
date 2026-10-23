@@ -4,6 +4,10 @@ The groups are created by the role bootstrap (``python -m gpu_marketplace.common
 revision runs. This revision never creates, alters or drops a role: roles are cluster-wide and shared
 with the test cluster, so downgrade only revokes privileges.
 
+Upgrade removes the database privileges of PUBLIC. Downgrade deliberately does NOT hand them back: the migration
+cannot know whether an operator had already restricted PUBLIC, and silently widening access on a downgrade is
+worse than leaving a hardened database hardened. Downgrade only revokes what this revision granted.
+
 Grants follow the GPU-002-A schema matrix section 6.3. Manager only needs CONNECT in Phase 1B. Neither group
 gets DELETE, TRUNCATE, REFERENCES, TRIGGER or any DDL privilege; lifecycle triggers (D2) and guarded delete
 (D3) are separate revisions.
@@ -120,9 +124,26 @@ def require_groups(bind: sa.engine.Connection, groups: Sequence[str]) -> None:
         )
 
 
+def require_schema_closed(bind: sa.engine.Connection, groups: Sequence[str]) -> None:
+    """Fail closed if the runtime groups could create objects in schema public, e.g. via PUBLIC on an old cluster.
+
+    The migration does not change the privileges of PUBLIC itself, so the operator must fix this explicitly.
+    """
+    for group in groups:
+        can_create = bind.execute(
+            sa.text("SELECT has_schema_privilege(CAST(:role AS name), 'public', 'CREATE')"), {"role": group}
+        ).scalar_one()
+        if can_create:
+            raise RuntimeError(
+                f"role {group} would have CREATE on schema public (usually granted to PUBLIC on a cluster upgraded "
+                "from PostgreSQL 14 or older): run REVOKE CREATE ON SCHEMA public FROM PUBLIC as the owner, then retry"
+            )
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     require_groups(bind, (API_GROUP, MANAGER_GROUP))
+    require_schema_closed(bind, (API_GROUP, MANAGER_GROUP))
 
     op.execute(
         sa.text(
@@ -148,7 +169,6 @@ def downgrade() -> None:
         sa.text(
             "DO $$ BEGIN "
             f"EXECUTE format('REVOKE ALL ON DATABASE %I FROM {API_GROUP}, {MANAGER_GROUP}', current_database()); "
-            "EXECUTE format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO PUBLIC', current_database()); "
             "END $$"
         )
     )

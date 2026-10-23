@@ -70,7 +70,29 @@ def _memberships(connection: Connection, login: str) -> set[str]:
     return set(rows.scalars())
 
 
-def _drift(connection: Connection, name: str, *, login: bool, expected_groups: set[str]) -> list[str]:
+def _effective_members(connection: Connection, group: str) -> set[str]:
+    """Every role that holds the group directly or through any chain of memberships."""
+    rows = connection.execute(
+        text(
+            "WITH RECURSIVE members(oid) AS ("
+            "  SELECT m.member FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid WHERE g.rolname = :group"
+            "  UNION"
+            "  SELECT m.member FROM pg_auth_members m JOIN members ON m.roleid = members.oid"
+            ") SELECT r.rolname FROM members JOIN pg_roles r ON r.oid = members.oid"
+        ),
+        {"group": group},
+    )
+    return set(rows.scalars())
+
+
+def _drift(
+    connection: Connection,
+    name: str,
+    *,
+    login: bool,
+    expected_groups: set[str],
+    allowed_members: set[str] | None = None,
+) -> list[str]:
     row = _role_row(connection, name)
     if row is None:
         return []
@@ -82,7 +104,17 @@ def _drift(connection: Connection, name: str, *, login: bool, expected_groups: s
     actual_groups = _memberships(connection, name)
     if actual_groups != expected_groups:
         problems.append(f"{name}: unexpected membership {sorted(actual_groups)}, expected {sorted(expected_groups)}")
+    if allowed_members is not None:
+        extra = _effective_members(connection, name) - allowed_members
+        if extra:
+            problems.append(f"{name}: unexpected member(s) {sorted(extra)} would inherit its privileges")
     return problems
+
+
+def _scram_verifier(connection: Connection, role: str, password: str) -> str:
+    """Hash the password with libpq so the server, its logs and any statement trace only see the verifier."""
+    pgconn = connection.connection.driver_connection.pgconn
+    return pgconn.encrypt_password(password.encode(), role.encode(), b"scram-sha-256").decode()
 
 
 def _execute_format(connection: Connection, template: str, **values: str) -> None:
@@ -107,31 +139,39 @@ def bootstrap_roles(
     definition. The caller owns the transaction.
     """
     plan = (
-        (names.api_group, False, set(), None),
-        (names.manager_group, False, set(), None),
-        (names.api_login, True, {names.api_group}, api_password),
-        (names.manager_login, True, {names.manager_group}, manager_password),
+        (names.api_group, False, set(), None, {names.api_login}),
+        (names.manager_group, False, set(), None, {names.manager_login}),
+        (names.api_login, True, {names.api_group}, api_password, set()),
+        (names.manager_login, True, {names.manager_group}, manager_password, set()),
     )
     problems = [
         problem
-        for name, login, groups, _ in plan
-        for problem in _drift(connection, name, login=login, expected_groups=groups)
+        for name, login, groups, _, allowed in plan
+        for problem in _drift(connection, name, login=login, expected_groups=groups, allowed_members=allowed)
     ]
     if problems:
         raise RoleDriftError("existing roles differ from the approved definition: " + "; ".join(problems))
 
-    for name, login, groups, secret in plan:
+    for name, login, groups, secret, _ in plan:
         if _role_row(connection, name) is None:
             if login:
                 _execute_format(
-                    connection, f"CREATE ROLE %I LOGIN {LOCKED_DOWN} INHERIT PASSWORD %L", name=name, password=secret
+                    connection,
+                    f"CREATE ROLE %I LOGIN {LOCKED_DOWN} INHERIT PASSWORD %L",
+                    name=name,
+                    password=_scram_verifier(connection, name, secret),
                 )
                 (group,) = groups
                 _execute_format(connection, "GRANT %I TO %I", group=group, login=name)
             else:
                 _execute_format(connection, f"CREATE ROLE %I NOLOGIN {LOCKED_DOWN} INHERIT", name=name)
         elif login and rotate_password:
-            _execute_format(connection, "ALTER ROLE %I PASSWORD %L", name=name, password=secret)
+            _execute_format(
+                connection,
+                "ALTER ROLE %I PASSWORD %L",
+                name=name,
+                password=_scram_verifier(connection, name, secret),
+            )
 
 
 def main(argv: list[str] | None = None) -> int:
