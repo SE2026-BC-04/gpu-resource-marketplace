@@ -4,8 +4,9 @@
 > **Ngày phê duyệt thiết kế:** 21/10/2026
 > **Trạng thái:** `APPROVED DESIGN / IMPLEMENTATION NOT STARTED`
 > **Phụ trách:** Thành viên 4 (Listings), nhóm trưởng (shared integration)
-> **Baseline kiểm tra:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b`
-> **Tài liệu:** `docs/architecture/phases/phase1d_gpu_listings.md` — bản thiết kế đã duyệt; chưa mặc định đã merge.
+> **Baseline thiết kế ban đầu:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b`
+> **Rà soát đồng bộ ngày 23/10/2026:** `main@538802adebeaeb74dcccd0c025f3a7abc81336c0` và handoff tại `ffb17de39d32956087aca187d490bb03c32ee980`; chỉ rà soát tài liệu, không xác nhận dependency đã sẵn sàng hay test ứng dụng đã chạy.
+> **Tài liệu:** [Phase 1D — GPU Listings Management](../../architecture/phases/phase1d_gpu_listings.md) — nguồn thiết kế chi tiết đã duyệt; trạng thái code/test được ghi riêng.
 > **Nguồn bắt buộc:** API Contract v0.6 §7; Database Design v0.4 §§9,11; Module Design; Test Design; Team Contribution Rules; Inter-Phase Change Control.
 
 ## 0. Mandatory Reading & Working Rules — BẮT BUỘC
@@ -59,6 +60,8 @@ Triển khai 6 Listings endpoints, server-side Worker ownership, Listing metadat
 | `GPU-004-E` | TV4 kiểm thử PostgreSQL/HTTP/UI | `API-LIST-01..18` phần khả thi, source-aware test oracles, test reports thật |
 | `GPU-004-F` | TV4 bàn giao + nhóm trưởng tích hợp | README/phase evidence, cross-phase ACK nếu có impact, PR có human review độc lập |
 
+**UI tối thiểu** theo Phase 1D §2.5: danh sách/chi tiết Listing, form tạo/sửa, pause/resume, phân trang và trạng thái loading/rỗng/lỗi theo role. Khi đang gửi thao tác, khóa nút tương ứng để tránh bấm lặp. Không tự động gửi lại `POST` tạo Listing khi chưa biết kết quả: API Contract §7.6 chưa có creation idempotency, nên cùng body gửi hai lần có thể tạo hai Listing.
+
 ## 3. Hợp đồng API và bất biến
 
 | Method | Path | Quyền / success |
@@ -72,6 +75,7 @@ Triển khai 6 Listings endpoints, server-side Worker ownership, Listing metadat
 
 - Response DTO giữ `worker.reputation`, `gpu_model`, `vram_gb`, `total_gpu_count`, `allocated_gpu_count`, `available_gpu_count`, `status`, `accepting_jobs`, giá mock `numeric(12,2)` biểu diễn string `"12.50"` hoặc null, timestamps UTC microsecond.
 - `available_gpu_count` là snapshot, **không phải** việc giữ chỗ hoặc guarantee Job scheduling.
+- API tạo Listing với `allocated_gpu_count=0`; sau khởi tạo, **Manager là writer duy nhất** cập nhật counter khi cấp phát/giải phóng GPU. Listing API chỉ sửa metadata/status và luôn bảo toàn `0 <= allocated_gpu_count <= total_gpu_count` theo API Contract §7.1 và Database Design `DB-INV-01`.
 - `status` chỉ `ACTIVE|PAUSED`; `accepting_jobs` chỉ dựa vào status. Pause không cancel QUEUED và không dừng RUNNING.
 - Create nhận `gpu_model`, `vram_gb`, `total_gpu_count`, optional `mock_price_per_hour`; PATCH cho phép đúng 4 field đó. Client không bao giờ ghi `worker_id`, `allocated_gpu_count`, `status` qua PATCH hay timestamps.
 - `TX-PAUSE-EDIT`: khóa `gpu_listings` **trước** Job. Đổi model/VRAM khi có QUEUED/RUNNING → 409; giảm total dưới allocated hoặc dưới yêu cầu lớn nhất QUEUED → 409; metadata/no-op xử lý theo API Contract.
@@ -91,7 +95,13 @@ backend/tests/, frontend/src/**/*.test.* — tests do TV4 chịu trách nhiệm 
 
 ## 5. Kiểm thử / nghiệm thu
 
-`P1D-AC-01..09` theo tài liệu chính. Bắt buộc chứng minh bằng PostgreSQL + API + UI thật: scopes, authenticated read, owner isolation, validation, capacity + hardware guard, pause/resume và regression của Foundation/Auth/DB. `API-LIST-13` phần pause-versus-submit chờ GPU-005, `API-LIST-14/15` phần Manager allocation/FIFO chờ Phase 2: ghi `BLOCKED`/`NOT_RUN`, không giả `PASS`.
+`P1D-AC-01..09` theo tài liệu chính. Bắt buộc chứng minh bằng PostgreSQL + API + UI thật: scopes, authenticated read, owner isolation, validation, capacity + hardware guard, pause/resume và regression của Foundation/Auth/DB.
+
+Phân tách dependency của race tests theo API Contract §7.10:
+
+- `API-LIST-13` nhánh pause-versus-submit và `API-LIST-15` nhánh capacity PATCH-versus-submit chờ GPU-005 (`TX-SUBMIT`).
+- `API-LIST-13` nhánh pause-versus-allocation, `API-LIST-14` resume/FIFO và `API-LIST-15` nhánh PATCH-versus-allocation chờ Phase 2 Manager (`TX-ALLOCATE`).
+- Ghi kết quả từng nhánh thực sự đã chạy; phần chưa sẵn sàng giữ `BLOCKED`/`NOT_RUN`. Không ghi toàn bộ test `PASS` khi mới chạy một nhánh hoặc dùng mock thay luồng submit/allocation thật.
 
 Evidence trong PR: commit SHA, DB revision, fixture IDs, HTTP requests/responses đã redacted, command, actual PASS/FAIL và CI link; độc lập với PASS của GPU-001.
 

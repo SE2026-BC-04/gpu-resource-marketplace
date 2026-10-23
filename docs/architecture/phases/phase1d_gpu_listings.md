@@ -1,13 +1,15 @@
 # Phase 1D — GPU Listings Management (GPU-004)
 
 > **Dự án:** GPU Resource Marketplace<br>
-> **Đường dẫn dự kiến:** `docs/architecture/phases/phase1d_gpu_listings.md`<br>
+> **Đường dẫn:** `docs/architecture/phases/phase1d_gpu_listings.md`<br>
 > **Ngày:** 21/10/2026<br>
 > **Owner:** Thành viên 4 — Listings / Registry<br>
-> **Trạng thái tài liệu:** `APPROVED DESIGN` — chủ dự án phê duyệt ngày 21/10/2026; chưa commit/merge tài liệu lên GitHub<br>
+> **Trạng thái tài liệu:** `APPROVED DESIGN` — chủ dự án phê duyệt ngày 21/10/2026; tài liệu đã có trong repository, trạng thái triển khai ghi riêng bên dưới<br>
 > **Trạng thái triển khai:** `PLANNED / NOT_IMPLEMENTED` — phê duyệt kiến trúc không đồng nghĩa tính năng đã có code<br>
-> **Baseline kiểm tra:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b` — GPU-001 đã merge; GPU-002 và GPU-003 mới được chủ dự án duyệt **thiết kế**, chưa merge code trên `main`.<br>
-> **Nguồn chuẩn:** [API Contract v0.6](../../design/api-contract.md) §7, [Database Design v0.4](../../design/database-design.md) §§9, 11, [Module Design](../../design/module-design.md) §§2–5, [Test Design](../../design/test-design.md), [Functional Requirements](../../functional-requirements.md) `FR-WR-01..04`, ADR-001/002/008 và [Team Contribution Rules](../../development/team-contribution-rules.md). Quy tắc mới: [Inter-Phase Change Control](../../development/interphase-change-control.md) (được owner chấp thuận nhưng chưa merge lên Git tại lúc lập draft).
+> **Baseline thiết kế ban đầu:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b` — GPU-001 đã merge; GPU-002 và GPU-003 mới được chủ dự án duyệt **thiết kế**, chưa merge code trên `main` tại mốc này.<br>
+> **Rà soát đồng bộ ngày 23/10/2026:** `main@538802adebeaeb74dcccd0c025f3a7abc81336c0` và handoff tại `ffb17de39d32956087aca187d490bb03c32ee980`; chỉ rà soát tài liệu, không xác nhận dependency đã sẵn sàng hay test ứng dụng đã chạy.<br>
+> **Handoff thực hiện:** [GPU-004 — Thành viên 4](../../development/handoffs/GPU-004_member4_handoff.md) — nhiệm vụ, ownership và checklist PR.<br>
+> **Nguồn chuẩn:** [API Contract v0.6](../../design/api-contract.md) §7, [Database Design v0.4](../../design/database-design.md) §§9, 11, [Module Design](../../design/module-design.md) §§2–5, [Test Design](../../design/test-design.md), [Functional Requirements](../../functional-requirements.md) `FR-WR-01..04`, ADR-001/002/008 và [Team Contribution Rules](../../development/team-contribution-rules.md). Quy trình phối hợp: [Inter-Phase Change Control](../../development/interphase-change-control.md).
 
 ## 1. MỤC TIÊU
 
@@ -47,11 +49,11 @@ flowchart LR
     REG --> UOW[GPU-002: repositories / UoW]
     UOW --> PG[(PostgreSQL: workers / gpu_listings / jobs / reputation)]
     JOB[GPU-005: future TX-SUBMIT] -.->|Same Listing lock + admission rules| PG
-    MAN[Phase 2 Manager] -.->|Future allocation_count writer| PG
-    SIM[Simulator] -.->|No direct DB access| PG
+    MAN[Phase 2 Manager] -.->|Future allocated_gpu_count writer| PG
+    SIM["Simulator: no direct DB access"]
 ```
 
-**Phân quyền ghi:** API Listings chỉ tạo Listing và sửa metadata/status; **Manager là writer duy nhất** của `allocated_gpu_count` khi Phase 2 được triển khai. `users`/`roles` và Worker profiles đã provisioned, không được sửa trong Listing routes. Queries của module không expose `worker_public_keys.public_key_raw`, mật khẩu, internal Bearer, `simulation_references` hoặc execution evidence.
+**Phân quyền ghi:** API tạo Listing với `allocated_gpu_count=0`, sau đó chỉ sửa metadata/status; **Manager là writer duy nhất** cập nhật counter khi cấp phát/giải phóng GPU trong Phase 2. Mọi thay đổi phải bảo toàn `0 <= allocated_gpu_count <= total_gpu_count` theo Database Design `DB-INV-01`. Simulator không có đường truy cập PostgreSQL theo ADR-002, nên sơ đồ không vẽ cạnh Simulator → DB. `users`/`roles` và Worker profiles đã provisioned, không được sửa trong Listing routes. Queries của module không expose `worker_public_keys.public_key_raw`, mật khẩu, internal Bearer, `simulation_references` hoặc execution evidence.
 
 ### 2.2. Bộ 6 endpoint cố định
 
@@ -135,6 +137,8 @@ frontend/src/
 
 Frontend tối thiểu: `CLIENT` duyệt catalogue ACTIVE/chi tiết; `WORKER` duyệt hoặc vào `mine`, tạo/chỉnh sửa/pause/resume Listing của mình; `ADMIN` dùng `all` read-only; loading, empty/error state, pagination. Không bổ sung dashboard nghiệp vụ, thanh toán, nút chạy GPU/Job hay frontend DB access. UI **không** tự quyết định quyền; Backend là authority. Sử dụng JWT volatile-memory từ GPU-003 (không localStorage/cookies/IndexedDB).
 
+Khi đang gửi thao tác, khóa nút tương ứng để tránh bấm lặp. Không tự động gửi lại `POST` tạo Listing khi chưa biết kết quả vì API Contract §7.6 chưa có creation idempotency; cùng body gửi hai lần có thể tạo hai Listing. Hướng dẫn này đồng bộ với GPU-004-D trong handoff.
+
 ## 3. NHIỆM VỤ, KIỂM THỬ VÀ KẾT QUẢ
 
 ### 3.1. Nhiệm vụ giao Thành viên 4 (đã duyệt về thiết kế)
@@ -164,7 +168,13 @@ Frontend tối thiểu: `CLIENT` duyệt catalogue ACTIVE/chi tiết; `WORKER` d
 | `P1D-AC-08` | Baseline regression: PostgreSQL migration, pytest/Vitest, React build, Docker Compose 5 services, network isolation | `NOT_RUN` |
 | `P1D-AC-09` | Mọi cross-phase impact thực tế có **source owner + affected owner ACK** và evidence; PR có human independent review | `NOT_RUN` |
 
-**Tách test Phase 1D vs Phase sau:** `API-LIST-10..12` có thể sử dụng **test fixtures** có Job `QUEUED/RUNNING` trong 10 bảng Phase 1B để kiểm tra guard, nhưng không có nghĩa Job Submit/Manager đã chạy thật. Với `API-LIST-13`, Phase 1E sẽ kiểm thử pause-versus-submit; với `API-LIST-14/15`, phần Manager allocate/FIFO thuộc Phase 2. Không đánh dấu PASS các bước chưa thực thi. Dữ liệu reference dùng trong fixture (nếu DB FK yêu cầu) chỉ là test-only compliant values, **không** được mô tả như thuật toán `DEC-P1-04` đã hoàn thành.
+**Tách test Phase 1D vs Phase sau:** `API-LIST-10..12` có thể sử dụng **test fixtures** có Job `QUEUED/RUNNING` trong 10 bảng Phase 1B để kiểm tra guard, nhưng không có nghĩa Job Submit/Manager đã chạy thật. Theo API Contract §7.10, dependency của race tests được tách như trong handoff:
+
+- `API-LIST-13` nhánh pause-versus-submit và `API-LIST-15` nhánh capacity PATCH-versus-submit chờ GPU-005 (`TX-SUBMIT`).
+- `API-LIST-13` nhánh pause-versus-allocation, `API-LIST-14` resume/FIFO và `API-LIST-15` nhánh PATCH-versus-allocation chờ Phase 2 Manager (`TX-ALLOCATE`).
+- Ghi kết quả từng nhánh thực sự đã chạy; phần chưa sẵn sàng giữ `BLOCKED`/`NOT_RUN`. Không ghi toàn bộ test `PASS` khi mới chạy một nhánh hoặc dùng mock thay luồng submit/allocation thật.
+
+Dữ liệu reference dùng trong fixture (nếu DB FK yêu cầu) chỉ là test-only compliant values, **không** được mô tả như thuật toán `DEC-P1-04` đã hoàn thành.
 
 ### 3.3. Inter-Phase Impact & Dual Acknowledgement — **BẮT BUỘC**
 
