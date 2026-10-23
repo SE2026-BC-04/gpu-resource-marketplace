@@ -4,8 +4,9 @@
 > **Ngày phê duyệt thiết kế:** 21/10/2026
 > **Trạng thái:** `APPROVED DESIGN / IMPLEMENTATION NOT STARTED`
 > **Phụ trách:** Thành viên 4 (Listings), nhóm trưởng (shared integration)
-> **Baseline kiểm tra:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b`
-> **Tài liệu:** `docs/architecture/phases/phase1d_gpu_listings.md` — bản thiết kế đã duyệt; chưa mặc định đã merge.
+> **Baseline thiết kế ban đầu:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b`
+> **Rà soát đồng bộ ngày 23/10/2026:** `main@538802adebeaeb74dcccd0c025f3a7abc81336c0` và handoff tại `ffb17de39d32956087aca187d490bb03c32ee980`; chỉ rà soát tài liệu, không xác nhận dependency đã sẵn sàng hay test ứng dụng đã chạy.
+> **Tài liệu:** [Phase 1D — GPU Listings Management](../../architecture/phases/phase1d_gpu_listings.md) — nguồn thiết kế chi tiết đã duyệt; trạng thái code/test được ghi riêng.
 > **Nguồn bắt buộc:** API Contract v0.6 §7; Database Design v0.4 §§9,11; Module Design; Test Design; Team Contribution Rules; Inter-Phase Change Control.
 
 ## 0. Mandatory Reading & Working Rules — BẮT BUỘC
