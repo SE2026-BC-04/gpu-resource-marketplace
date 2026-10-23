@@ -6,6 +6,7 @@
 > **Ngày soạn:** 23/10/2026<br>
 > **Baseline đã đọc:** `main@538802a` (so với baseline handoff `c90f540`: chỉ khác tài liệu/fixture, không khác code); rà lại trên `main@cceffbf` (PR #7 chỉ làm rõ Phase 1D/GPU-004 handoff: API tạo Listing với `allocated_gpu_count=0`, Manager là writer duy nhất của counter — khớp mục 3.6 và 6.2, không đổi matrix)<br>
 > **Trạng thái:** `PROPOSED / FOR LEAD REVIEW` — **không phải migration**, không có SQL đã chạy; mọi test `NOT_RUN`<br>
+> **Revision 2 (24/10/2026):** sửa theo technical review GPU-002-A (`CHANGES REQUESTED`: 2×P1, 2×P2) — xem mục 14. D1–D10 (và D11 mới) vẫn `PROPOSED` tới khi nhóm trưởng quyết định<br>
 > **Nguồn chuẩn:** [Database Design v0.4 §9, §11](../../design/database-design.md), [Phase 1B](phase1b_database_persistence.md), [GPU-002 handoff](../../development/handoffs/GPU-002_member2_handoff.md), [Module Design §5](../../design/module-design.md), [ADR-002](../decisions/ADR-002-postgresql-access-boundaries.md), [Phase 1C](phase1c_authentication_rbac.md), [Phase 1D](phase1d_gpu_listings.md), [Phase 1E](phase1e_job_submission_queue.md)
 
 ## 0. Mục đích, phạm vi và cách đọc
@@ -307,13 +308,21 @@ Nguyên tắc: **migration không chứa dữ liệu demo**; dữ liệu demo kh
 
 | Role | Loại | Tạo bởi | Dùng cho |
 |---|---|---|---|
-| `gpu_marketplace` (hiện có) | Owner / superuser | Image postgres | Chỉ migration và provisioning một lần; runtime **không** dùng |
-| `gpm_api_rw` | `NOLOGIN` group | Baseline migration (`CREATE ROLE` nếu chưa tồn tại) | Nhận grants của API |
-| `gpm_manager_rw` | `NOLOGIN` group | Baseline migration | Nhận grants của Manager |
-| `gpm_api_app` | `LOGIN`, member của `gpm_api_rw` | Init script của Compose (đọc mật khẩu từ `.env`) | DSN của service `api` |
-| `gpm_manager_app` | `LOGIN`, member của `gpm_manager_rw` | Init script của Compose | DSN của service `manager` |
+| `gpu_marketplace` (hiện có) | Owner / superuser | Image postgres | Chỉ bootstrap role, migration và provisioning; runtime **không** dùng |
+| `gpm_api_rw` | `NOLOGIN` group | **Bootstrap role (bước 0)** | Nhận grants của API |
+| `gpm_manager_rw` | `NOLOGIN` group | **Bootstrap role (bước 0)** | Nhận grants của Manager |
+| `gpm_api_app` | `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT`, member của `gpm_api_rw` | **Bootstrap role (bước 0)** | DSN của service `api` |
+| `gpm_manager_app` | Như trên, member của `gpm_manager_rw` | **Bootstrap role (bước 0)** | DSN của service `manager` |
 
-Lý do tách group/login: migration không được chứa mật khẩu; role là đối tượng **toàn cluster** nên migration chỉ `CREATE ROLE ... NOLOGIN` khi chưa có và **downgrade không `DROP ROLE`** (nhiều DB test dùng chung cluster). Init script `docker-entrypoint-initdb.d` chỉ chạy trên volume rỗng, nên volume dev hiện có cần một bước thủ công được ghi trong runbook. Mọi thay đổi `compose.yaml`/`.env.example` là shared infra, cần nhóm trưởng (D1).
+**Thứ tự khởi tạo (sửa theo review P1-1).** Revision 1 để migration tạo group role còn init script tạo login role và cấp membership; vì init script chạy **trước** migration trên volume rỗng, `GRANT gpm_api_rw TO gpm_api_app` sẽ lỗi do group chưa tồn tại. Revision 2 gom **toàn bộ** role vào một bước bootstrap duy nhất, chạy trước migration; migration không bao giờ tạo hay xóa role:
+
+| Bước | Ai chạy / bằng role nào | Làm gì | Điều kiện an toàn |
+|---|---|---|---|
+| 0. Bootstrap role | Owner. Hai đường gọi **cùng một script**: (a) `docker-entrypoint-initdb.d` khi volume rỗng; (b) lệnh chạy lại thủ công cho volume đã có dữ liệu hoặc khi đổi mật khẩu | Tạo 2 group `NOLOGIN` → tạo 2 login role → `GRANT` group cho login. Mỗi lệnh có kiểm tra `pg_roles` trước (idempotent); login role đã tồn tại thì chỉ `ALTER ROLE ... PASSWORD` | Mật khẩu lấy từ biến môi trường **chỉ của container `postgres`**, đưa vào SQL qua biến psql và `format('%L')`, không ghi vào file SQL, không echo. Script không đụng bảng nào |
+| 1. Migration | Owner (mục 9, D9) | Bước đầu tiên của baseline revision: kiểm tra `gpm_api_rw` và `gpm_manager_rw` tồn tại trong `pg_roles`; thiếu thì **dừng** với thông báo "chạy bootstrap role trước" (không tự tạo). Sau đó tạo bảng, trigger, rồi `GRANT` cho **group** | Không chứa mật khẩu, không tham chiếu login role |
+| 2. Runtime | `gpm_api_app` / `gpm_manager_app` | API/Manager kết nối bằng DSN riêng | Không service runtime nào nhận owner DSN |
+
+Hệ quả: (1) thứ tự phụ thuộc chỉ một chiều, bootstrap → migration; (2) migration downgrade chỉ `REVOKE` và xóa object, **không `DROP ROLE`** vì role là đối tượng toàn cluster dùng chung với DB test; (3) volume dev hiện có không chạy lại init script, nên runbook ghi lệnh (b) trước `alembic upgrade head`; (4) test fixture cũng gọi cùng script bootstrap trước migration, nên CI kiểm chứng đúng thứ tự này. Mọi thay đổi `compose.yaml`/`.env.example`/init script là shared infra, cần nhóm trưởng (D1).
 
 Thêm: `REVOKE ALL ON DATABASE ... FROM PUBLIC`, `GRANT CONNECT` cho hai group; `REVOKE EXECUTE` trên các trigger function khỏi `PUBLIC`; trigger function đặt `SET search_path = pg_catalog, public`.
 
@@ -350,7 +359,7 @@ Trigger là **defense in depth**, áp dụng cả cho owner. Owner/superuser v�
 
 | Trigger | Bảng / thời điểm | Quy tắc | Nguồn yêu cầu |
 |---|---|---|---|
-| `trg_jobs_guard_update` | `jobs` BEFORE UPDATE | (a) Job terminal (`COMPLETED`/`FAILED`/`CANCELLED`) không được UPDATE; (b) cột bất biến không đổi: `id, client_id, client_role, listing_id, worker_id, requested_gpu_count, duration_seconds, submitted_at, enqueue_seq, idempotency_key, request_sha256, correlation_id`; (c) chỉ cho cạnh `QUEUED→RUNNING`, `QUEUED→CANCELLED`, `RUNNING→COMPLETED`, `RUNNING→FAILED`; nếu `status` không đổi thì không cột nào được đổi; (d) nếu `current_user` thuộc `gpm_api_rw` thì **chỉ** `QUEUED→CANCELLED` | BR-05; §9.2-07 "never rewrite core Job identity"; §9.5.8; §11.5 "no API/Manager UPDATE grant bypassing lifecycle"; Module Design §5 |
+| `trg_jobs_guard_update` | `jobs` BEFORE UPDATE | (a) Job terminal (`COMPLETED`/`FAILED`/`CANCELLED`) không được UPDATE; (b) cột bất biến không đổi: `id, client_id, client_role, listing_id, worker_id, requested_gpu_count, duration_seconds, submitted_at, enqueue_seq, idempotency_key, request_sha256, correlation_id`; (c) chỉ cho cạnh `QUEUED→RUNNING`, `QUEUED→CANCELLED`, `RUNNING→COMPLETED`, `RUNNING→FAILED`; nếu `status` không đổi thì không cột nào được đổi; (d) ràng buộc cạnh theo loại caller (API/Manager/owner/không xác định) — xem bảng phân loại bên dưới | BR-05; §9.2-07 "never rewrite core Job identity"; §9.5.8; §11.5 "no API/Manager UPDATE grant bypassing lifecycle"; Module Design §5 |
 | `trg_jobs_guard_delete` | `jobs` BEFORE DELETE | Xem mục 8 | §9.3 safety barrier |
 | `trg_simulation_references_immutable` | `simulation_references` BEFORE UPDATE | Từ chối mọi UPDATE (DELETE chỉ qua cascade sau guard) | §9.2-08 "immutable truth record"; §9.5.8 |
 | `trg_audit_events_immutable` | `audit_events` BEFORE UPDATE | Từ chối mọi UPDATE | §9.2-18 "insert-only" |
@@ -367,12 +376,26 @@ IF NEW.status = OLD.status:
     IF NEW row IS DISTINCT FROM OLD row: REJECT 'job_update_without_transition'
     RETURN NEW
 IF (OLD.status, NEW.status) NOT IN legal edges: REJECT 'job_illegal_transition'
-IF current_user is member of gpm_api_rw AND NOT (QUEUED -> CANCELLED):
-    REJECT 'job_transition_not_owned_by_api'
-RETURN NEW
+caller = classify(current_user)          # xem bảng bên dưới
+IF caller = API     AND edge <> QUEUED -> CANCELLED:            REJECT 'job_transition_not_owned_by_api'
+IF caller = MANAGER AND edge NOT IN (QUEUED -> RUNNING,
+                                     RUNNING -> COMPLETED, RUNNING -> FAILED):
+                                                                REJECT 'job_transition_not_owned_by_manager'
+IF caller = UNKNOWN:                                            REJECT 'job_update_role_not_permitted'
+RETURN NEW                               # caller = OWNER_MAINTENANCE: chỉ qua (a)-(c)
 ```
 
-**Lưu ý triển khai (d):** `pg_has_role()` coi superuser là thành viên mọi role. Vì vậy kiểm tra membership cần đọc `pg_auth_members` trực tiếp, hoặc loại trừ superuser một cách tường minh. Phải có test cho cả `gpm_api_app` và owner.
+**Cách xác định caller (sửa theo review P2-3).** Function là `SECURITY INVOKER` (không dùng `SECURITY DEFINER`), nên `current_user` là role đang thực thi câu lệnh, kể cả sau `SET ROLE`. Membership được tính bằng truy vấn **đệ quy trên `pg_auth_members`** bắt đầu từ chính `current_user` (bao gồm trường hợp `current_user` là group), **không** dùng `pg_has_role()`/`is_member_of()` vì hai hàm này trả `true` cho superuser với mọi role:
+
+| Thứ tự xét | Điều kiện | Caller | Hành vi |
+|---|---|---|---|
+| 1 | Thuộc **cả** `gpm_api_rw` và `gpm_manager_rw` | — | Từ chối mọi UPDATE (`job_update_role_ambiguous`): cấu hình role sai |
+| 2 | Thuộc `gpm_api_rw` | `API` | Chỉ `QUEUED→CANCELLED` |
+| 3 | Thuộc `gpm_manager_rw` | `MANAGER` | Chỉ `QUEUED→RUNNING`, `RUNNING→COMPLETED`, `RUNNING→FAILED` (Phase 2 mới cấp grant UPDATE) |
+| 4 | Không thuộc group nào, và `rolsuper` hoặc là owner của DB | `OWNER_MAINTENANCE` | **Không** được miễn (a)–(c): Job terminal vẫn bất biến, cột định danh vẫn bất biến, chỉ đi theo cạnh hợp lệ. Chỉ bỏ ràng buộc "cạnh thuộc service nào" để phục vụ sửa dữ liệu có kiểm soát |
+| 5 | Mọi trường hợp còn lại | `UNKNOWN` | Từ chối (fail closed), kể cả khi role đó có grant UPDATE |
+
+**Giới hạn phải ghi nhận:** superuser có thể `ALTER TABLE ... DISABLE TRIGGER` hoặc `SET session_replication_role = replica` để bỏ qua trigger. Trigger không chặn được việc này; lớp bảo vệ thực sự là runtime **không bao giờ** chạy bằng superuser/owner (mục 6.2). Test ở GPU-002-D phải kiểm: `gpm_api_app` và `gpm_manager_app` có `rolsuper = false`, `rolreplication = false`, `rolbypassrls = false`; `gpm_api_app` đi `QUEUED→RUNNING` bị từ chối, `QUEUED→CANCELLED` được phép; owner sửa Job terminal hoặc đi `RUNNING→QUEUED` bị từ chối; một role thử nghiệm có grant UPDATE nhưng không thuộc group nào bị từ chối; `SET ROLE gpm_api_rw` vẫn được phân loại `API`.
 
 Không đề xuất trigger cho `roles`/`users`/`user_roles`/`workers`: runtime không có quyền ghi, provisioning chạy bằng owner.
 
@@ -400,11 +423,44 @@ RETURN OLD
 
 | Chủ đề | Đề xuất | Owner quyết định |
 |---|---|---|
-| Chạy migration ở Compose | `docker compose run --rm -e GPU_MARKETPLACE_DATABASE_URL=<owner DSN> api alembic upgrade head`. **Không** thêm service `migrate`: `tests/test_compose_topology.py` khóa đúng 5 services. **Không** tự migrate khi API khởi động (role API không có DDL; nhiều instance có thể race) | Nhóm trưởng (D9) |
+| Chạy migration ở Compose | Chạy tạm một container `api` bằng `docker compose run --rm` với lệnh `alembic upgrade head`, nhận owner DSN qua biến **riêng** `GPU_MARKETPLACE_MIGRATION_DATABASE_URL` theo mục 9.1 — **không** truyền giá trị DSN trên dòng lệnh. **Không** thêm service `migrate`: `tests/test_compose_topology.py` khóa đúng 5 services. **Không** tự migrate khi API khởi động (role API không có DDL; nhiều instance có thể race) | Nhóm trưởng (D9) |
 | PostgreSQL cho CI | Thêm `services: postgres` vào job `python` của `foundation.yml`, pin cùng image digest với `compose.yaml` (`postgres:16.15-bookworm@sha256:0ea6...`). Không thêm dependency mới (testcontainers…) | Nhóm trưởng (D8) |
-| An toàn DB test | Integration test chỉ đọc `GPU_MARKETPLACE_TEST_DATABASE_URL`; **từ chối chạy** nếu tên DB không kết thúc bằng `_test`. Fixture session drop/create DB test, chạy `alembic upgrade head`; dọn dữ liệu giữa test bằng `TRUNCATE` (owner) vì test race cần commit thật trên nhiều connection. Thiếu biến → test được skip và báo `NOT_RUN`, không PASS | TV2, review nhóm trưởng |
+| An toàn DB test | Integration test chỉ đọc `GPU_MARKETPLACE_TEST_DATABASE_URL` và phải qua **toàn bộ** hàng rào ở mục 9.2 trước mọi `DROP`/`CREATE`/`TRUNCATE`. Fixture session chạy bootstrap role → tạo DB test → `alembic upgrade head`; dọn dữ liệu giữa test bằng `TRUNCATE` (owner) vì test race cần commit thật trên nhiều connection. Thiếu biến → test được skip và báo `NOT_RUN`, không PASS | TV2, review nhóm trưởng (D11) |
 | Round-trip | `upgrade head` → kiểm tra catalog → `downgrade base` → `upgrade head` chỉ trên DB test (P1B-AC-08). Downgrade xóa trigger, function, bảng theo thứ tự ngược, `REVOKE`; **không** `DROP ROLE` | TV2 |
 | Drift ORM ↔ DB | (a) `alembic.autogenerate.compare_metadata` phải rỗng; (b) vì autogenerate không so CHECK/partial predicate đầy đủ, thêm test truy vấn `pg_constraint`/`pg_indexes`/`information_schema` so với danh sách tên ở mục 2 | TV2 |
+
+### 9.1. Cấp owner DSN cho migration mà không lộ credential (sửa theo review P2-4)
+
+Revision 1 hướng dẫn `-e GPU_MARKETPLACE_DATABASE_URL=<owner DSN>` trên dòng lệnh. Cách đó để mật khẩu owner lọt vào shell history, danh sách tiến trình của máy host và log CI; đồng thời dùng chung tên biến với DSN runtime nên dễ cấu hình nhầm service `api` chạy bằng owner. Revision 2 đề xuất:
+
+| Quy tắc | Nội dung |
+|---|---|
+| Biến riêng | Migration chỉ đọc `GPU_MARKETPLACE_MIGRATION_DATABASE_URL`. `migrations/env.py` **không fallback** sang DSN runtime: thiếu biến thì dừng với thông báo không chứa URL. Role runtime không có DDL nên fallback cũng không chạy được, chỉ gây lỗi khó hiểu |
+| Không đưa giá trị lên dòng lệnh | Giá trị nằm trong `.env` (đã được `.gitignore`) hoặc secret của CI. Khi chạy, chỉ truyền **tên** biến (`docker compose run --rm -e GPU_MARKETPLACE_MIGRATION_DATABASE_URL api alembic upgrade head`) để Compose lấy giá trị từ môi trường của shell; hoặc chạy Alembic từ host qua cổng loopback với biến đã nạp từ `.env` |
+| Không gắn vào service thường trực | `compose.yaml` **không** khai báo biến migration trong `environment` của `api`/`manager`, nên container thường trực không bao giờ giữ owner DSN. Container migration dùng `--rm` |
+| Không in ra | `env.py` và mọi tool không log URL; lỗi kết nối chỉ ghi tên exception (giống `tools/compose_smoke.py`). `alembic.ini` giữ `sqlalchemy.url` rỗng |
+| Tách credential | Owner DSN ≠ DSN runtime ≠ mật khẩu login role ≠ secret JWT/service token. `.env.example` chỉ chứa giá trị dev giả, có ghi chú phải thay |
+| CI | Postgres service của CI dùng mật khẩu tạm của job, nạp từ secret hoặc sinh trong job; không log `env` |
+
+Phạm vi file: `migrations/env.py` thuộc TV2; `compose.yaml`, `.env.example`, `.github/workflows/foundation.yml` là shared infra (D1, D8, D9).
+
+### 9.2. Hàng rào bảo vệ DB test trước `DROP`/`CREATE` (sửa theo review P1-2)
+
+Chỉ kiểm hậu tố `_test` là chưa đủ: một DB dev hoặc DB của người khác vẫn có thể trùng tên, và cấu hình nhầm có thể trỏ test vào cluster dùng chung. Fixture phải qua **tất cả** điều kiện dưới đây; vi phạm bất kỳ điều nào thì **abort cả test session** (không skip lặng lẽ, không chạy tiếp):
+
+| # | Hàng rào | Chặn được gì |
+|---|---|---|
+| G1 | Opt-in tường minh: biến `GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS=1` phải được đặt. Không có biến này thì test DB báo `NOT_RUN` | Chạy nhầm khi chỉ có `TEST_DATABASE_URL` sót lại trong môi trường |
+| G2 | Tên DB khớp **toàn bộ** mẫu `^gpu_marketplace_test(_[a-z0-9]{1,16})?$`; không chỉ kiểm hậu tố. Danh sách cấm cứng: `postgres`, `template0`, `template1`, `gpu_marketplace` | Tên tùy ý như `prod_test`, `x_test` |
+| G3 | Host phải là loopback (`localhost`, `127.0.0.1`, `::1`) | Trỏ nhầm sang server dùng chung/từ xa |
+| G4 | So với `GPU_MARKETPLACE_DATABASE_URL` và `GPU_MARKETPLACE_MIGRATION_DATABASE_URL` (nếu có): cùng host + port + tên DB thì từ chối | Test dùng nhầm DB dev đang chạy |
+| G5 | `DROP`/`CREATE` chạy trên connection tới DB bảo trì `postgres`, không bao giờ `DROP` DB của chính connection hiện tại; dùng tên DB đã qua G2 và quote bằng identifier, không ghép chuỗi | SQL injection qua tên DB; drop nhầm DB khác |
+| G6 | **Marker sở hữu:** ngay sau `CREATE DATABASE`, đặt `COMMENT ON DATABASE <tên> IS 'gpu-marketplace-disposable-test-db'`. Trước khi `DROP` một DB đã tồn tại, phải đọc được đúng marker này qua `pg_shdescription`; không có marker thì **từ chối drop** và yêu cầu người dùng xử lý thủ công. Marker là comment, không phải bảng, nên không làm sai yêu cầu đúng 10 bảng | DB trùng tên nhưng không do test tạo ra |
+| G7 | Trước `DROP`, kiểm `pg_stat_activity`: nếu còn connection tới DB đó mà `application_name` khác `gpm-pytest` thì từ chối. Mọi connection của test đặt `application_name=gpm-pytest`. Không dùng `DROP DATABASE ... WITH (FORCE)` | Drop DB đang có người/khác tiến trình dùng |
+| G8 | `TRUNCATE` giữa các test chỉ chạy khi `current_database()` khớp G2 **và** marker G6 có mặt (kiểm lại mỗi lần, không cache) | `search_path`/connection bị đổi giữa chừng |
+| G9 | Test không gọi `docker compose down -v`, không đụng volume `postgres-data`, không `DROP ROLE`. Downgrade migration chỉ chạy trong DB test đã qua G1–G6 | Mất dữ liệu dev; xóa role dùng chung cluster |
+
+Kiểm chứng bằng unit test **không cần PostgreSQL**: từng hàng rào G1–G4 có một ca vi phạm phải abort; G5–G8 kiểm trên DB test thật ở GPU-002-D (ví dụ tạo sẵn một DB trùng tên mà không có marker → fixture từ chối drop).
 
 ## 10. Truy vết tới tiêu chí nghiệm thu
 
@@ -429,16 +485,17 @@ RETURN OLD
 
 | ID | Câu hỏi | Đề xuất của TV2 | Mức |
 |---|---|---|---|
-| D1 | Tách DB role cho API/Manager ngay Phase 1B hay hoãn? | **Ngay Phase 1B**: group role trong migration, login role qua init script; sửa `compose.yaml`/`.env.example` (shared infra) | L2 |
-| D2 | `trg_jobs_guard_update` có ràng buộc theo role (API chỉ `QUEUED→CANCELLED`)? | **Có** — column grant không chặn được API ghi `RUNNING` | L2 |
+| D1 | Tách DB role cho API/Manager ngay Phase 1B hay hoãn? | **Ngay Phase 1B**: một script bootstrap tạo cả group và login role, chạy trước migration (init script khi volume rỗng + lệnh chạy lại cho volume cũ); migration chỉ kiểm tra group tồn tại và GRANT (mục 6.2); sửa `compose.yaml`/`.env.example` (shared infra) | L2 |
+| D2 | `trg_jobs_guard_update` có ràng buộc theo role? | **Có** — phân loại caller bằng `pg_auth_members` đệ quy, không dùng `pg_has_role()`; API chỉ `QUEUED→CANCELLED`, Manager chỉ cạnh của mình, owner/superuser vẫn bị (a)–(c), role lạ bị từ chối (mục 7) | L2 |
 | D3 | Guarded delete Phase 1B = trigger terminal + 23 ngày, mở rộng ở Phase 3? | **Có** | L2 |
 | D4 | Partial unique một key active/Worker (§9.2 ghi "Proposed policy")? | **Tạo** — nằm trong §9 đã duyệt, chặn nhập nhằng khi verify | L1 nếu xác nhận là đã duyệt |
 | D5 | Constraint trigger `DEFERRABLE INITIALLY DEFERRED` bắt buộc mỗi Job có đúng một reference khi commit? | **Không ở Phase 1B**; để TV5 + nhóm trưởng quyết định cùng spec `DEC-P1-04` | L2 nếu thêm |
 | D6 | Default thời gian `clock_timestamp()` thay vì `now()`? | `clock_timestamp()` — nhất quán với quy ước trusted clock §9.1 | L1 |
 | D7 | `updated_at` do trigger đặt thay vì caller truyền? | **Trigger** — caller không backdate được, grants không cần cột này | L1 |
 | D8 | PostgreSQL service trong CI `foundation.yml`? | **Có**, cùng image digest | L1 (shared infra) |
-| D9 | Cách chạy migration trong Compose? | `docker compose run --rm ... api alembic upgrade head` bằng owner DSN | L1 (shared infra) |
+| D9 | Cách chạy migration trong Compose? | `docker compose run --rm` container `api` chạy `alembic upgrade head`; owner DSN qua biến riêng `GPU_MARKETPLACE_MIGRATION_DATABASE_URL`, chỉ truyền tên biến, không fallback, không gắn vào service thường trực (mục 9.1) | L1 (shared infra) |
 | D10 | Mã lỗi trigger: SQLSTATE 23000 + `CONSTRAINT` name? | **Có** | L1 |
+| D11 | Chính sách bảo vệ DB test trước `DROP`/`CREATE`/`TRUNCATE`? | Hàng rào G1–G9: opt-in tường minh, tên khớp toàn bộ mẫu, chỉ loopback, khác DSN dev/migration, marker comment do test tạo, kiểm connection khác, abort session khi vi phạm (mục 9.2) | L1 (an toàn dữ liệu; nhóm trưởng xác nhận) |
 
 ## 12. Mâu thuẫn và điểm mơ hồ phát hiện khi đối chiếu
 
@@ -454,15 +511,28 @@ RETURN OLD
 ## 13. Inter-Phase Impact Review — XPH-GPU-002-01
 
 - Source phase / owner: GPU-002 / Thành viên 2
-- Changed file(s), base SHA → target SHA: thêm `docs/architecture/phases/phase1b_gpu002a_schema_matrix.md` trên `main@cceffbf` (branch `docs/gpu-002-a-schema-matrix`)
-- Changed contract/assumption (before → after): chưa có schema thực → **đề xuất** tên constraint (contract ánh xạ lỗi), column-level grants, trigger lifecycle/guarded delete, role DB tách cho API/Manager
-- Classification: `POTENTIAL_IMPACT` (tài liệu đề xuất; thành `CONFIRMED_IMPACT` khi D1–D10 được quyết định)
-- Affected phase(s), owner(s): GPU-003/Thành viên 3 (grants `users`, provisioning chạy bằng owner); GPU-004/Thành viên 4 (column grants Listing, `allocated_gpu_count` không ghi được từ API, trigger `updated_at`); GPU-005/Thành viên 5 (INSERT `jobs` không có `status`, `simulation_references` không RETURNING/SELECT, tên `uq_jobs_client_idempotency`, D5); nhóm trưởng (Compose DSN, init script, CI postgres service, cách chạy migration)
-- Impact: schema/permissions/migration/CI/test
-- Required updates / responsible person / deadline: nhóm trưởng quyết định D1–D10; TV3/4/5 rà soát grants và tên constraint; hạn: trước khi bắt đầu `GPU-002-B`
-- Verification: chưa có; mọi test `NOT_RUN`
-- Source owner acknowledgement: Thành viên 2 — `PENDING` (sau khi gửi bản này)
+- Changed file(s), base SHA → target SHA: thêm `docs/architecture/phases/phase1b_gpu002a_schema_matrix.md` trên `main@cceffbf` (branch `docs/gpu-002-a-schema-matrix`, PR #9). Revision 1 = commit `903c5c2`; revision 2 = commit kế tiếp trên cùng branch, sửa theo technical review ngày 24/10/2026
+- Changed contract/assumption (before → after): chưa có schema thực → **đề xuất** tên constraint (contract ánh xạ lỗi), column-level grants, trigger lifecycle/guarded delete, role DB tách cho API/Manager. **Revision 2 thêm:** role tạo ở bước bootstrap trước migration (không còn trong migration); trigger phân loại caller API/Manager/owner/unknown, Manager bị giới hạn cạnh của mình; owner DSN đổi sang biến riêng `GPU_MARKETPLACE_MIGRATION_DATABASE_URL`; hàng rào DB test G1–G9 với biến opt-in mới
+- Classification: `POTENTIAL_IMPACT` (tài liệu đề xuất; thành `CONFIRMED_IMPACT` khi D1–D11 được quyết định)
+- Affected phase(s), owner(s): GPU-003/Thành viên 3 (grants `users`, provisioning chạy bằng owner DSN theo mục 9.1); GPU-004/Thành viên 4 (column grants Listing, `allocated_gpu_count` không ghi được từ API, trigger `updated_at`, hàng rào DB test nếu dùng chung fixture); GPU-005/Thành viên 5 (INSERT `jobs` không có `status`, `simulation_references` không RETURNING/SELECT, tên `uq_jobs_client_idempotency`, D5, API chỉ được `QUEUED→CANCELLED`); nhóm trưởng (script bootstrap role + init script, Compose DSN, biến migration riêng, `.env.example`, CI postgres service, cách chạy migration, biến opt-in test); owner Phase 2 khi được giao (Manager chỉ được cạnh `QUEUED→RUNNING`, `RUNNING→COMPLETED/FAILED`)
+- Impact: schema/permissions/migration/CI/test/config
+- Required updates / responsible person / deadline: nhóm trưởng quyết định D1–D11; TV3/4/5 rà soát grants, tên constraint, phân loại caller và fixture test; hạn: trước khi bắt đầu `GPU-002-B`
+- Verification: chưa có; mọi test `NOT_RUN`. Technical review revision 1: `CHANGES REQUESTED` (24/10/2026); revision 2 chờ review lại
+- Source owner acknowledgement: Thành viên 2 — `PENDING` (sau khi gửi revision 2)
 - Consumer owner acknowledgement(s): Thành viên 3 / 4 / 5 — `PENDING`
-- Leader coordination: `PENDING`
+- Leader coordination: `PENDING` (đang review lại revision 2)
 - Gate status: `AWAITING_CROSS_PHASE_ACK`
 - Linked change-control record (L2/L3, nếu có): cần tạo cho D1, D2, D3 (và D5 nếu thêm)
+
+## 14. Phản hồi technical review — revision 2 (24/10/2026)
+
+Review revision 1: **CHANGES REQUESTED / NOT APPROVED FOR MERGE**. Schema matrix 10 bảng được đánh giá cơ bản phù hợp Database Design; 4 điểm cần sửa:
+
+| # | Mức | Yêu cầu review | Đã sửa ở đâu | Tóm tắt thay đổi |
+|---|---|---|---|---|
+| R1 | P1 | Thiết kế lại thứ tự khởi tạo group role và login role; init script không được phụ thuộc role chỉ tạo trong migration chạy sau | Mục 6.2, D1 | Một script bootstrap idempotent tạo cả group và login role, chạy **trước** migration qua init script (volume rỗng) hoặc lệnh chạy lại (volume cũ). Migration chỉ kiểm tra group tồn tại rồi GRANT; không tạo/xóa role |
+| R2 | P1 | Bảo vệ DB test khi DROP/CREATE, không chỉ dựa vào hậu tố `_test` | Mục 9 (hàng "An toàn DB test"), 9.2, D11 | 9 hàng rào G1–G9: opt-in tường minh, khớp toàn bộ mẫu tên + danh sách cấm, chỉ loopback, khác DSN dev/migration, DROP/CREATE từ DB bảo trì, marker comment sở hữu, kiểm connection khác, kiểm lại trước TRUNCATE, không đụng volume/role |
+| R3 | P2 | Làm rõ cách kiểm tra quyền trong `trg_jobs_guard_update`, đặc biệt với superuser | Mục 7, D2 | Phân loại caller bằng `pg_auth_members` đệ quy từ `current_user` (`SECURITY INVOKER`), không dùng `pg_has_role()`. Superuser/owner không được miễn quy tắc (a)–(c); role lạ bị từ chối; ghi rõ giới hạn `DISABLE TRIGGER`/`session_replication_role` và các test bắt buộc |
+| R4 | P2 | Điều chỉnh hướng dẫn cấp owner DSN khi chạy migration để tránh lộ credential | Mục 9 (hàng "Chạy migration"), 9.1, D9 | Biến riêng `GPU_MARKETPLACE_MIGRATION_DATABASE_URL`, chỉ truyền tên biến, không fallback sang DSN runtime, không gắn vào service thường trực, không log URL |
+
+D1–D11 vẫn ở trạng thái `PROPOSED` cho đến khi có quyết định của nhóm trưởng. Revision này không thêm bảng, cột, service hay role nghiệp vụ; biến môi trường mới (`GPU_MARKETPLACE_MIGRATION_DATABASE_URL`, `GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS`) và hai login role DB là đề xuất cấu hình chờ D1/D9/D11.
