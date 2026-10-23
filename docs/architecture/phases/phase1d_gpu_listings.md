@@ -8,6 +8,7 @@
 > **Trạng thái triển khai:** `PLANNED / NOT_IMPLEMENTED` — phê duyệt kiến trúc không đồng nghĩa tính năng đã có code<br>
 > **Baseline thiết kế ban đầu:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b` — GPU-001 đã merge; GPU-002 và GPU-003 mới được chủ dự án duyệt **thiết kế**, chưa merge code trên `main` tại mốc này.<br>
 > **Rà soát đồng bộ ngày 23/10/2026:** `main@538802adebeaeb74dcccd0c025f3a7abc81336c0` và handoff tại `ffb17de39d32956087aca187d490bb03c32ee980`; chỉ rà soát tài liệu, không xác nhận dependency đã sẵn sàng hay test ứng dụng đã chạy.<br>
+> **Đối chiếu các Phase trước ngày 24/10/2026:** `main@21071549937888c997b250625607a16a97a20419` (PR #7, #9, #10 đã merge); đã đọc Foundation, Phase 1B, schema matrix GPU-002-A revision 3 và Phase 1C cập nhật. Matrix vẫn `PROPOSED / FOR LEAD REVIEW`; không coi tài liệu đã merge là quyết định duyệt D1–D12 hoặc evidence triển khai.<br>
 > **Handoff thực hiện:** [GPU-004 — Thành viên 4](../../development/handoffs/GPU-004_member4_handoff.md) — nhiệm vụ, ownership và checklist PR.<br>
 > **Nguồn chuẩn:** [API Contract v0.6](../../design/api-contract.md) §7, [Database Design v0.4](../../design/database-design.md) §§9, 11, [Module Design](../../design/module-design.md) §§2–5, [Test Design](../../design/test-design.md), [Functional Requirements](../../functional-requirements.md) `FR-WR-01..04`, ADR-001/002/008 và [Team Contribution Rules](../../development/team-contribution-rules.md). Quy trình phối hợp: [Inter-Phase Change Control](../../development/interphase-change-control.md).
 
@@ -37,8 +38,8 @@ Không triển khai Worker public signup/onboarding/key provisioning, Job submis
 | Nguồn | Đã có / thiết kế đã duyệt | Phase 1D sử dụng hoặc bổ sung |
 |---|---|---|
 | GPU-001 — Foundation (`IMPLEMENTED`) | FastAPI app/health, frontend skeleton, PostgreSQL service, shared backend, CI/Compose; 5 services | Tích hợp router/UI vào app hiện hữu; không thay đổi runtime topology |
-| GPU-002 — Database (`APPROVED DESIGN`, chưa merged) | `workers`, `gpu_listings`, `jobs`, `worker_reputation_aggregates`, UoW/repositories, constraints | Read/insert/update Listing; truy vấn role-safe ownership và queued/nonterminal Jobs trong transaction |
-| GPU-003 — Authentication (`APPROVED DESIGN`, chưa merged) | `AuthenticatedPrincipal`, HS256 JWT, role guard, Login UI và frontend volatile session | Áp dụng `WORKER` mutation guards; bảo vệ GET dành cho user đã đăng nhập; tái sử dụng Auth API client |
+| GPU-002 — Database (thiết kế đã có trên Git; code `NOT_IMPLEMENTED`) | Thiết kế 10 bảng Phase 1B, gồm `workers`, `gpu_listings`, `jobs`, `worker_reputation_aggregates`; UoW/repositories vẫn cần hiện thực. Matrix GPU-002-A có các đề xuất D1–D12 chưa được quyết định | Dùng migration/repository thực sau khi bàn giao; đọc Job để kiểm tra guard, không tự tạo schema hoặc triển khai nghiệp vụ Job |
+| GPU-003 — Authentication (thiết kế đã có trên Git; code `NOT_IMPLEMENTED`) | Thiết kế `AuthenticatedPrincipal`, HS256 JWT, role guard, Login UI và frontend volatile session; còn gate đồng bộ Auth contract và provisioning | Nhận principal/guard và Auth client thực; kiểm tra role/account hiện hành, rồi resolve Worker và kiểm tra Listing ownership trong GPU-004 |
 | GPU-004 — **MỚI** (`PLANNED`) | Chưa có nghiệp vụ Listing trên `main`; `listings/` mới có stub | Registry use cases, routes, DTO, Listing UI, tests và handoff GPU-005 |
 
 ```mermaid
@@ -54,6 +55,18 @@ flowchart LR
 ```
 
 **Phân quyền ghi:** API tạo Listing với `allocated_gpu_count=0`, sau đó chỉ sửa metadata/status; **Manager là writer duy nhất** cập nhật counter khi cấp phát/giải phóng GPU trong Phase 2. Mọi thay đổi phải bảo toàn `0 <= allocated_gpu_count <= total_gpu_count` theo Database Design `DB-INV-01`. Simulator không có đường truy cập PostgreSQL theo ADR-002, nên sơ đồ không vẽ cạnh Simulator → DB. `users`/`roles` và Worker profiles đã provisioned, không được sửa trong Listing routes. Queries của module không expose `worker_public_keys.public_key_raw`, mật khẩu, internal Bearer, `simulation_references` hoặc execution evidence.
+
+**Đầu vào cần nhận từ các Phase trước:** [Foundation §§2–4,7](phase1_project_foundation.md), [Phase 1B §§3.2–3.4,6](phase1b_database_persistence.md), [schema matrix GPU-002-A revision 3](phase1b_gpu002a_schema_matrix.md) và [Phase 1C §§2.5–2.6,5.3–5.4](phase1c_authentication_rbac.md). Các dòng `PROPOSAL` dưới đây chỉ mô tả ảnh hưởng nếu được duyệt; không chốt thay quyết định của TV2/TV3/nhóm trưởng.
+
+| Đầu vào / chủ sở hữu | Cách GPU-004 sử dụng | Trạng thái cần phân biệt |
+|---|---|---|
+| Foundation / nhóm trưởng | Giữ 5 services, health/CORS và network isolation; nhóm trưởng tích hợp `api/app.py`/shared UI. Không thêm service migration hoặc tự migrate khi API khởi động | Foundation đã triển khai; thay shared config cần owner review |
+| Dữ liệu / TV2 | Dùng `workers.user_id` để resolve owner; giữ `gpu_listings.worker_id` bất biến và composite FK `jobs(listing_id,worker_id)`. Chỉ đọc `jobs` và reputation projection; không ghi Job/reference/reputation từ Listing use case | `SPEC` của Database/Module Design; code/repository chưa bàn giao |
+| Listing INSERT/UPDATE / TV2 | Nếu grants ở matrix §6.3 được duyệt: INSERT chỉ `worker_id`, `gpu_model`, `vram_gb`, `total_gpu_count`, `mock_price_per_hour`; `id`, `status=ACTIVE`, `allocated_gpu_count=0`, timestamps lấy từ DB defaults. UPDATE chỉ metadata/status theo endpoint, không gửi toàn bộ ORM row | `PROPOSAL` (D1); khởi tạo counter bằng default không phải quyền API sửa allocation |
+| DB clock, trigger và lỗi / TV2 | Nếu D7 được duyệt, `updated_at` do trigger đặt; repository không UPDATE cột này. GPU-004 dùng typed errors theo contract repository đã bàn giao, không parse message của driver; tên constraint/mã lỗi cụ thể phải được TV2 chốt | Tên constraint là `IMPL` đang trình review; D7/D10 vẫn chờ quyết định. Trigger không thay `TX-PAUSE-EDIT` và các guard liên quan Job |
+| Principal/Auth client / TV3 | Nhận `AuthenticatedPrincipal(user_id, role, status=ACTIVE)` từ token hợp lệ + DB role/account hiện hành trên mỗi request; sau đó GPU-004 resolve `workers.id` và kiểm tra ownership. Dùng lại volatile session/Bearer client, xóa auth state khi hết hạn/401 theo GPU-003 | Contract khái niệm đã có; chữ ký interface thực cần bàn giao. Không tự viết JWT codec, login normalization hoặc provisioning trong Listings |
+
+**Gate trước tích hợp:** cần revision migration/UoW/repository của GPU-002 và principal/Auth client của GPU-003 có evidence thật. Phase 1C ghi `DEC-P1-03` đã được owner duyệt nhưng API Contract §4.5/§14.3 vẫn còn nhãn `NEEDS_OWNER_DECISION`; GPU-003-A phải đồng bộ qua review trước phần code phụ thuộc. Hash/password provisioning và credential provisioning vẫn cần TV2/TV3/nhóm trưởng chốt; GPU-004 không tự đặt tên biến owner DSN hay tạo account/profile. Có thể soạn policy/DTO/UI với doubles trên branch riêng, nhưng tích hợp PostgreSQL/Auth thật còn `BLOCKED/NOT_RUN` khi các gate này chưa sẵn sàng.
 
 ### 2.2. Bộ 6 endpoint cố định
 
@@ -117,7 +130,7 @@ Dùng PostgreSQL `READ COMMITTED` và row-level locks như Database Design §11.
 3. **Hardware edit:** nếu giá trị `gpu_model` hoặc `vram_gb` thực sự thay đổi, từ chối khi bất kỳ Job của Listing còn `QUEUED` hoặc `RUNNING`: `409 LISTING_HARDWARE_LOCKED`; no-op cùng giá trị được chấp nhận.
 4. **Giảm capacity:** yêu cầu new total `>= allocated_gpu_count` và `>= MAX(requested_gpu_count)` của mọi Job `QUEUED`. Nếu cả hai fail, ưu tiên `409 LISTING_CAPACITY_BELOW_ALLOCATED`; nếu riêng queued max fail → `409 LISTING_CAPACITY_BELOW_QUEUED_MAX`. Không dùng snapshot UI để phán quyết.
 5. **Pause:** đổi ACTIVE sang PAUSED hoặc no-op; Job RUNNING tiếp tục, QUEUED giữ hàng đợi; submit/allocate lấy lock **sau commit pause** phải bị chặn bởi chính use case sở hữu tương ứng. **Resume:** đổi PAUSED sang ACTIVE hoặc no-op; không tự allocate.
-6. Commit metadata/status trong một transaction, cập nhật `updated_at` bằng trusted DB time khi có thay đổi. Rollback giữ nguyên tất cả cột nếu một điều kiện fail.
+6. Commit metadata/status trong một transaction; `updated_at` phản ánh trusted DB time khi có thay đổi, qua cơ chế do GPU-002 bàn giao. Nếu D7 được duyệt thì trigger đặt timestamp, API không UPDATE cột này. No-op pause/resume có thể trả DTO mà không phát UPDATE. Rollback giữ nguyên tất cả cột nếu một điều kiện fail.
 
 **Concurrency boundary:** cả GPU-005 `TX-SUBMIT` và Phase 2 Manager `TX-ALLOCATE` phải dùng **cùng Listing lock trước Job**. Hai PATCH metadata hợp lệ thực hiện nối tiếp; last-committed value wins đối với field cùng tên (không có ETag/version column trong thiết kế duyệt). Không thêm column mới để giải quyết lost-update mà chưa có change control.
 
@@ -176,6 +189,10 @@ Khi đang gửi thao tác, khóa nút tương ứng để tránh bấm lặp. Kh
 
 Dữ liệu reference dùng trong fixture (nếu DB FK yêu cầu) chỉ là test-only compliant values, **không** được mô tả như thuật toán `DEC-P1-04` đã hoàn thành.
 
+**Fixture và quyền DB:** dùng lại fixture/UoW của GPU-002; dữ liệu account/profile, Job `QUEUED/RUNNING`, allocated count hoặc reputation phục vụ test do harness có quyền phù hợp dựng trong môi trường test, không thông qua quyền Listing API và không cần hiện thực scheduler/oracle generator. Seed account bằng mật khẩu vẫn chờ thuật toán hash và provisioning được duyệt. Khi D1 được duyệt, request API cần chạy với role runtime giới hạn (`gpm_api_app` theo đề xuất), không dùng owner DSN để làm test API xanh; kiểm tra riêng Listing lock hoạt động và API không ghi counter/Job/reputation. Ở Phase 1B, Manager chưa có quyền ghi allocation.
+
+**Môi trường test kế thừa — đề xuất chờ D11/D12:** theo matrix GPU-002-A §§9.2–9.3 và Phase 1C §4.2, dùng chung harness PostgreSQL của GPU-002 trên cluster tạm riêng. Các tên `GPU_MARKETPLACE_TEST_DATABASE_URL`, `GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS=1`, `GPU_MARKETPLACE_TEST_CLUSTER_TOKEN` và hàng rào C1–C5/G1–G9 là đề xuất chưa duyệt; không tạo harness/config song song ở GPU-004 hoặc fallback sang DB/volume Compose dev. Thiếu môi trường đủ điều kiện thì ghi `NOT_RUN/BLOCKED`; có cấu hình nhưng vi phạm hàng rào thì dừng test session theo thiết kế nguồn, không bỏ qua kiểm tra.
+
 ### 3.3. Inter-Phase Impact & Dual Acknowledgement — **BẮT BUỘC**
 
 **Quy trình:** theo [Inter-Phase Change Control](../../development/interphase-change-control.md). Áp dụng ngay cả khi sửa file `.md`, không đợi thay code. `NO_IMPACT` cho chỉnh sửa thuần trình bày có lý do; `POTENTIAL_IMPACT` phải cảnh báo và chờ làm rõ; `CONFIRMED_IMPACT` yêu cầu **hai phía xác nhận** và hoàn tất remediation/tests trước merge hoặc dùng baseline. Chưa ACK hay conflict → `BLOCKED_INTERPHASE`. Independent human reviewer/CR L0–L3 vẫn bắt buộc riêng, không được tính một trong các ACK thay cho PR review.
@@ -188,7 +205,9 @@ Dữ liệu reference dùng trong fixture (nếu DB FK yêu cầu) chỉ là tes
 | GPU-004 Listing DTO, `ACTIVE/PAUSED`, accepting_jobs, capacity & ownership | TV4 ↔ TV5 (GPU-005) | Thay hợp đồng mà Job Submit phải dùng; thông báo trước khi TV5 dựa vào revision mới |
 | GPU-004 semantics cho Manager future allocation | TV4 ↔ owner Phase 2 **khi được giao** | Có diff thực sự tác động scheduler; không tự dựng người xác nhận |
 
-**Trạng thái tại thời điểm lập tài liệu:** `NO_CHANGE_ASSESSED` (chưa có diff implementation/contract Phase 1D nào để hai bên đối chiếu); **chưa có ACK thực tế**. Mọi `XPH-GPU-004-nn` chỉ được mở khi có thay đổi thật; chủ dự án phê duyệt *quy trình* không đồng nghĩa xác nhận một diff cụ thể. GPU-002/003 chưa merge nên không được tự khẳng định compatibility với code chưa tồn tại.
+**Trạng thái tại thời điểm lập tài liệu:** `NO_CHANGE_ASSESSED` (chưa có diff implementation/contract Phase 1D nào để hai bên đối chiếu); **chưa có ACK thực tế**. Mọi `XPH-GPU-004-nn` chỉ được mở khi có thay đổi thật; chủ dự án phê duyệt *quy trình* không đồng nghĩa xác nhận một diff cụ thể. Code GPU-002/003 chưa được triển khai tại baseline rà soát, nên không được tự khẳng định compatibility với implementation chưa tồn tại.
+
+**Đối chiếu upstream ngày 24/10/2026:** `XPH-GPU-002-01` revision 3 vẫn `AWAITING_CROSS_PHASE_ACK`, D1–D12 và consumer ACK còn pending trong matrix. Bản cập nhật này chỉ ghi nhận các phụ thuộc và điều kiện chờ, không phải `ACK_COMPATIBLE`, không đóng gate nguồn và không cho phép dùng đề xuất grants/trigger/test harness làm baseline đã duyệt. Không thay đổi public Listing contract hay test oracle của TV5/Phase 2.
 
 **Mẫu record khi có diff ảnh hưởng:**
 
