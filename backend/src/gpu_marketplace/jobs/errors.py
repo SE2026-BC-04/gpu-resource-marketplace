@@ -113,7 +113,9 @@ class DependencyUnavailable(JobDomainError):
 def submit_request_from_mapping(payload: object) -> SubmitJobRequest:
     """Validate a decoded payload and translate errors to the §8 taxonomy."""
     try:
-        return SubmitJobRequest.model_validate(payload, strict=True)
+        # The model config keeps integer fields strict; the UUID field has an
+        # explicit wire parser so canonical UUIDv4 strings work in mappings.
+        return SubmitJobRequest.model_validate(payload)
     except ValidationError as exc:
         if any(error.get("type") == "json_invalid" for error in exc.errors()):
             raise InvalidJson() from exc

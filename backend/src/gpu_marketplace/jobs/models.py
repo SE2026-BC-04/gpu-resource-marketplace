@@ -5,7 +5,17 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Annotated
-from pydantic import UUID4, BaseModel, ConfigDict, Field, field_serializer, model_validator
+from uuid import UUID
+
+from pydantic import (
+    UUID4,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    field_serializer,
+    model_validator,
+)
 
 
 MAX_POSTGRES_INTEGER = 2_147_483_647
@@ -35,12 +45,30 @@ class StrictDTO(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+def _canonical_uuid4(value: object) -> object:
+    """Validate public UUID text before Pydantic's UUID parser normalizes it."""
+    if isinstance(value, str):
+        try:
+            parsed = UUID(value)
+        except ValueError as exc:
+            raise ValueError("value must be a canonical UUIDv4") from exc
+        if parsed.version != 4 or str(parsed) != value:
+            raise ValueError("value must be a lowercase canonical UUIDv4")
+        return parsed
+    if isinstance(value, UUID) and value.version == 4:
+        return value
+    raise ValueError("value must be a canonical UUIDv4 string")
+
+
+CanonicalUUID4 = Annotated[UUID4, BeforeValidator(_canonical_uuid4)]
+
+
 class SubmitJobRequest(StrictDTO):
     """Exact three-field public submit body (not a submission use case)."""
 
-    # UUID is a JSON string in the wire contract; Pydantic strict mode still
-    # rejects coercions for numeric fields while accepting this UUID spelling.
-    listing_id: UUID4 = Field(strict=False)
+    # Public IDs use canonical lowercase UUIDv4 wire strings. Numeric fields
+    # remain strict under the base model configuration.
+    listing_id: CanonicalUUID4 = Field(strict=False)
     gpu_count: Annotated[int, Field(gt=0, le=MAX_POSTGRES_INTEGER)]
     duration_seconds: Annotated[int, Field(gt=0, le=MAX_POSTGRES_INTEGER)]
 

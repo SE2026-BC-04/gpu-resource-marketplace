@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
+import anyio
 import pytest
+from fastapi import FastAPI
+from fastapi import dependencies as fastapi_dependencies
+from fastapi import routing as fastapi_routing
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
 from gpu_marketplace.jobs.errors import (
@@ -40,7 +45,12 @@ from gpu_marketplace.jobs.ports import (
     JobRecord,
 )
 from gpu_marketplace.jobs.projections import project_job
-from gpu_marketplace.jobs.router import _parse_job_id, _parse_limit, _request_id
+from gpu_marketplace.jobs.router import (
+    _parse_job_id,
+    _parse_limit,
+    _request_id,
+    create_jobs_router,
+)
 from gpu_marketplace.jobs.service import JobsReadService
 
 
@@ -95,6 +105,66 @@ def test_submit_request_accepts_only_wire_fields_and_strict_positive_integers() 
     ):
         with pytest.raises(ValidationFailed):
             submit_request_from_mapping(invalid)
+
+
+def test_submit_request_mapping_accepts_canonical_uuid4_string() -> None:
+    request = submit_request_from_mapping(
+        {
+            "listing_id": str(LISTING_ID),
+            "gpu_count": 2,
+            "duration_seconds": 60,
+        }
+    )
+    assert request.listing_id == LISTING_ID
+
+
+@pytest.mark.parametrize("field", ["gpu_count", "duration_seconds"])
+@pytest.mark.parametrize("invalid_value", [True, 2.0, "2"])
+def test_submit_request_helpers_reject_non_integer_json_values(
+    field: str, invalid_value: object
+) -> None:
+    mapping_payload: dict[str, object] = {
+        "listing_id": str(LISTING_ID),
+        "gpu_count": 2,
+        "duration_seconds": 60,
+    }
+    mapping_payload[field] = invalid_value
+    with pytest.raises(ValidationFailed):
+        submit_request_from_mapping(mapping_payload)
+
+    json_payload = {
+        "listing_id": str(LISTING_ID),
+        "gpu_count": 2,
+        "duration_seconds": 60,
+    }
+    json_payload[field] = invalid_value
+    with pytest.raises(ValidationFailed):
+        submit_request_from_json(json.dumps(json_payload))
+
+
+@pytest.mark.parametrize(
+    "listing_id",
+    [
+        "22222222-2222-1222-8222-222222222222",  # UUIDv1
+        "22222222222242228222222222222222",  # no hyphens
+        "abcdefab-cdef-4abc-8def-abcdefabcdef".upper(),
+        "not-a-uuid",
+    ],
+)
+@pytest.mark.parametrize("decoder_name", ["mapping", "json"])
+def test_submit_request_helpers_reject_noncanonical_listing_uuid(
+    listing_id: str, decoder_name: str
+) -> None:
+    mapping_payload = {
+        "listing_id": listing_id,
+        "gpu_count": 2,
+        "duration_seconds": 60,
+    }
+    with pytest.raises(ValidationFailed):
+        if decoder_name == "mapping":
+            submit_request_from_mapping(mapping_payload)
+        else:
+            submit_request_from_json(json.dumps(mapping_payload))
 
 
 @pytest.mark.parametrize(
@@ -262,6 +332,123 @@ class FakeCursorCodec:
     def _token(context: CursorContext) -> str:
         status = context.status.value if context.status is not None else "none"
         return f"cursor:{context.user_id}:{context.role.value}:{context.scope}:{status}"
+
+
+def make_test_app(*, role: str = "CLIENT", record: JobRecord | None = None) -> FastAPI:
+    principal = Principal(CLIENT_ID if role == "CLIENT" else WORKER_ID, role)
+    reader = FakeReader(
+        page=JobPage(items=(record,) if record is not None else (), next_position=None),
+        record=record,
+    )
+    service = JobsReadService(reader=reader, cursor_codec=FakeCursorCodec())
+    app = FastAPI()
+    app.include_router(
+        create_jobs_router(service=service, principal_provider=lambda: principal)
+    )
+    return app
+
+
+def http_get(
+    app: FastAPI,
+    path: str,
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+    headers: dict[str, str] | None = None,
+):
+    async def run_sync_inline(target, *args, **kwargs):
+        # This sandbox's AnyIO worker portal deadlocks for all sync FastAPI
+        # endpoints. Keep the test's synchronous fake service inline while
+        # exercising the actual ASGI router and serialization path.
+        return target(*args, **kwargs)
+
+    monkeypatch.setattr(fastapi_routing, "run_in_threadpool", run_sync_inline)
+    monkeypatch.setattr(
+        fastapi_dependencies.utils, "run_in_threadpool", run_sync_inline
+    )
+
+    async def send_request():
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://jobs.test"
+        ) as client:
+            return await client.get(path, headers=headers)
+
+    return anyio.run(send_request)
+
+
+def assert_server_request_headers(response: object, supplied_request_id: str) -> None:
+    headers = response.headers  # type: ignore[attr-defined]
+    parsed_request_id = UUID(headers["X-Request-ID"])
+    assert parsed_request_id.version == 4
+    assert str(parsed_request_id) == headers["X-Request-ID"]
+    assert headers["X-Request-ID"] != supplied_request_id
+    assert headers["Cache-Control"] == "no-store"
+
+
+def test_router_list_asgi_returns_safe_client_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = make_test_app(record=make_record())
+    supplied_id = "caller-chosen-request-id"
+    response = http_get(
+        app, "/api/v1/jobs", monkeypatch=monkeypatch, headers={"X-Request-ID": supplied_id}
+    )
+
+    assert response.status_code == 200
+    assert_server_request_headers(response, supplied_id)
+    payload = response.json()
+    assert payload["items"][0]["worker_id"] == str(WORKER_ID)
+    assert not {"client_id", "seed_value", "expected_digest"}.intersection(
+        payload["items"][0]
+    )
+
+
+def test_router_detail_asgi_serializes_client_worker_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = make_test_app(record=make_record())
+    supplied_id = "caller-chosen-request-id"
+    response = http_get(
+        app,
+        f"/api/v1/jobs/{JOB_ID}",
+        monkeypatch=monkeypatch,
+        headers={"X-Request-ID": supplied_id},
+    )
+
+    assert response.status_code == 200
+    assert_server_request_headers(response, supplied_id)
+    payload = response.json()
+    assert payload["worker_id"] == str(WORKER_ID)
+    assert not {"client_id", "seed_value", "expected_digest"}.intersection(payload)
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_status"),
+    [
+        ("/api/v1/jobs?limit=0", 422),
+        ("/api/v1/jobs?cursor=invalid", 400),
+        ("/api/v1/jobs?scope=all", 403),
+        ("/api/v1/jobs/33333333-3333-4333-8333-333333333334", 404),
+    ],
+)
+def test_router_asgi_maps_read_errors(
+    path: str, expected_status: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = make_test_app(record=None)
+    supplied_id = "caller-chosen-request-id"
+    response = http_get(
+        app, path, monkeypatch=monkeypatch, headers={"X-Request-ID": supplied_id}
+    )
+
+    assert response.status_code == expected_status
+    assert_server_request_headers(response, supplied_id)
+
+
+def test_router_asgi_maps_invalid_cursor_to_400(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = make_test_app(record=make_record())
+    response = http_get(app, "/api/v1/jobs?cursor=invalid", monkeypatch=monkeypatch)
+    assert response.status_code == 400
+    assert UUID(response.headers["X-Request-ID"]).version == 4
+    assert response.headers["Cache-Control"] == "no-store"
 
 
 def test_pagination_uses_role_default_and_context_binds_cursor() -> None:
