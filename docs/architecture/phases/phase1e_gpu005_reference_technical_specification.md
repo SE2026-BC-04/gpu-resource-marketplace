@@ -101,6 +101,7 @@ Outcome mapping:
 ```text
 n = 100
 limit = 4,294,967,200
+outcome_raw(C) = UINT32_BE(H(OUTCOME_DOMAIN, C)[0:4])
 ```
 
 | Bucket | Outcome | Failure reason |
@@ -114,6 +115,7 @@ Work-unit mapping:
 ```text
 n = 1,000,000
 limit = 4,294,000,000
+work_units_raw(C) = UINT32_BE(H(WORK_UNITS_DOMAIN, C)[0:4])
 work_units = accepted_candidate mod 1,000,000
 ```
 
