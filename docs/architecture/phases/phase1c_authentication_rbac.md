@@ -72,7 +72,7 @@ flowchart LR
 | Chủ đề | Nội dung | Nhãn |
 |---|---|---|
 | Cột dùng cho Auth | `users(id, login_name varchar(128) UNIQUE, password_hash text, status ACTIVE\|DISABLED)`, `user_roles(user_id PK, role_code)`, `roles(code)`. `PK(user_id)` bảo đảm tối đa một role/account; account không có dòng `user_roles` vẫn có thể tồn tại và phải bị từ chối (fail closed) | `SPEC` |
-| Không có cột ghi cho Auth | Auth không `INSERT/UPDATE/DELETE` `users`, `user_roles`, `roles`; tài khoản chỉ được provisioning ngoài migration bằng owner DSN, nhận qua biến riêng `GPU_MARKETPLACE_MIGRATION_DATABASE_URL` (không dùng DSN runtime, không in ra log) | `SPEC` + `PROPOSAL` (mục 5, 9.1 của matrix; D9) |
+| Không có cột ghi cho Auth | Auth không `INSERT/UPDATE/DELETE` `users`, `user_roles`, `roles`; tài khoản chỉ được provisioning ngoài migration, bằng role có quyền owner (matrix mục 5 và 6.2), không bao giờ bằng DSN runtime của API/Manager. **Contract credential cho provisioning (tên biến, cách cấp, công cụ chạy) chưa được định nghĩa:** `GPU_MARKETPLACE_MIGRATION_DATABASE_URL` ở matrix mục 9.1 là biến dành cho migration, GPU-003 **không** mặc định coi đó là giao diện provisioning. Chờ Thành viên 2 và nhóm trưởng chốt (§5.3 mục 10) | `SPEC` + `PROPOSAL` (mục 5, 6.2 của matrix); credential provisioning `PENDING` |
 | Tên constraint là contract | Repository ánh xạ lỗi DB theo tên (`uq_users_login_name`, `ck_users_status`, `fk_user_roles_*`); Auth không được phụ thuộc vào thông điệp lỗi của driver | `IMPL` (đề xuất đặt tên của matrix) |
 | Quyền DB của API | Nếu D1 được duyệt, một script bootstrap chạy **trước** migration tạo group `gpm_api_rw` và login role `gpm_api_app` (`NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`, ...). API runtime kết nối bằng `gpm_api_app`, chỉ có `SELECT` trên `users`, `user_roles`, `roles` và `INSERT` (không gồm `id`, `created_at`) trên `audit_events`; không service runtime nào nhận owner DSN. Test Auth gọi API bằng role này, còn fixture dựng dữ liệu bằng owner | `PROPOSAL` (D1, chờ nhóm trưởng) |
 | `audit_events.actor_kind` | CHECK chỉ cho `USER` hoặc `SERVICE`; không có giá trị cho người chưa xác thực. Cách ghi sự kiện login thất bại (và việc có ghi hay không) phải được chốt trước khi code; `actor_ref` không được chứa `login_name` thô hay bất kỳ giá trị người dùng nhập | Cần quyết định (xem §5.3) |
@@ -250,8 +250,9 @@ Toàn bộ `GPU-003-A..F`, Auth endpoints/guards, password hash verifier, JWT is
 5. **External test dependencies:** các phép thử về ownership của Jobs/Listing và internal Bearer routes chưa thể nghiệm thu toàn bộ ở GPU-003, phải handoff đúng chủ sở hữu.
 6. **Hàm dùng chung với provisioning:** xác nhận với Thành viên 2 rằng chuẩn hóa `login_name` và băm mật khẩu do `identity/` sở hữu và công cụ provisioning import lại (xem §2.4).
 7. **Audit cho người chưa xác thực:** `audit_events.actor_kind` chỉ có `USER|SERVICE`; quyết định có ghi sự kiện login thất bại hay không và dùng `actor_kind`/`actor_ref` nào (không chứa `login_name` thô).
-8. **Phụ thuộc vào đề xuất GPU-002-A (D1–D12):** cách cấp DB role cho API, cách chạy migration/provisioning bằng owner DSN và cluster test tạm còn chờ nhóm trưởng; không viết test hay cấu hình giả định chúng đã được duyệt.
+8. **Phụ thuộc vào đề xuất GPU-002-A (D1–D12):** cách cấp DB role cho API, cách chạy migration bằng owner DSN và cluster test tạm còn chờ nhóm trưởng; không viết test hay cấu hình giả định chúng đã được duyệt.
 9. **Collation và khóa ghép:** thêm kiểm tra collation của `login_name` và dùng tài khoản tạm cho test đổi/mất role (xem §2.4 và `P1C-AC-05`).
+10. **Credential cho provisioning:** Thành viên 2 và nhóm trưởng chốt công cụ provisioning nhận credential quyền owner bằng biến/giao diện nào (dùng chung với migration hay biến riêng), quy tắc không ghi credential ra dòng lệnh/log, và cách dùng trong cluster test tạm. Cho đến khi chốt, GPU-003 không viết tài liệu, test hay cấu hình giả định một tên biến cụ thể.
 
 ### 5.4. Handoff
 
@@ -274,7 +275,7 @@ Toàn bộ `GPU-003-A..F`, Auth endpoints/guards, password hash verifier, JWT is
 
 | Auth boundary có thể bị đổi | Owner phải cùng xác thực **khi bị ảnh hưởng** |
 |---|---|
-| Account/role repository, password provisioning, DB query semantics, tên constraint, DB grants/role của API, owner DSN cho provisioning, fixture và cluster test (xem `XPH-GPU-002-01` revision 3, hiện `AWAITING_CROSS_PHASE_ACK`) | Thành viên 2 (GPU-002) + Thành viên 3 |
+| Account/role repository, password provisioning, DB query semantics, tên constraint, DB grants/role của API, credential provisioning (contract chưa định nghĩa, §5.3 mục 10), fixture và cluster test (xem `XPH-GPU-002-01` revision 3, hiện `AWAITING_CROSS_PHASE_ACK`) | Thành viên 2 (GPU-002) + Thành viên 3 |
 | `AuthenticatedPrincipal`, role guard, JWT claim/expiry/normalization | Thành viên 4 (GPU-004) và/hoặc Thành viên 5 (GPU-005) + Thành viên 3 |
 | Shared frontend Auth state, API client/Bearer convention | Thành viên 4/5 dùng UI; nhóm trưởng nếu shared shell/client chịu tác động |
 | `api/app.py`, CORS, config, error/request-ID, router registration | Nhóm trưởng (GPU-001/integration) + Thành viên 3 |
