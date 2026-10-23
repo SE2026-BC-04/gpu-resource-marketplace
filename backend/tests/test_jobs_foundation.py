@@ -167,6 +167,21 @@ def test_submit_request_helpers_reject_noncanonical_listing_uuid(
             submit_request_from_json(json.dumps(mapping_payload))
 
 
+@pytest.mark.parametrize("decoder_name", ["mapping", "json"])
+def test_submit_request_helpers_forbid_extra_fields(decoder_name: str) -> None:
+    payload = {
+        "listing_id": str(LISTING_ID),
+        "gpu_count": 2,
+        "duration_seconds": 60,
+        "worker_id": str(WORKER_ID),
+    }
+    with pytest.raises(UnknownField):
+        if decoder_name == "mapping":
+            submit_request_from_mapping(payload)
+        else:
+            submit_request_from_json(json.dumps(payload))
+
+
 @pytest.mark.parametrize(
     "field",
     [
