@@ -318,6 +318,7 @@ def test_second_simulation_reference_for_a_job_is_rejected(conn: Connection) -> 
         ("sha256:" + "a" * 63, "SUCCESS", None, "ck_simulation_references_digest_format"),
         (DIGEST, "SUCCESS", "WORKER_FAULT", "ck_simulation_references_outcome_reason"),
         (DIGEST, "FAILED", "SYSTEM_FAULT", "ck_simulation_references_outcome_reason"),
+        (DIGEST, "FAILED", None, "ck_simulation_references_outcome_reason"),
         (DIGEST, "UNKNOWN", None, "ck_simulation_references_outcome"),
     ],
 )

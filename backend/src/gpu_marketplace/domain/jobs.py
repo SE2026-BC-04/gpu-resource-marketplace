@@ -106,7 +106,8 @@ class SimulationReference(Base):
         CheckConstraint("expected_outcome IN ('SUCCESS','FAILED')", name="ck_simulation_references_outcome"),
         CheckConstraint(
             "(expected_outcome = 'SUCCESS' AND expected_failure_reason IS NULL) OR "
-            "(expected_outcome = 'FAILED' AND expected_failure_reason IN ('WORKER_FAULT','JOB_FAULT'))",
+            "(expected_outcome = 'FAILED' AND expected_failure_reason IS NOT NULL AND "
+            "expected_failure_reason IN ('WORKER_FAULT','JOB_FAULT'))",
             name="ck_simulation_references_outcome_reason",
         ),
         CheckConstraint(
