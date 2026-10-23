@@ -1,3 +1,5 @@
+import base64
+
 import pytest
 
 from gpu_marketplace.identity.passwords import ScryptPasswordHasher
@@ -54,6 +56,25 @@ def test_unreadable_stored_hash_fails_closed(hasher: ScryptPasswordHasher, encod
     assert hasher.verify_password("anything", encoded) is False
 
 
+@pytest.mark.parametrize(("salt_bytes", "key_bytes"), [(8, 32), (65, 32), (16, 16), (16, 65), (16, 2_000_000)])
+def test_stored_salt_and_key_lengths_are_bounded(
+    hasher: ScryptPasswordHasher, salt_bytes: int, key_bytes: int
+) -> None:
+    encoded = (
+        "scrypt$n=1024,r=8,p=1$"
+        + base64.b64encode(b"s" * salt_bytes).decode()
+        + "$"
+        + base64.b64encode(b"k" * key_bytes).decode()
+    )
+    assert hasher.verify_password("anything", encoded) is False
+
+
+def test_password_bytes_are_hashed_exactly_including_nul(hasher: ScryptPasswordHasher) -> None:
+    encoded = hasher.hash_password("ab\x00cd")
+    assert hasher.verify_password("ab\x00cd", encoded)
+    assert not hasher.verify_password("ab", encoded)
+
+
 def test_non_string_inputs_fail_closed(hasher: ScryptPasswordHasher) -> None:
     encoded = hasher.hash_password("pw")
     assert hasher.verify_password(None, encoded) is False  # type: ignore[arg-type]
@@ -75,7 +96,10 @@ def test_burn_verification_runs_without_an_account(hasher: ScryptPasswordHasher)
     hasher.burn_verification("any password")
 
 
-@pytest.mark.parametrize("parameters", [{"n": 1000}, {"n": 1}, {"r": 0}, {"p": 0}, {"salt_bytes": 8}])
+@pytest.mark.parametrize(
+    "parameters",
+    [{"n": 1000}, {"n": 1}, {"r": 0}, {"p": 0}, {"salt_bytes": 8}, {"salt_bytes": 65}, {"key_bytes": 65}],
+)
 def test_invalid_parameters_are_rejected(parameters: dict[str, int]) -> None:
     with pytest.raises(ValueError):
         ScryptPasswordHasher(**{**FAST, **parameters})

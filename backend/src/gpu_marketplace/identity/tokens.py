@@ -66,6 +66,8 @@ class AccessTokenCodec:
         self._clock = clock
 
     def issue(self, subject: UUID) -> IssuedAccessToken:
+        if not isinstance(subject, UUID):
+            raise TypeError("token subject must be a UUID")
         issued_at = self._clock()
         expires_at = issued_at + _LIFETIME_MICROSECONDS
         # Built by hand so the NumericDate text keeps exactly six fractional digits.
@@ -87,7 +89,8 @@ class AccessTokenCodec:
         if not isinstance(token, str):
             raise InvalidTokenError("malformed")
         segments = token.split(".")
-        if len(segments) != 3:
+        # Validate every segment's alphabet before signing, so non-ASCII input cannot raise.
+        if len(segments) != 3 or not all(_BASE64URL_SEGMENT.fullmatch(segment) for segment in segments):
             raise InvalidTokenError("malformed")
         header_segment, payload_segment, signature_segment = segments
 

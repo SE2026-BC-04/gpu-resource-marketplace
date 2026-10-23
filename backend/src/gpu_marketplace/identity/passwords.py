@@ -23,6 +23,8 @@ _ENCODED = re.compile(
 _MAX_STORED_N = 2**20
 _MAX_STORED_R = 32
 _MAX_STORED_P = 16
+_SALT_BYTES_RANGE = range(16, 65)
+_KEY_BYTES_RANGE = range(32, 65)
 
 
 class PasswordHasher(Protocol):
@@ -47,8 +49,8 @@ class ScryptPasswordHasher:
     ) -> None:
         if not _valid_parameters(n, r, p):
             raise ValueError("invalid scrypt parameters")
-        if salt_bytes < 16 or key_bytes < 32:
-            raise ValueError("scrypt salt must be >= 16 bytes and key >= 32 bytes")
+        if salt_bytes not in _SALT_BYTES_RANGE or key_bytes not in _KEY_BYTES_RANGE:
+            raise ValueError("scrypt salt must be 16..64 bytes and key 32..64 bytes")
         self._n = n
         self._r = r
         self._p = p
@@ -79,7 +81,7 @@ class ScryptPasswordHasher:
             password_bytes = _encode_password(password)
         except (binascii.Error, UnicodeEncodeError):
             return False
-        if not salt or not expected:
+        if len(salt) not in _SALT_BYTES_RANGE or len(expected) not in _KEY_BYTES_RANGE:
             return False
         actual = _derive(password_bytes, salt, n, r, p, len(expected))
         return hmac.compare_digest(actual, expected)
