@@ -7,6 +7,7 @@
 > **Baseline đã đọc:** `main@538802a` (so với baseline handoff `c90f540`: chỉ khác tài liệu/fixture, không khác code); rà lại trên `main@cceffbf` (PR #7 chỉ làm rõ Phase 1D/GPU-004 handoff: API tạo Listing với `allocated_gpu_count=0`, Manager là writer duy nhất của counter — khớp mục 3.6 và 6.2, không đổi matrix)<br>
 > **Trạng thái:** `PROPOSED / FOR LEAD REVIEW` — **không phải migration**, không có SQL đã chạy; mọi test `NOT_RUN`<br>
 > **Revision 2 (24/10/2026):** sửa theo technical review GPU-002-A (`CHANGES REQUESTED`: 2×P1, 2×P2) — xem mục 14. D1–D10 (và D11 mới) vẫn `PROPOSED` tới khi nhóm trưởng quyết định<br>
+> **Revision 3 (24/10/2026):** sửa P1 "PostgreSQL Test Cluster Isolation" — test có bootstrap role chỉ chạy trên cluster PostgreSQL riêng, dùng xong bỏ; bootstrap không bao giờ tự đổi mật khẩu/quyền role đã tồn tại; thêm test kiểm chứng cô lập (mục 9.3, D12, R5 ở mục 14)<br>
 > **Nguồn chuẩn:** [Database Design v0.4 §9, §11](../../design/database-design.md), [Phase 1B](phase1b_database_persistence.md), [GPU-002 handoff](../../development/handoffs/GPU-002_member2_handoff.md), [Module Design §5](../../design/module-design.md), [ADR-002](../decisions/ADR-002-postgresql-access-boundaries.md), [Phase 1C](phase1c_authentication_rbac.md), [Phase 1D](phase1d_gpu_listings.md), [Phase 1E](phase1e_job_submission_queue.md)
 
 ## 0. Mục đích, phạm vi và cách đọc
@@ -318,11 +319,11 @@ Nguyên tắc: **migration không chứa dữ liệu demo**; dữ liệu demo kh
 
 | Bước | Ai chạy / bằng role nào | Làm gì | Điều kiện an toàn |
 |---|---|---|---|
-| 0. Bootstrap role | Owner. Hai đường gọi **cùng một script**: (a) `docker-entrypoint-initdb.d` khi volume rỗng; (b) lệnh chạy lại thủ công cho volume đã có dữ liệu hoặc khi đổi mật khẩu | Tạo 2 group `NOLOGIN` → tạo 2 login role → `GRANT` group cho login. Mỗi lệnh có kiểm tra `pg_roles` trước (idempotent); login role đã tồn tại thì chỉ `ALTER ROLE ... PASSWORD` | Mật khẩu lấy từ biến môi trường **chỉ của container `postgres`**, đưa vào SQL qua biến psql và `format('%L')`, không ghi vào file SQL, không echo. Script không đụng bảng nào |
+| 0. Bootstrap role | Owner. Hai đường gọi **cùng một script**: (a) `docker-entrypoint-initdb.d` khi volume rỗng; (b) lệnh chạy lại thủ công cho volume đã có dữ liệu hoặc khi đổi mật khẩu | Tạo 2 group `NOLOGIN` → tạo 2 login role → `GRANT` group cho login. **Chế độ mặc định chỉ tạo mới (create-only):** role chưa có thì tạo; role đã có thì **không** `ALTER` mật khẩu, thuộc tính hay membership, chỉ **kiểm tra** thuộc tính (`NOSUPERUSER`, `NOREPLICATION`, `NOBYPASSRLS`, `LOGIN`/`NOLOGIN`) và membership mong đợi; lệch thì dừng với mã lỗi khác 0 và báo cho người vận hành sửa thủ công. Đổi mật khẩu là lệnh riêng, phải gọi tường minh (cờ `--rotate-password`), không bao giờ chạy từ init script hay test (sửa theo review R5) | Mật khẩu lấy từ biến môi trường **chỉ của container `postgres`**, đưa vào SQL qua biến psql và `format('%L')`, không ghi vào file SQL, không echo. Script không đụng bảng nào |
 | 1. Migration | Owner (mục 9, D9) | Bước đầu tiên của baseline revision: kiểm tra `gpm_api_rw` và `gpm_manager_rw` tồn tại trong `pg_roles`; thiếu thì **dừng** với thông báo "chạy bootstrap role trước" (không tự tạo). Sau đó tạo bảng, trigger, rồi `GRANT` cho **group** | Không chứa mật khẩu, không tham chiếu login role |
 | 2. Runtime | `gpm_api_app` / `gpm_manager_app` | API/Manager kết nối bằng DSN riêng | Không service runtime nào nhận owner DSN |
 
-Hệ quả: (1) thứ tự phụ thuộc chỉ một chiều, bootstrap → migration; (2) migration downgrade chỉ `REVOKE` và xóa object, **không `DROP ROLE`** vì role là đối tượng toàn cluster dùng chung với DB test; (3) volume dev hiện có không chạy lại init script, nên runbook ghi lệnh (b) trước `alembic upgrade head`; (4) test fixture cũng gọi cùng script bootstrap trước migration, nên CI kiểm chứng đúng thứ tự này. Mọi thay đổi `compose.yaml`/`.env.example`/init script là shared infra, cần nhóm trưởng (D1).
+Hệ quả: (1) thứ tự phụ thuộc chỉ một chiều, bootstrap → migration; (2) migration downgrade chỉ `REVOKE` và xóa object, **không `DROP ROLE`** vì role là đối tượng toàn cluster dùng chung với DB test; (3) volume dev hiện có không chạy lại init script, nên runbook ghi lệnh (b) trước `alembic upgrade head`; (4) test fixture cũng gọi cùng script bootstrap trước migration, nên CI kiểm chứng đúng thứ tự này — nhưng **chỉ** trên cluster test riêng đã qua hàng rào mục 9.3, với mật khẩu ngẫu nhiên sinh cho từng test session, không đọc mật khẩu từ `.env` dev. Mọi thay đổi `compose.yaml`/`.env.example`/init script là shared infra, cần nhóm trưởng (D1).
 
 Thêm: `REVOKE ALL ON DATABASE ... FROM PUBLIC`, `GRANT CONNECT` cho hai group; `REVOKE EXECUTE` trên các trigger function khỏi `PUBLIC`; trigger function đặt `SET search_path = pg_catalog, public`.
 
@@ -425,7 +426,7 @@ RETURN OLD
 |---|---|---|
 | Chạy migration ở Compose | Chạy tạm một container `api` bằng `docker compose run --rm` với lệnh `alembic upgrade head`, nhận owner DSN qua biến **riêng** `GPU_MARKETPLACE_MIGRATION_DATABASE_URL` theo mục 9.1 — **không** truyền giá trị DSN trên dòng lệnh. **Không** thêm service `migrate`: `tests/test_compose_topology.py` khóa đúng 5 services. **Không** tự migrate khi API khởi động (role API không có DDL; nhiều instance có thể race) | Nhóm trưởng (D9) |
 | PostgreSQL cho CI | Thêm `services: postgres` vào job `python` của `foundation.yml`, pin cùng image digest với `compose.yaml` (`postgres:16.15-bookworm@sha256:0ea6...`). Không thêm dependency mới (testcontainers…) | Nhóm trưởng (D8) |
-| An toàn DB test | Integration test chỉ đọc `GPU_MARKETPLACE_TEST_DATABASE_URL` và phải qua **toàn bộ** hàng rào ở mục 9.2 trước mọi `DROP`/`CREATE`/`TRUNCATE`. Fixture session chạy bootstrap role → tạo DB test → `alembic upgrade head`; dọn dữ liệu giữa test bằng `TRUNCATE` (owner) vì test race cần commit thật trên nhiều connection. Thiếu biến → test được skip và báo `NOT_RUN`, không PASS | TV2, review nhóm trưởng (D11) |
+| An toàn DB test | Integration test chỉ đọc `GPU_MARKETPLACE_TEST_DATABASE_URL` và phải qua **toàn bộ** hàng rào cấp cluster ở mục 9.3 rồi hàng rào cấp database ở mục 9.2 trước mọi bootstrap role, `DROP`/`CREATE`/`TRUNCATE`. Test **không bao giờ** chạy trên service `postgres` của Compose dev. Fixture session chạy bootstrap role → tạo DB test → `alembic upgrade head`; dọn dữ liệu giữa test bằng `TRUNCATE` (owner) vì test race cần commit thật trên nhiều connection. Thiếu biến → test được skip và báo `NOT_RUN`, không PASS | TV2, review nhóm trưởng (D11) |
 | Round-trip | `upgrade head` → kiểm tra catalog → `downgrade base` → `upgrade head` chỉ trên DB test (P1B-AC-08). Downgrade xóa trigger, function, bảng theo thứ tự ngược, `REVOKE`; **không** `DROP ROLE` | TV2 |
 | Drift ORM ↔ DB | (a) `alembic.autogenerate.compare_metadata` phải rỗng; (b) vì autogenerate không so CHECK/partial predicate đầy đủ, thêm test truy vấn `pg_constraint`/`pg_indexes`/`information_schema` so với danh sách tên ở mục 2 | TV2 |
 
@@ -462,6 +463,41 @@ Chỉ kiểm hậu tố `_test` là chưa đủ: một DB dev hoặc DB của ng
 
 Kiểm chứng bằng unit test **không cần PostgreSQL**: từng hàng rào G1–G4 có một ca vi phạm phải abort; G5–G8 kiểm trên DB test thật ở GPU-002-D (ví dụ tạo sẵn một DB trùng tên mà không có marker → fixture từ chối drop).
 
+### 9.3. Cô lập cluster PostgreSQL cho test (sửa theo review R5, P1)
+
+**Vấn đề revision 2:** hàng rào G1–G9 chỉ bảo vệ **database**. Nhưng role là đối tượng **toàn cluster**: nếu fixture chạy bootstrap role trên cluster mà môi trường dev cũng dùng, nó có thể đổi mật khẩu hoặc quyền của `gpm_api_app`/`gpm_manager_app` mà API/Manager dev đang dùng, dù DB test đã được cô lập đúng.
+
+**Quyết định đề xuất:** mọi test có thao tác bootstrap role, `CREATE/DROP DATABASE` hoặc downgrade migration **bắt buộc** chạy trên một **cluster PostgreSQL riêng, dùng xong bỏ** (disposable). Không có cluster như vậy thì các test này báo `NOT_RUN`, không fallback sang cluster dev.
+
+| Môi trường | Cách cấp cluster test | Ghi chú |
+|---|---|---|
+| CI | `services: postgres` của job `python` trong `foundation.yml` (D8): mỗi job một container mới, không volume, mật khẩu tạm của job, publish ra **cổng host khác `5432`** để thỏa C1 giống môi trường local. Một bước workflow đặt marker cluster (C3) ngay sau khi service sẵn sàng | Không đụng `compose.yaml`, không thêm service sản phẩm |
+| Local | Container tạm chạy riêng ngoài Compose project sản phẩm: cùng image digest với `compose.yaml`, dữ liệu trên `tmpfs`, `--rm`, bind `127.0.0.1` với **cổng khác** cổng dev; một script helper khởi động container và đặt marker. Lệnh cụ thể ghi ở runbook GPU-002-E | Không phải service thứ 6 trong topology; `tests/test_compose_topology.py` giữ nguyên. Cách cấp này cần nhóm trưởng duyệt (D12) |
+
+**Hàng rào cấp cluster** — kiểm **trước** mọi câu lệnh bootstrap/DDL; vi phạm thì abort cả test session, không chạy câu SQL ghi nào:
+
+| # | Hàng rào | Chặn được gì |
+|---|---|---|
+| C1 | Cổng của `GPU_MARKETPLACE_TEST_DATABASE_URL` khác cổng trong DSN dev, DSN migration và `POSTGRES_HOST_PORT` (mặc định `5432`) | Trỏ nhầm vào service `postgres` của Compose dev |
+| C2 | Cluster chỉ được chứa các DB: `postgres`, `template0`, `template1`, DB marker (C3) và DB khớp mẫu G2. Có DB nào khác (ví dụ `gpu_marketplace`) thì từ chối | Cluster dev hoặc cluster dùng chung có dữ liệu thật |
+| C3 | **Marker cluster có token:** script khởi động cluster tạo DB rỗng `gpm_disposable_test_cluster` và đặt `COMMENT ON DATABASE` chứa một token ngẫu nhiên; cùng token được truyền cho test qua `GPU_MARKETPLACE_TEST_CLUSTER_TOKEN`. Fixture đọc comment qua `pg_shdescription` và so khớp chính xác; thiếu hoặc khác thì từ chối. DB marker không có bảng, nên không ảnh hưởng yêu cầu đúng 10 bảng trong DB ứng dụng | Cluster không do harness test tạo ra |
+| C4 | Trước bootstrap lần đầu của session: nếu `gpm_api_app`/`gpm_manager_app` đã tồn tại mà marker C3 hợp lệ thì vẫn được dùng (chạy lại trên cùng cluster tạm); nếu marker không hợp lệ thì C3 đã chặn từ trước. Bootstrap trong test luôn ở chế độ create-only, **không bao giờ** dùng `--rotate-password` | Đổi mật khẩu/quyền của role đang được môi trường khác dùng |
+| C5 | Mật khẩu login role trong test được sinh ngẫu nhiên cho từng cluster tạm, chỉ giữ trong bộ nhớ tiến trình test; test không đọc `.env` dev | Lộ hoặc ghi đè credential dev |
+
+**Test bắt buộc kiểm chứng cơ chế cô lập** (GPU-002-D; hiện `NOT_RUN`):
+
+| Test | Loại | Kịch bản | PASS khi |
+|---|---|---|---|
+| `ISO-01-PORT-GUARD` | Unit, không cần PostgreSQL | URL test trùng cổng DSN dev; trùng `POSTGRES_HOST_PORT` | Fixture abort trước khi mở connection |
+| `ISO-02-TOKEN-GUARD` | Unit + cluster tạm | Thiếu `GPU_MARKETPLACE_TEST_CLUSTER_TOKEN`; token sai; DB marker không có comment | Abort; số dòng `pg_roles` và `pg_database` không đổi |
+| `ISO-03-FOREIGN-DB` | Cluster tạm | Tạo thêm DB `gpu_marketplace` trong cluster tạm rồi khởi động fixture | Abort theo C2, không chạy bootstrap/DDL; sau đó xóa DB giả lập |
+| `ISO-04-NO-PASSWORD-CHANGE` | Cluster tạm | Tạo trước `gpm_api_app` với mật khẩu và thuộc tính đúng; ghi lại `rolpassword` (đọc `pg_authid` bằng owner của cluster tạm) và thuộc tính; chạy bootstrap create-only | `rolpassword`, thuộc tính và membership **giữ nguyên**; bootstrap thoát mã 0 |
+| `ISO-05-ATTRIBUTE-DRIFT` | Cluster tạm | Tạo trước `gpm_api_app` với `CREATEDB` (lệch mong đợi); chạy bootstrap create-only | Bootstrap thoát mã khác 0, **không** `ALTER` role; thuộc tính vẫn như trước |
+| `ISO-06-ROTATE-EXPLICIT` | Cluster tạm | Chạy bootstrap không có `--rotate-password`, rồi có cờ | Chỉ lần có cờ mới đổi `rolpassword` |
+| `ISO-07-NO-DEV-CLUSTER` | Unit, không cần PostgreSQL | Không đặt URL/token test | Mọi test cần cluster báo `NOT_RUN` (skip có lý do), không thử kết nối DSN dev |
+
+Ghi chú bằng chứng: `ISO-03..06` tự tạo tình huống "giống cluster dùng chung" **bên trong** cluster tạm, nên không bao giờ cần chạm vào cluster dev để chứng minh cơ chế cô lập.
+
 ## 10. Truy vết tới tiêu chí nghiệm thu
 
 | Test / tiêu chí | Đối tượng kiểm | P1B-AC | Trạng thái dự kiến sau GPU-002 |
@@ -496,6 +532,7 @@ Kiểm chứng bằng unit test **không cần PostgreSQL**: từng hàng rào G
 | D9 | Cách chạy migration trong Compose? | `docker compose run --rm` container `api` chạy `alembic upgrade head`; owner DSN qua biến riêng `GPU_MARKETPLACE_MIGRATION_DATABASE_URL`, chỉ truyền tên biến, không fallback, không gắn vào service thường trực (mục 9.1) | L1 (shared infra) |
 | D10 | Mã lỗi trigger: SQLSTATE 23000 + `CONSTRAINT` name? | **Có** | L1 |
 | D11 | Chính sách bảo vệ DB test trước `DROP`/`CREATE`/`TRUNCATE`? | Hàng rào G1–G9: opt-in tường minh, tên khớp toàn bộ mẫu, chỉ loopback, khác DSN dev/migration, marker comment do test tạo, kiểm connection khác, abort session khi vi phạm (mục 9.2) | L1 (an toàn dữ liệu; nhóm trưởng xác nhận) |
+| D12 | Cluster PostgreSQL riêng cho test có bootstrap role/DDL? | **Bắt buộc**: CI dùng `services: postgres` mới mỗi job; local dùng container tạm (`tmpfs`, `--rm`, cổng khác, ngoài Compose project sản phẩm) do script helper khởi động và đặt marker token; hàng rào C1–C5; bootstrap create-only, đổi mật khẩu chỉ qua cờ tường minh; test cô lập `ISO-01..07` (mục 9.3) | L1 (an toàn dữ liệu + shared CI; nhóm trưởng xác nhận) |
 
 ## 12. Mâu thuẫn và điểm mơ hồ phát hiện khi đối chiếu
 
@@ -511,16 +548,16 @@ Kiểm chứng bằng unit test **không cần PostgreSQL**: từng hàng rào G
 ## 13. Inter-Phase Impact Review — XPH-GPU-002-01
 
 - Source phase / owner: GPU-002 / Thành viên 2
-- Changed file(s), base SHA → target SHA: thêm `docs/architecture/phases/phase1b_gpu002a_schema_matrix.md` trên `main@cceffbf` (branch `docs/gpu-002-a-schema-matrix`, PR #9). Revision 1 = commit `903c5c2`; revision 2 = commit kế tiếp trên cùng branch, sửa theo technical review ngày 24/10/2026
-- Changed contract/assumption (before → after): chưa có schema thực → **đề xuất** tên constraint (contract ánh xạ lỗi), column-level grants, trigger lifecycle/guarded delete, role DB tách cho API/Manager. **Revision 2 thêm:** role tạo ở bước bootstrap trước migration (không còn trong migration); trigger phân loại caller API/Manager/owner/unknown, Manager bị giới hạn cạnh của mình; owner DSN đổi sang biến riêng `GPU_MARKETPLACE_MIGRATION_DATABASE_URL`; hàng rào DB test G1–G9 với biến opt-in mới
-- Classification: `POTENTIAL_IMPACT` (tài liệu đề xuất; thành `CONFIRMED_IMPACT` khi D1–D11 được quyết định)
-- Affected phase(s), owner(s): GPU-003/Thành viên 3 (grants `users`, provisioning chạy bằng owner DSN theo mục 9.1); GPU-004/Thành viên 4 (column grants Listing, `allocated_gpu_count` không ghi được từ API, trigger `updated_at`, hàng rào DB test nếu dùng chung fixture); GPU-005/Thành viên 5 (INSERT `jobs` không có `status`, `simulation_references` không RETURNING/SELECT, tên `uq_jobs_client_idempotency`, D5, API chỉ được `QUEUED→CANCELLED`); nhóm trưởng (script bootstrap role + init script, Compose DSN, biến migration riêng, `.env.example`, CI postgres service, cách chạy migration, biến opt-in test); owner Phase 2 khi được giao (Manager chỉ được cạnh `QUEUED→RUNNING`, `RUNNING→COMPLETED/FAILED`)
+- Changed file(s), base SHA → target SHA: thêm `docs/architecture/phases/phase1b_gpu002a_schema_matrix.md` trên `main@cceffbf` (branch `docs/gpu-002-a-schema-matrix`, PR #9). Revision 1 = commit `903c5c2`; revision 2 = commit `4fe8c8a`; revision 3 = commit kế tiếp trên cùng branch, sửa P1 cô lập test cluster theo review lần 2 ngày 24/10/2026
+- Changed contract/assumption (before → after): chưa có schema thực → **đề xuất** tên constraint (contract ánh xạ lỗi), column-level grants, trigger lifecycle/guarded delete, role DB tách cho API/Manager. **Revision 2 thêm:** role tạo ở bước bootstrap trước migration (không còn trong migration); trigger phân loại caller API/Manager/owner/unknown, Manager bị giới hạn cạnh của mình; owner DSN đổi sang biến riêng `GPU_MARKETPLACE_MIGRATION_DATABASE_URL`; hàng rào DB test G1–G9 với biến opt-in mới. **Revision 3 thêm:** test có bootstrap/DDL chỉ chạy trên cluster PostgreSQL tạm riêng (CI service mới mỗi job; local container `tmpfs` ngoài Compose); biến `GPU_MARKETPLACE_TEST_CLUSTER_TOKEN`; hàng rào C1–C5; bootstrap mặc định create-only, đổi mật khẩu chỉ qua cờ `--rotate-password`; test cô lập `ISO-01..07`
+- Classification: `POTENTIAL_IMPACT` (tài liệu đề xuất; thành `CONFIRMED_IMPACT` khi D1–D12 được quyết định)
+- Affected phase(s), owner(s): GPU-003/Thành viên 3 (grants `users`, provisioning chạy bằng owner DSN theo mục 9.1); GPU-004/Thành viên 4 (column grants Listing, `allocated_gpu_count` không ghi được từ API, trigger `updated_at`, hàng rào DB test nếu dùng chung fixture); GPU-005/Thành viên 5 (INSERT `jobs` không có `status`, `simulation_references` không RETURNING/SELECT, tên `uq_jobs_client_idempotency`, D5, API chỉ được `QUEUED→CANCELLED`); nhóm trưởng (script bootstrap role + init script, Compose DSN, biến migration riêng, `.env.example`, CI postgres service, cách chạy migration, biến opt-in test, cluster test tạm cho CI và local, biến token cluster); owner Phase 2 khi được giao (Manager chỉ được cạnh `QUEUED→RUNNING`, `RUNNING→COMPLETED/FAILED`)
 - Impact: schema/permissions/migration/CI/test/config
-- Required updates / responsible person / deadline: nhóm trưởng quyết định D1–D11; TV3/4/5 rà soát grants, tên constraint, phân loại caller và fixture test; hạn: trước khi bắt đầu `GPU-002-B`
-- Verification: chưa có; mọi test `NOT_RUN`. Technical review revision 1: `CHANGES REQUESTED` (24/10/2026); revision 2 chờ review lại
-- Source owner acknowledgement: Thành viên 2 — `PENDING` (sau khi gửi revision 2)
+- Required updates / responsible person / deadline: nhóm trưởng quyết định D1–D12; TV3/4/5 rà soát grants, tên constraint, phân loại caller và fixture test; hạn: trước khi bắt đầu `GPU-002-B`
+- Verification: chưa có; mọi test `NOT_RUN` (kể cả `ISO-01..07`). Technical review revision 1: `CHANGES REQUESTED`; revision 2: `BLOCKED — CHANGES REQUESTED` (1 P1: test cluster isolation), cùng ngày 24/10/2026; revision 3 chờ review lại. Independent human reviews: 0/2
+- Source owner acknowledgement: Thành viên 2 — `PENDING` (sau khi gửi revision 3)
 - Consumer owner acknowledgement(s): Thành viên 3 / 4 / 5 — `PENDING`
-- Leader coordination: `PENDING` (đang review lại revision 2)
+- Leader coordination: `PENDING` (D1–D12: PENDING LEAD DECISION; đang review lại revision 3)
 - Gate status: `AWAITING_CROSS_PHASE_ACK`
 - Linked change-control record (L2/L3, nếu có): cần tạo cho D1, D2, D3 (và D5 nếu thêm)
 
@@ -536,3 +573,15 @@ Review revision 1: **CHANGES REQUESTED / NOT APPROVED FOR MERGE**. Schema matrix
 | R4 | P2 | Điều chỉnh hướng dẫn cấp owner DSN khi chạy migration để tránh lộ credential | Mục 9 (hàng "Chạy migration"), 9.1, D9 | Biến riêng `GPU_MARKETPLACE_MIGRATION_DATABASE_URL`, chỉ truyền tên biến, không fallback sang DSN runtime, không gắn vào service thường trực, không log URL |
 
 D1–D11 vẫn ở trạng thái `PROPOSED` cho đến khi có quyết định của nhóm trưởng. Revision này không thêm bảng, cột, service hay role nghiệp vụ; biến môi trường mới (`GPU_MARKETPLACE_MIGRATION_DATABASE_URL`, `GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS`) và hai login role DB là đề xuất cấu hình chờ D1/D9/D11.
+
+### 14.1. Revision 3 — phản hồi review lần 2 (24/10/2026)
+
+Review revision 2: **BLOCKED — CHANGES REQUESTED**. Bốn finding R1–R4 được xác nhận đã xử lý; còn 1 P1:
+
+| # | Mức | Yêu cầu review | Đã sửa ở đâu | Tóm tắt thay đổi |
+|---|---|---|---|---|
+| R5.1 | P1 | Bắt buộc dùng PostgreSQL test cluster độc lập cho test có thao tác bootstrap role | Mục 9 (hàng "An toàn DB test"), 9.3, D12 | CI: service postgres mới mỗi job; local: container tạm `tmpfs`, `--rm`, cổng khác, ngoài Compose project sản phẩm. Hàng rào C1–C3 (cổng khác dev, cluster chỉ chứa DB được phép, marker token) chặn trước mọi SQL ghi. Không có cluster riêng → `NOT_RUN`, không fallback sang dev |
+| R5.2 | P1 | Không tự động đổi mật khẩu hoặc quyền của role đã tồn tại trên cluster dùng chung | Mục 6.2 (bước 0), 9.3 (C4, C5) | Bootstrap mặc định create-only: role đã có thì chỉ kiểm tra, lệch thì dừng mã khác 0, không `ALTER`. Đổi mật khẩu chỉ qua cờ `--rotate-password`, không bao giờ gọi từ init script hay test. Mật khẩu test sinh ngẫu nhiên cho cluster tạm |
+| R5.3 | P1 | Bổ sung test xác minh cơ chế cô lập | Mục 9.3 | `ISO-01..07`: chặn cổng dev, chặn thiếu/sai token, chặn cluster có DB lạ, không đổi `rolpassword`/thuộc tính role có sẵn, phát hiện lệch thuộc tính mà không sửa, chỉ đổi mật khẩu khi có cờ, không cluster thì `NOT_RUN`. Tất cả hiện `NOT_RUN` |
+
+Trạng thái merge gate không đổi: D1–D12 `PENDING LEAD DECISION`; ACK TV3/TV4/TV5 `PENDING`; independent human reviews 0/2; PostgreSQL integration tests `NOT_RUN`.
