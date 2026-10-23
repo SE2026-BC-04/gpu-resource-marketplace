@@ -234,6 +234,40 @@ work_units = 490818
 expected_digest = sha256:f1c9d8e371bd4e6876a73b2414c285c6362fe01bca4d8d432169f4d484b3d749
 ```
 
+### V4 — rejection-path vector
+
+Input (same fields as V1 except `job_id`):
+
+```json
+{"algorithm_version":"demo-v1-public1","duration_seconds":60,"job_id":"33333333-3333-4333-8333-000000000c02","listing_id":"22222222-2222-4222-8222-222222222222","requested_gpu_count":2,"worker_id":"11111111-1111-4111-8111-111111111111","workload_profile":"demo-v1"}
+```
+
+The rejection-sampling trace and expected output are:
+
+```text
+work_units_raw(0) = 4294735637  # reject: >= 4,294,000,000
+work_units_raw(1) = 316562456   # accept
+work_units = 316562456 mod 1,000,000 = 562456
+seed_value = 2240287873181493078
+outcome_raw(0) = 632019716
+outcome_bucket = 632019716 mod 100 = 16
+outcome = SUCCESS
+failure_reason = null
+```
+
+Expected output:
+
+```json
+{"duration_seconds":60,"failure_reason":null,"job_id":"33333333-3333-4333-8333-000000000c02","listing_id":"22222222-2222-4222-8222-222222222222","outcome":"SUCCESS","requested_gpu_count":2,"schema_version":"demo-v1","work_units":562456,"workload_profile":"demo-v1"}
+```
+
+```text
+expected_digest = sha256:ad2212d44fef948b303afb1e5d5d8e9435eeab64f6701c54cafc3c6f3fd77aa7
+Calculation status = VERIFIED CALCULATION
+Runtime tests = NOT_RUN
+Design status = PROPOSED — NOT OWNER APPROVED
+```
+
 Vector status:
 
 ```text
