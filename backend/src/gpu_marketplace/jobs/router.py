@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.routing import APIRoute
 
 from gpu_marketplace.jobs.errors import (
+    Forbidden,
     JobDomainError,
+    Unauthenticated,
     ValidationFailed,
     job_error_response,
 )
@@ -16,11 +19,48 @@ from gpu_marketplace.jobs.ports import JobPrincipal, PrincipalProvider
 from gpu_marketplace.jobs.service import JobsReadService
 
 
+class JobsAPIRoute(APIRoute):
+    """Translate typed auth failures raised during FastAPI dependency solving."""
+
+    def get_route_handler(self):
+        original_handler = super().get_route_handler()
+
+        async def route_handler(request: Request) -> Response:
+            try:
+                return await original_handler(request)
+            except JobDomainError as exc:
+                return job_error_response(exc, request_id=_request_id(request))
+            except HTTPException as exc:
+                if exc.status_code == 401:
+                    challenge = next(
+                        (
+                            value
+                            for name, value in (exc.headers or {}).items()
+                            if name.lower() == "www-authenticate"
+                        ),
+                        None,
+                    )
+                    return job_error_response(
+                        Unauthenticated(),
+                        request_id=_request_id(request),
+                        www_authenticate=challenge,
+                    )
+                if exc.status_code == 403:
+                    return job_error_response(
+                        Forbidden(), request_id=_request_id(request)
+                    )
+                raise
+
+        return route_handler
+
+
 def create_jobs_router(
     *, service: JobsReadService, principal_provider: PrincipalProvider
 ) -> APIRouter:
     """Build GET routes only; submission/cancellation await their transaction gates."""
-    router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
+    router = APIRouter(
+        prefix="/api/v1/jobs", tags=["jobs"], route_class=JobsAPIRoute
+    )
 
     @router.get("", response_model=JobCollectionResponse)
     def list_jobs(

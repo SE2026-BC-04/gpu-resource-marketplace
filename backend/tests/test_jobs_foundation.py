@@ -9,7 +9,7 @@ from uuid import UUID
 import anyio
 import pytest
 from fastapi import FastAPI
-from fastapi import dependencies as fastapi_dependencies
+from fastapi import HTTPException, Request
 from fastapi import routing as fastapi_routing
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
@@ -23,6 +23,7 @@ from gpu_marketplace.jobs.errors import (
     InvalidJson,
     JobErrorCode,
     JobNotFound,
+    Unauthenticated,
     UnknownField,
     ValidationFailed,
     job_error_response,
@@ -319,13 +320,31 @@ class FakeReader:
         self.page = page or JobPage(items=(), next_position=None)
         self.record = record
         self.list_calls: list[dict[str, object]] = []
+        self.get_calls: list[dict[str, object]] = []
 
     def list_visible(self, **kwargs: object) -> JobPage:
         self.list_calls.append(kwargs)
-        return self.page
+        principal = kwargs["principal"]
+        visible_items = tuple(
+            record for record in self.page.items if self._visible(record, principal)
+        )
+        return JobPage(items=visible_items, next_position=self.page.next_position)
 
-    def get_visible(self, **_: object) -> JobRecord | None:
+    def get_visible(self, **kwargs: object) -> JobRecord | None:
+        self.get_calls.append(kwargs)
+        if self.record is None or not self._visible(self.record, kwargs["principal"]):
+            return None
         return self.record
+
+    @staticmethod
+    def _visible(record: JobRecord, principal: object) -> bool:
+        role = JobRole(getattr(principal, "role"))
+        user_id = getattr(principal, "user_id")
+        if role is JobRole.CLIENT:
+            return record.client_id == user_id
+        if role is JobRole.WORKER:
+            return record.worker_id == user_id
+        return role is JobRole.ADMIN
 
 
 class FakeCursorCodec:
@@ -349,17 +368,39 @@ class FakeCursorCodec:
         return f"cursor:{context.user_id}:{context.role.value}:{context.scope}:{status}"
 
 
-def make_test_app(*, role: str = "CLIENT", record: JobRecord | None = None) -> FastAPI:
-    principal = Principal(CLIENT_ID if role == "CLIENT" else WORKER_ID, role)
+def make_test_app(
+    *,
+    role: str = "CLIENT",
+    record: JobRecord | None = None,
+    principal_provider=None,
+    next_position: CursorPosition | None = None,
+) -> FastAPI:
+    principal_id = {
+        "CLIENT": CLIENT_ID,
+        "WORKER": WORKER_ID,
+        "ADMIN": UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+    }[role]
+    principal = Principal(principal_id, role)
     reader = FakeReader(
-        page=JobPage(items=(record,) if record is not None else (), next_position=None),
+        page=JobPage(
+            items=(record,) if record is not None else (),
+            next_position=next_position,
+        ),
         record=record,
     )
-    service = JobsReadService(reader=reader, cursor_codec=FakeCursorCodec())
-    app = FastAPI()
-    app.include_router(
-        create_jobs_router(service=service, principal_provider=lambda: principal)
+    service = JobsReadService(
+        reader=reader,
+        cursor_codec=HmacCursorCodec(b"test-only-jobs-cursor-key-0123456789"),
     )
+    app = FastAPI()
+    if principal_provider is None:
+        async def principal_provider():
+            return principal
+
+    app.include_router(
+        create_jobs_router(service=service, principal_provider=principal_provider)
+    )
+    app.state.test_reader = reader
     return app
 
 
@@ -369,6 +410,7 @@ def http_get(
     *,
     monkeypatch: pytest.MonkeyPatch,
     headers: dict[str, str] | None = None,
+    raise_app_exceptions: bool = True,
 ):
     async def run_sync_inline(target, *args, **kwargs):
         # This sandbox's AnyIO worker portal deadlocks for all sync FastAPI
@@ -377,13 +419,13 @@ def http_get(
         return target(*args, **kwargs)
 
     monkeypatch.setattr(fastapi_routing, "run_in_threadpool", run_sync_inline)
-    monkeypatch.setattr(
-        fastapi_dependencies.utils, "run_in_threadpool", run_sync_inline
-    )
 
     async def send_request():
         async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://jobs.test"
+            transport=ASGITransport(
+                app=app, raise_app_exceptions=raise_app_exceptions
+            ),
+            base_url="http://jobs.test",
         ) as client:
             return await client.get(path, headers=headers)
 
@@ -464,6 +506,190 @@ def test_router_asgi_maps_invalid_cursor_to_400(monkeypatch: pytest.MonkeyPatch)
     assert response.status_code == 400
     assert UUID(response.headers["X-Request-ID"]).version == 4
     assert response.headers["Cache-Control"] == "no-store"
+
+
+@pytest.mark.parametrize("failure", ["missing", "invalid", "expired", "domain"])
+def test_dependency_auth_failures_map_to_401_without_reader_access(
+    failure: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def principal_provider(request: Request):
+        # Test double models missing, invalid, and expired bearer credentials;
+        # production JWT validation remains owned by GPU-003.
+        authorization = request.headers.get("authorization")
+        assert authorization == {
+            "missing": None,
+            "invalid": "Bearer invalid-test-token",
+            "expired": "Bearer expired-test-token",
+            "domain": None,
+        }[failure]
+        raise Unauthenticated()
+
+    app = make_test_app(principal_provider=principal_provider)
+    headers = {
+        "invalid": {"Authorization": "Bearer invalid-test-token"},
+        "expired": {"Authorization": "Bearer expired-test-token"},
+    }.get(failure, {}) | {"X-Request-ID": "caller-controlled-id"}
+    response = http_get(
+        app,
+        "/api/v1/jobs",
+        monkeypatch=monkeypatch,
+        headers=headers,
+    )
+
+    assert response.status_code == 401
+    request_id = response.headers["X-Request-ID"]
+    assert UUID(request_id).version == 4
+    assert request_id != "caller-controlled-id"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.json() == {
+        "error": {
+            "code": "UNAUTHENTICATED",
+            "message": "Authentication is required.",
+            "request_id": request_id,
+        }
+    }
+    assert "token" not in response.text.lower()
+    assert app.state.test_reader.list_calls == []
+    assert app.state.test_reader.get_calls == []
+
+
+def test_http_auth_exceptions_are_mapped_and_internal_detail_is_not_exposed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def unauthorized_provider():
+        raise HTTPException(
+            status_code=401,
+            detail="private token verifier detail",
+            headers={"www-authenticate": "Bearer"},
+        )
+
+    app = make_test_app(principal_provider=unauthorized_provider)
+    response = http_get(app, "/api/v1/jobs", monkeypatch=monkeypatch)
+
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.json()["error"]["code"] == "UNAUTHENTICATED"
+    assert "private token" not in response.text
+    assert app.state.test_reader.list_calls == []
+
+
+def test_dependency_403_maps_to_forbidden_not_unauthenticated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def forbidden_provider():
+        raise HTTPException(status_code=403, detail="private policy detail")
+
+    app = make_test_app(principal_provider=forbidden_provider)
+    response = http_get(app, "/api/v1/jobs", monkeypatch=monkeypatch)
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+    assert UUID(response.headers["X-Request-ID"]).version == 4
+    assert response.headers["Cache-Control"] == "no-store"
+    assert "private policy" not in response.text
+    assert app.state.test_reader.list_calls == []
+
+
+def test_unexpected_dependency_error_is_not_misclassified_as_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def broken_provider():
+        raise RuntimeError("private provider failure")
+
+    app = make_test_app(principal_provider=broken_provider)
+    response = http_get(
+        app,
+        "/api/v1/jobs",
+        monkeypatch=monkeypatch,
+        raise_app_exceptions=False,
+    )
+
+    assert response.status_code == 500
+    assert response.text == "Internal Server Error"
+    assert "private provider failure" not in response.text
+    assert app.state.test_reader.list_calls == []
+
+
+@pytest.mark.parametrize(
+    ("role", "scope", "expected_worker", "expected_status"),
+    [
+        ("CLIENT", "mine", True, 200),
+        ("WORKER", "assigned", False, 200),
+        ("ADMIN", "all", False, 200),
+    ],
+)
+def test_router_list_role_visibility_and_projection(
+    role: str,
+    scope: str,
+    expected_worker: bool,
+    expected_status: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = make_test_app(role=role, record=make_record())
+    response = http_get(
+        app, f"/api/v1/jobs?scope={scope}", monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == expected_status
+    item = response.json()["items"][0]
+    assert ("worker_id" in item) is expected_worker
+    assert "client_id" not in item
+    assert not {"seed_value", "expected_digest"}.intersection(item)
+
+
+@pytest.mark.parametrize(
+    ("role", "scope"),
+    [("CLIENT", "assigned"), ("WORKER", "mine"), ("ADMIN", "mine")],
+)
+def test_router_rejects_cross_role_scope(
+    role: str, scope: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = make_test_app(role=role, record=make_record())
+    response = http_get(
+        app, f"/api/v1/jobs?scope={scope}", monkeypatch=monkeypatch
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.parametrize(
+    ("role", "record_client", "record_worker", "expected_status"),
+    [
+        ("CLIENT", CLIENT_ID, WORKER_ID, 200),
+        (
+            "CLIENT",
+            UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+            WORKER_ID,
+            404,
+        ),
+        ("WORKER", CLIENT_ID, WORKER_ID, 200),
+        (
+            "WORKER",
+            CLIENT_ID,
+            UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
+            404,
+        ),
+        ("ADMIN", CLIENT_ID, WORKER_ID, 200),
+    ],
+)
+def test_router_detail_role_visibility(
+    role: str,
+    record_client: UUID,
+    record_worker: UUID,
+    expected_status: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = make_record(client_id=record_client, worker_id=record_worker)
+    app = make_test_app(role=role, record=record)
+    response = http_get(
+        app, f"/api/v1/jobs/{JOB_ID}", monkeypatch=monkeypatch
+    )
+    assert response.status_code == expected_status
+    if expected_status == 200:
+        payload = response.json()
+        assert "client_id" not in payload
+        assert not {"seed_value", "expected_digest"}.intersection(payload)
 
 
 def test_pagination_uses_role_default_and_context_binds_cursor() -> None:

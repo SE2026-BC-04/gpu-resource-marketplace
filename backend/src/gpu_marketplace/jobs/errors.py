@@ -147,7 +147,12 @@ def validate_idempotency_key(value: str | None) -> str:
     return value
 
 
-def job_error_response(error: JobDomainError, *, request_id: str) -> JSONResponse:
+def job_error_response(
+    error: JobDomainError,
+    *,
+    request_id: str,
+    www_authenticate: str | None = None,
+) -> JSONResponse:
     status_code, message = _ERRORS[error.code]
     try:
         parsed_request_id = UUID(request_id)
@@ -160,6 +165,18 @@ def job_error_response(error: JobDomainError, *, request_id: str) -> JSONRespons
         and str(parsed_request_id) == request_id
         else str(uuid4())
     )
+    headers = {"X-Request-ID": safe_request_id, "Cache-Control": "no-store"}
+    if (
+        error.code is JobErrorCode.UNAUTHENTICATED
+        and isinstance(www_authenticate, str)
+        and len(www_authenticate) <= 512
+        and (
+            www_authenticate.lower() == "bearer"
+            or www_authenticate.lower().startswith("bearer ")
+        )
+        and all(0x20 <= ord(char) <= 0x7E for char in www_authenticate)
+    ):
+        headers["WWW-Authenticate"] = www_authenticate
     return JSONResponse(
         status_code=status_code,
         content={
@@ -169,5 +186,5 @@ def job_error_response(error: JobDomainError, *, request_id: str) -> JSONRespons
                 "request_id": safe_request_id,
             }
         },
-        headers={"X-Request-ID": safe_request_id, "Cache-Control": "no-store"},
+        headers=headers,
     )
