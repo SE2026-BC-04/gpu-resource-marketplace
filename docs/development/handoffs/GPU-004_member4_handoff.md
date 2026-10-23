@@ -6,6 +6,7 @@
 > **Phụ trách:** Thành viên 4 (Listings), nhóm trưởng (shared integration)
 > **Baseline thiết kế ban đầu:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b`
 > **Rà soát đồng bộ ngày 23/10/2026:** `main@538802adebeaeb74dcccd0c025f3a7abc81336c0` và handoff tại `ffb17de39d32956087aca187d490bb03c32ee980`; chỉ rà soát tài liệu, không xác nhận dependency đã sẵn sàng hay test ứng dụng đã chạy.
+> **Đối chiếu upstream ngày 24/10/2026:** `main@21071549937888c997b250625607a16a97a20419`; Phase 1D §2.1/§3.2 đã ghi điều kiện nhận DB/Auth và dùng chung fixture. Schema matrix GPU-002-A revision 3 vẫn `PROPOSED`, D1–D12 và `XPH-GPU-002-01` chưa đóng; không coi bản cập nhật này là ACK hoặc dependency đã triển khai.
 > **Tài liệu:** [Phase 1D — GPU Listings Management](../../architecture/phases/phase1d_gpu_listings.md) — nguồn thiết kế chi tiết đã duyệt; trạng thái code/test được ghi riêng.
 > **Nguồn bắt buộc:** API Contract v0.6 §7; Database Design v0.4 §§9,11; Module Design; Test Design; Team Contribution Rules; Inter-Phase Change Control.
 
@@ -31,6 +32,7 @@
 - [Module Design: Registry and write ownership](../../design/module-design.md)
 - [Test Design: API-LIST-01..18, DBTX](../../design/test-design.md)
 - [Phase 1B: DB/Repository prerequisites](../../architecture/phases/phase1b_database_persistence.md)
+- [GPU-002-A revision 3: schema matrix, grants/trigger/test harness đang đề xuất](../../architecture/phases/phase1b_gpu002a_schema_matrix.md) — đối chiếu Phase 1D §2.1 và §3.2; chỉ dùng phần đề xuất sau khi có quyết định/ACK cần thiết.
 - [Phase 1C: Auth/RBAC prerequisites](../../architecture/phases/phase1c_authentication_rbac.md)
 - [Phase 1E: Jobs consumer of Listing status/capacity](../../architecture/phases/phase1e_job_submission_queue.md)
 
