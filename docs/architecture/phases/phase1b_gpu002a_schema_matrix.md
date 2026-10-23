@@ -213,7 +213,7 @@ Ghi chú `SPEC`: bốn UNIQUE phụ `uq_jobs_id_*` thuộc bảng `jobs` (đã t
 | `pk_simulation_references` | `PRIMARY KEY (job_id)` — tối đa một reference/Job | §9.2-08 | `DBP-05` (phần áp dụng): reference thứ hai rejected |
 | `fk_simulation_references_job_id` | `(job_id) → jobs(id) ON DELETE CASCADE` (chỉ sau guarded delete) | §9.2-08, §9.3 | cascade chỉ khi guard cho phép (mục 8) |
 | `ck_simulation_references_outcome` | `expected_outcome IN ('SUCCESS','FAILED')` | §9.2-08 | negative outcome |
-| `ck_simulation_references_outcome_reason` | `(expected_outcome = 'SUCCESS' AND expected_failure_reason IS NULL) OR (expected_outcome = 'FAILED' AND expected_failure_reason IN ('WORKER_FAULT','JOB_FAULT'))` | §9.2-08 | SUCCESS có reason / FAILED với `SYSTEM_FAULT` rejected |
+| `ck_simulation_references_outcome_reason` | `(expected_outcome = 'SUCCESS' AND expected_failure_reason IS NULL) OR (expected_outcome = 'FAILED' AND expected_failure_reason IS NOT NULL AND expected_failure_reason IN ('WORKER_FAULT','JOB_FAULT'))` | §9.2-08 | SUCCESS có reason / FAILED với `SYSTEM_FAULT` / FAILED với reason NULL rejected (`IN` trên NULL cho kết quả UNKNOWN nên cần `IS NOT NULL` tường minh) |
 | `ck_simulation_references_digest_format` | `expected_digest ~ '^sha256:[0-9a-f]{64}$'` | §9.2-08 | hex hoa, thiếu prefix, 63 ký tự rejected |
 
 `SPEC`: PK/FK chỉ bảo đảm **tối đa** một reference. "Đúng một reference cho mỗi Job" thuộc `TX-SUBMIT` (GPU-005), trừ khi chọn thêm cơ chế DB ở D5. Fixture test chỉ dùng giá trị hợp lệ về **định dạng**, không phải output của generator, và không được trình bày như oracle thật.
