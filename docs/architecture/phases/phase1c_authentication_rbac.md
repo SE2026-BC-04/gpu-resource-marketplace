@@ -1,14 +1,15 @@
 # Phase 1C — Authentication & RBAC (GPU-003)
 
 > **Dự án:** GPU Resource Marketplace<br>
-> **Đường dẫn dự kiến:** `docs/architecture/phases/phase1c_authentication_rbac.md`<br>
+> **Đường dẫn:** `docs/architecture/phases/phase1c_authentication_rbac.md`<br>
 > **Ngày lập:** 21/10/2026<br>
 > **Chủ sở hữu công việc:** Thành viên 3 — Identity/Auth và Login UI<br>
-> **Trạng thái tài liệu:** `APPROVED DESIGN` — Chủ dự án phê duyệt ngày 21/10/2026; chưa commit/merge vào repository<br>
+> **Trạng thái tài liệu:** `APPROVED DESIGN` — Chủ dự án phê duyệt ngày 21/10/2026; tài liệu đã có trong repository (PR #4), trạng thái triển khai ghi riêng bên dưới<br>
 > **Bổ sung governance 21/10/2026:** áp dụng [Inter-Phase Change Control](../../development/interphase-change-control.md); nội dung Auth đã duyệt và trạng thái implementation không thay đổi.
 > **Trạng thái triển khai:** `PLANNED / NOT_IMPLEMENTED` — phê duyệt thiết kế, chưa cho phép tự động code/commit/push/PR<br>
-> **Baseline kiểm tra:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b` (GPU-001 đã merge)<br>
-> **Phụ thuộc:** GPU-002 (Phase 1B) đã được chủ dự án duyệt **thiết kế**, chưa có migration nghiệp vụ trên `main` tại thời điểm kiểm tra.<br>
+> **Baseline thiết kế ban đầu:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b` (GPU-001 đã merge)<br>
+> **Rà soát đồng bộ ngày 24/10/2026:** `main@f2db64e` (PR #9 đã merge); chỉ rà soát tài liệu, đối chiếu với [schema matrix GPU-002-A](phase1b_gpu002a_schema_matrix.md) revision 3 (commit `b923b9e`; nội dung trong tài liệu đó vẫn ghi `PROPOSED`); không xác nhận dependency đã sẵn sàng hay test ứng dụng đã chạy.<br>
+> **Phụ thuộc:** GPU-002 (Phase 1B) đã được chủ dự án duyệt **thiết kế**, chưa có migration nghiệp vụ trên `main` tại thời điểm kiểm tra. Các đề xuất về DB role, grants, trigger, cách chạy migration và cô lập test DB trong schema matrix GPU-002-A **chưa được nhóm trưởng quyết định** (D1–D12); mục nào của tài liệu này dựa trên chúng đều ghi rõ là đề xuất.<br>
 > **Nguồn chuẩn:** [API Contract v0.6](../../design/api-contract.md) §§3–6,14; [Database Design v0.4](../../design/database-design.md) §9.2; [Module Design](../../design/module-design.md) §§2–5; [Test Design](../../design/test-design.md); ADR-001/002/008 và [Team Contribution Rules](../../development/team-contribution-rules.md).
 
 ## 1. MỤC TIÊU
@@ -28,7 +29,7 @@
 
 - Không có public `register/signup`, reset/change password, change-role, tạo Admin, OAuth/SSO, refresh token, DB session table hoặc revoke JWT tức thời.
 - Không triển khai Listings/Jobs API, Dashboard nghiệp vụ, Manager scheduler, Simulator workload, Signed Results/Disputes.
-- Không thêm database table thứ 11 ở Phase 1B, service thứ sáu, cookie session, localStorage/IndexedDB token hoặc rate-limit behavior chưa được chấp thuận.
+- Không thêm bảng/cột/constraint mới ngoài 10 bảng Phase 1B của GPU-002, service thứ sáu, cookie session, localStorage/IndexedDB token hoặc rate-limit behavior chưa được chấp thuận.
 - Không tự sửa Requirements, ADR hoặc hợp thức hóa API Contract khác biệt ngoài quy trình change control.
 
 ### 1.3. Definition of Done dự kiến
@@ -48,7 +49,7 @@
 | `api` FastAPI | App factory, health, CORS, logging, DB readiness | Identity router, HTTP DTO/validation, auth guards, standard errors |
 | `identity/` | Package skeleton | Auth use cases, credential verifier, JWT codec, principal/policy |
 | `repositories/`, `domain/` | Skeleton; GPU-002 được duyệt thiết kế | Dùng Account/Role query + SQLAlchemy UoW do GPU-002 bàn giao |
-| PostgreSQL | PostgreSQL 16 service, no business migration trên `main` | **Không tạo bảng**; đọc `users`, `roles`, `user_roles`; audit append khi phù hợp |
+| PostgreSQL | PostgreSQL 16 service, no business migration trên `main` | **Không tạo bảng**; chỉ **đọc** `users`, `roles`, `user_roles` (không có quyền ghi trong thiết kế GPU-002); audit append (`INSERT` vào `audit_events`) khi phù hợp |
 | `frontend` | React/TS/Vite SPA, API health client, placeholder | Login form, Auth API client, session memory, logout và role readout |
 | `manager`, `simulator` | Independent processes, simulator không được nối DB | Không thay đổi; internal service tokens **khác** end-user JWT |
 
@@ -65,6 +66,16 @@ flowchart LR
 ```
 
 **Ranh giới gọi:** HTTP handler → identity use case / auth policy → Account/Role repository (GPU-002) → PostgreSQL. Domain policy không import FastAPI hay React. Role guard ở backend là nguồn quyền; UI chỉ hỗ trợ hiển thị và điều hướng.
+
+**Điều kiện từ GPU-002 mà Auth phải tuân thủ** (theo Database Design §9.2 và schema matrix GPU-002-A):
+
+| Chủ đề | Nội dung | Nhãn |
+|---|---|---|
+| Cột dùng cho Auth | `users(id, login_name varchar(128) UNIQUE, password_hash text, status ACTIVE\|DISABLED)`, `user_roles(user_id PK, role_code)`, `roles(code)`. `PK(user_id)` bảo đảm tối đa một role/account; account không có dòng `user_roles` vẫn có thể tồn tại và phải bị từ chối (fail closed) | `SPEC` |
+| Không có cột ghi cho Auth | Auth không `INSERT/UPDATE/DELETE` `users`, `user_roles`, `roles`; tài khoản chỉ được provisioning ngoài migration, bằng role có quyền owner (matrix mục 5 và 6.2), không bao giờ bằng DSN runtime của API/Manager. **Contract credential cho provisioning (tên biến, cách cấp, công cụ chạy) chưa được định nghĩa:** `GPU_MARKETPLACE_MIGRATION_DATABASE_URL` ở matrix mục 9.1 là biến dành cho migration, GPU-003 **không** mặc định coi đó là giao diện provisioning. Chờ Thành viên 2 và nhóm trưởng chốt (§5.3 mục 10) | `SPEC` + `PROPOSAL` (mục 5, 6.2 của matrix); credential provisioning `PENDING` |
+| Tên constraint là contract | Repository ánh xạ lỗi DB theo tên (`uq_users_login_name`, `ck_users_status`, `fk_user_roles_*`); Auth không được phụ thuộc vào thông điệp lỗi của driver | `IMPL` (đề xuất đặt tên của matrix) |
+| Quyền DB của API | Nếu D1 được duyệt, một script bootstrap chạy **trước** migration tạo group `gpm_api_rw` và login role `gpm_api_app` (`NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`, ...). API runtime kết nối bằng `gpm_api_app`, chỉ có `SELECT` trên `users`, `user_roles`, `roles` và `INSERT` (không gồm `id`, `created_at`) trên `audit_events`; không service runtime nào nhận owner DSN. Test Auth gọi API bằng role này, còn fixture dựng dữ liệu bằng owner | `PROPOSAL` (D1, chờ nhóm trưởng) |
+| `audit_events.actor_kind` | CHECK chỉ cho `USER` hoặc `SERVICE`; không có giá trị cho người chưa xác thực. Cách ghi sự kiện login thất bại (và việc có ghi hay không) phải được chốt trước khi code; `actor_ref` không được chứa `login_name` thô hay bất kỳ giá trị người dùng nhập | Cần quyết định (xem §5.3) |
 
 ### 2.2. API Contract giữ nguyên
 
@@ -120,6 +131,10 @@ Hàm normalization **duy nhất** phải được dùng đồng nhất trong acc
 - Không trim `U+00A0` hoặc các Unicode whitespace khác.
 - Validate `login_name` có độ dài `1..128` **sau** normalization; login toàn ASCII spaces → `422`.
 - **Không trim/normalize password**; kiểm tra password bằng hash lưu ở `users.password_hash`, không dùng plain-text comparison/logging.
+
+**Chủ sở hữu hàm dùng chung (đề xuất, chờ ACK của Thành viên 2):** hàm chuẩn hóa `login_name` và hàm băm/kiểm tra mật khẩu do Thành viên 3 sở hữu dưới dạng hàm thuần (không import FastAPI, SQLAlchemy hay PostgreSQL driver). Công cụ provisioning của Thành viên 2 chỉ **import lại** hàm này, không tự cài đặt quy tắc thứ hai. Database Design không có CHECK chuẩn hóa cho `login_name`, nên tính nhất quán provisioning/login chỉ được bảo đảm bằng việc dùng chung hàm và bằng test.
+
+**Đặc tính của cột `login_name` ở phía DB:** `UNIQUE(login_name)` và phép so sánh bằng chỉ phân biệt hoa/thường và NFC/NFD nếu cột dùng collation xác định (deterministic, mặc định của PostgreSQL). Test `P1C-AC-04` phải có kiểm tra ở mức DB (`Demo` khác `demo`, `café` NFC khác NFD) và kiểm tra collation của cột.
 
 **Chưa được đặc tả trong nguồn:** password hashing/verification algorithm cụ thể và quy trình provisioning tài khoản demo an toàn. Phải đưa ra đề xuất kỹ thuật để nhóm trưởng review cùng GPU-002/GPU-003 trước code phụ thuộc; không tuyên bố một thuật toán đã được duyệt khi repository chỉ quy định lưu `password_hash`.
 
@@ -205,11 +220,13 @@ Có thể phát triển `GPU-003-B` và UI với mocks độc lập trên branch
 | `P1C-AC-02` | JWT HS256 đúng `iss/aud/typ/sub`; sai chữ ký/claim/algorithm bị 401 |
 | `P1C-AC-03` | Microsecond NumericDate test: `T0+899.999999` hợp lệ, `T0+900.000000` hết hạn, `exp-iat=900s`, zero leeway |
 | `P1C-AC-04` | Unicode/case/ASCII-trim fixtures theo DEC-P1-03; seeding/Login normalization đồng nhất |
-| `P1C-AC-05` | User disabled/role changed after issuance được đánh giá theo DB current state; invalid mapping fail closed |
+| `P1C-AC-05` | User disabled/role changed after issuance được đánh giá theo DB current state; invalid mapping fail closed. Vì `workers(user_id, role_code)` và `jobs(client_id, client_role)` tham chiếu `user_roles` bằng khóa ghép với `ON DELETE RESTRICT`, tài khoản seed có Worker profile hoặc Job **không** đổi/xóa được role: test phải tạo tài khoản tạm không có phụ thuộc bằng owner DSN |
 | `P1C-AC-06` | Login/Me/Logout API status+DTO/error/no-store/request-ID đúng v0.6; 0 public registration endpoints |
 | `P1C-AC-07` | React Login→Me→Logout với API thật; browser refresh/mount không phục hồi JWT; protected call gửi đúng Bearer |
 | `P1C-AC-08` | Fresh PostgreSQL DB+fixtures, pytest + Vitest + Compose smoke + current foundation regression PASS |
 | `P1C-AC-09` | PR có SHA/command/log evidence, reviewer độc lập đúng cấp độ, merge trước khi ghi IMPLEMENTED |
+
+**Môi trường test DB (theo đề xuất GPU-002-A mục 9.2–9.3, D11–D12, chờ quyết định):** integration test Auth dùng **chung fixture DB của GPU-002**, không tự viết fixture tạo/xóa DB hay bootstrap role. Fixture đó chỉ chạy trên một **cluster PostgreSQL tạm riêng** (CI: service postgres mới mỗi job; local: container tạm ngoài Compose project sản phẩm), qua các hàng rào cấp cluster C1–C5 và cấp database G1–G9; cần các biến `GPU_MARKETPLACE_TEST_DATABASE_URL`, `GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS=1` và `GPU_MARKETPLACE_TEST_CLUSTER_TOKEN`. Thiếu cluster hoặc biến thì test được skip và ghi `NOT_RUN`, không ghi PASS, không bao giờ fallback sang service `postgres` của Compose dev. Mật khẩu của `gpm_api_app` trong test sinh ngẫu nhiên cho từng cluster tạm, không đọc `.env` dev. Seed `users`/`user_roles` bị `BLOCKED` cho đến khi thuật toán băm mật khẩu được duyệt.
 
 **Test evidence phải ghi:** Git SHA, migration revision, env/runtime, fixture/fake clock, command, actual status/body (đã redacted), oracle, PASS/FAIL/BLOCKED/NOT_RUN. Foundation CI PASS của GPU-001 không chứng minh Auth PASS.
 
@@ -231,6 +248,11 @@ Toàn bộ `GPU-003-A..F`, Auth endpoints/guards, password hash verifier, JWT is
 3. **JWT exact precision:** trình bày lựa chọn thư viện, cách serialize JSON NumericDate ở microsecond và verify không truncate/leeway để tech lead kiểm tra trước code.
 4. **API integration:** `api/app.py` do trưởng nhóm sở hữu; phải thỏa error/request-ID contract mà không phá health route/CORS/CI cũ.
 5. **External test dependencies:** các phép thử về ownership của Jobs/Listing và internal Bearer routes chưa thể nghiệm thu toàn bộ ở GPU-003, phải handoff đúng chủ sở hữu.
+6. **Hàm dùng chung với provisioning:** xác nhận với Thành viên 2 rằng chuẩn hóa `login_name` và băm mật khẩu do `identity/` sở hữu và công cụ provisioning import lại (xem §2.4).
+7. **Audit cho người chưa xác thực:** `audit_events.actor_kind` chỉ có `USER|SERVICE`; quyết định có ghi sự kiện login thất bại hay không và dùng `actor_kind`/`actor_ref` nào (không chứa `login_name` thô).
+8. **Phụ thuộc vào đề xuất GPU-002-A (D1–D12):** cách cấp DB role cho API, cách chạy migration bằng owner DSN và cluster test tạm còn chờ nhóm trưởng; không viết test hay cấu hình giả định chúng đã được duyệt.
+9. **Collation và khóa ghép:** thêm kiểm tra collation của `login_name` và dùng tài khoản tạm cho test đổi/mất role (xem §2.4 và `P1C-AC-05`).
+10. **Credential cho provisioning:** Thành viên 2 và nhóm trưởng chốt công cụ provisioning nhận credential quyền owner bằng biến/giao diện nào (dùng chung với migration hay biến riêng), quy tắc không ghi credential ra dòng lệnh/log, và cách dùng trong cluster test tạm. Cho đến khi chốt, GPU-003 không viết tài liệu, test hay cấu hình giả định một tên biến cụ thể.
 
 ### 5.4. Handoff
 
@@ -253,7 +275,7 @@ Toàn bộ `GPU-003-A..F`, Auth endpoints/guards, password hash verifier, JWT is
 
 | Auth boundary có thể bị đổi | Owner phải cùng xác thực **khi bị ảnh hưởng** |
 |---|---|
-| Account/role repository, password provisioning, DB query semantics | Thành viên 2 (GPU-002) + Thành viên 3 |
+| Account/role repository, password provisioning, DB query semantics, tên constraint, DB grants/role của API, credential provisioning (contract chưa định nghĩa, §5.3 mục 10), fixture và cluster test (xem `XPH-GPU-002-01` revision 3, hiện `AWAITING_CROSS_PHASE_ACK`) | Thành viên 2 (GPU-002) + Thành viên 3 |
 | `AuthenticatedPrincipal`, role guard, JWT claim/expiry/normalization | Thành viên 4 (GPU-004) và/hoặc Thành viên 5 (GPU-005) + Thành viên 3 |
 | Shared frontend Auth state, API client/Bearer convention | Thành viên 4/5 dùng UI; nhóm trưởng nếu shared shell/client chịu tác động |
 | `api/app.py`, CORS, config, error/request-ID, router registration | Nhóm trưởng (GPU-001/integration) + Thành viên 3 |
