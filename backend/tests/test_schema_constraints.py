@@ -338,7 +338,11 @@ def test_simulation_reference_rules(
 def test_simulation_reference_cascades_when_its_job_is_deleted(conn: Connection) -> None:
     client_id = add_user(conn, "CLIENT")
     _, worker_id = add_worker(conn)
-    job_id = add_job(conn, client_id, add_listing(conn, worker_id), worker_id)
+    # D3 only lets a Job go once it has been terminal for 23 days; the FK cascade is what is checked here.
+    terminal_at = conn.execute(text("SELECT clock_timestamp() - interval '24 days'")).scalar_one()
+    job_id = add_job(
+        conn, client_id, add_listing(conn, worker_id), worker_id, {"status": "COMPLETED", "terminal_at": terminal_at}
+    )
     conn.execute(
         text(
             "INSERT INTO simulation_references (job_id, seed_value, algorithm_version, expected_outcome, expected_digest) "
