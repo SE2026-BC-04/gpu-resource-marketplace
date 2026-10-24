@@ -448,3 +448,101 @@ def test_p2_upgrade_runs_the_login_role_preflight() -> None:
     upgrade_body = source.split("def upgrade() -> None:", 1)[1].split("def downgrade", 1)[0]
     assert "require_login_roles(bind" in upgrade_body
     assert upgrade_body.index("require_login_roles(") < upgrade_body.index("op.execute(")
+
+
+# --- PR #27 review (TV5, P1): the migration re-checks the full role definition before granting ---------------------
+
+INTRUDER = "gpm_t_role_intruder"
+
+# (setup applied by the owner to a database at the baseline, cleanup, text the refusal must contain).
+ROLE_DRIFT = [
+    pytest.param(
+        f"CREATE ROLE {INTRUDER} LOGIN; GRANT {API_GROUP} TO {INTRUDER}",
+        f"DROP ROLE {INTRUDER}",
+        f"{API_GROUP}: unexpected member(s) ['{INTRUDER}']",
+        id="extra-direct-member-of-the-api-group",
+    ),
+    pytest.param(
+        f"CREATE ROLE {INTRUDER} LOGIN; GRANT {API_LOGIN} TO {INTRUDER}",
+        f"DROP ROLE {INTRUDER}",
+        f"{API_LOGIN}: unexpected member(s) ['{INTRUDER}']",
+        id="indirect-member-through-the-api-login",
+    ),
+    pytest.param(
+        f"CREATE ROLE {INTRUDER} NOLOGIN; GRANT {MANAGER_GROUP} TO {INTRUDER}",
+        f"DROP ROLE {INTRUDER}",
+        f"{MANAGER_GROUP}: unexpected member(s) ['{INTRUDER}']",
+        id="extra-member-of-the-manager-group",
+    ),
+    pytest.param(
+        f"GRANT {MANAGER_GROUP} TO {API_LOGIN}",
+        f"REVOKE {MANAGER_GROUP} FROM {API_LOGIN}",
+        f"{API_LOGIN}: unexpected membership",
+        id="api-login-also-in-the-manager-group",
+    ),
+    pytest.param(
+        f"ALTER ROLE {API_LOGIN} CREATEROLE", f"ALTER ROLE {API_LOGIN} NOCREATEROLE", f"{API_LOGIN}: CREATEROLE is set",
+        id="createrole-on-the-api-login",
+    ),
+    pytest.param(
+        f"ALTER ROLE {MANAGER_GROUP} BYPASSRLS",
+        f"ALTER ROLE {MANAGER_GROUP} NOBYPASSRLS",
+        f"{MANAGER_GROUP}: BYPASSRLS is set",
+        id="bypassrls-on-the-manager-group",
+    ),
+    pytest.param(
+        f"ALTER ROLE {API_LOGIN} NOINHERIT", f"ALTER ROLE {API_LOGIN} INHERIT", f"{API_LOGIN}: expected INHERIT",
+        id="noinherit-on-the-api-login",
+    ),
+    pytest.param(
+        f"ALTER ROLE {API_GROUP} LOGIN", f"ALTER ROLE {API_GROUP} NOLOGIN", f"{API_GROUP}: expected NOLOGIN",
+        id="login-on-the-api-group",
+    ),
+]
+
+
+@pytest.mark.parametrize(("setup", "cleanup", "reason"), ROLE_DRIFT)
+def test_upgrade_fails_closed_when_a_runtime_role_drifted_from_its_definition(
+    baseline_database: Engine, alembic_config: Config, setup: str, cleanup: str, reason: str
+) -> None:
+    command.downgrade(alembic_config, BASELINE)
+    try:
+        with baseline_database.begin() as connection:
+            for statement in setup.split("; "):
+                connection.execute(text(statement))
+        with pytest.raises(RuntimeError, match="runtime roles differ from the approved definition") as failure:
+            command.upgrade(alembic_config, "head")
+        assert reason in str(failure.value)
+        assert "no role or ACL was changed" in str(failure.value)
+        with baseline_database.connect() as connection:
+            version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+            assert version == BASELINE, "a refused upgrade must leave the revision unchanged"
+            acl = public_database_acl(connection)
+            assert API_GROUP not in acl and MANAGER_GROUP not in acl, "a refused upgrade must not grant anything"
+            granted = connection.execute(text(f"SELECT has_table_privilege('{API_GROUP}', 'jobs', 'SELECT')")).scalar_one()
+            assert granted is False, "a refused upgrade must not leave a partial grant"
+    finally:
+        with baseline_database.begin() as connection:
+            for statement in cleanup.split("; "):
+                connection.execute(text(statement))
+        command.upgrade(alembic_config, "head")
+
+
+def test_bootstrapped_roles_pass_the_role_definition_preflight(conn: Connection) -> None:
+    grants_module().require_role_definitions(conn)
+
+
+def test_the_role_definition_refusal_never_shows_a_password(conn: Connection) -> None:
+    conn.execute(text(f"ALTER ROLE {API_LOGIN} CREATEDB"))  # rolled back with the test transaction
+    with pytest.raises(RuntimeError) as failure:
+        grants_module().require_role_definitions(conn)
+    message = str(failure.value)
+    assert f"{API_LOGIN}: CREATEDB is set" in message
+    assert "password" not in message.lower() and "scram" not in message.lower()
+
+
+def test_upgrade_runs_the_role_definition_preflight_before_any_grant() -> None:
+    source = (VERSIONS / "0002_phase1b_grants.py").read_bytes().decode("utf-8")
+    upgrade_body = source.split("def upgrade() -> None:", 1)[1].split("def downgrade", 1)[0]
+    assert "require_role_definitions(bind)" in upgrade_body
+    assert upgrade_body.index("require_role_definitions(") < upgrade_body.index("op.execute(")

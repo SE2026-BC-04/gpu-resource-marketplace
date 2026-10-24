@@ -111,6 +111,29 @@ def _drift(
     return problems
 
 
+def _definitions(names: RoleNames) -> tuple[tuple[str, bool, set[str], set[str]], ...]:
+    """(role, LOGIN, exact direct memberships, roles allowed to hold it directly or indirectly)."""
+    return (
+        (names.api_group, False, set(), {names.api_login}),
+        (names.manager_group, False, set(), {names.manager_login}),
+        (names.api_login, True, {names.api_group}, set()),
+        (names.manager_login, True, {names.manager_group}, set()),
+    )
+
+
+def role_definition_problems(connection: Connection, names: RoleNames = RoleNames()) -> list[str]:
+    """Read-only check of every existing runtime role against the approved definition.
+
+    Reports restricted attributes, LOGIN/NOLOGIN, INHERIT, exact memberships and unexpected direct or indirect
+    members. Missing roles are not reported here. Used by the bootstrap and by migration 0002 before it grants.
+    """
+    return [
+        problem
+        for name, login, groups, allowed in _definitions(names)
+        for problem in _drift(connection, name, login=login, expected_groups=groups, allowed_members=allowed)
+    ]
+
+
 def _scram_verifier(connection: Connection, role: str, password: str) -> str:
     """Hash the password with libpq so the server, its logs and any statement trace only see the verifier."""
     pgconn = connection.connection.driver_connection.pgconn
@@ -138,21 +161,13 @@ def bootstrap_roles(
     Raises ``RoleDriftError`` before changing anything when an existing role differs from the approved
     definition. The caller owns the transaction.
     """
-    plan = (
-        (names.api_group, False, set(), None, {names.api_login}),
-        (names.manager_group, False, set(), None, {names.manager_login}),
-        (names.api_login, True, {names.api_group}, api_password, set()),
-        (names.manager_login, True, {names.manager_group}, manager_password, set()),
-    )
-    problems = [
-        problem
-        for name, login, groups, _, allowed in plan
-        for problem in _drift(connection, name, login=login, expected_groups=groups, allowed_members=allowed)
-    ]
+    problems = role_definition_problems(connection, names)
     if problems:
         raise RoleDriftError("existing roles differ from the approved definition: " + "; ".join(problems))
 
-    for name, login, groups, secret, _ in plan:
+    secrets = {names.api_login: api_password, names.manager_login: manager_password}
+    for name, login, groups, _ in _definitions(names):
+        secret = secrets.get(name)
         if _role_row(connection, name) is None:
             if login:
                 _execute_format(

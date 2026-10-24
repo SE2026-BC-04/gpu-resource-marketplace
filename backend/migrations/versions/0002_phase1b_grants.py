@@ -8,7 +8,9 @@ Upgrade removes the database privileges of PUBLIC. Downgrade deliberately does N
 cannot know whether an operator had already restricted PUBLIC, and silently widening access on a downgrade is
 worse than leaving a hardened database hardened. Downgrade only revokes what this revision granted.
 
-After granting, the revision checks the effective privileges of both groups and both login roles and fails closed
+Before granting, the revision re-runs the bootstrap's read-only role check (attributes, memberships and no
+unexpected direct or indirect member of a group or login role), so a grant to a group can only reach the approved
+login role. After granting, the revision checks the effective privileges of both groups and both login roles and fails closed
 (transaction rolled back, no ACL touched) if any of them exceeds the matrix, whether through a direct grant or PUBLIC.
 
 Grants follow the GPU-002-A schema matrix section 6.3. Manager only needs CONNECT in Phase 1B. Neither group
@@ -23,6 +25,8 @@ from typing import Mapping, Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+
+from gpu_marketplace.common.db_roles import role_definition_problems
 
 revision: str = "0002_phase1b_grants"
 down_revision: Union[str, None] = "0001_phase1b_baseline"
@@ -166,6 +170,23 @@ def require_login_roles(bind: sa.engine.Connection, logins: Mapping[str, str]) -
         )
 
 
+def require_role_definitions(bind: sa.engine.Connection) -> None:
+    """Stop unless all four runtime roles still match the approved definition the bootstrap verified.
+
+    Same read-only check as the bootstrap: no SUPERUSER, CREATEDB, CREATEROLE, REPLICATION or BYPASSRLS; groups
+    NOLOGIN and logins LOGIN, all INHERIT; each login a member of exactly its own group; and no other role holding a
+    group or a login role directly or indirectly, so a grant to a group cannot reach an unexpected member.
+    """
+    problems = role_definition_problems(bind)
+    if problems:
+        raise RuntimeError(
+            "runtime roles differ from the approved definition: "
+            + "; ".join(problems)
+            + ". Fix them explicitly as the owner (the bootstrap reports drift without altering roles), then retry; "
+            "no role or ACL was changed by this migration"
+        )
+
+
 def require_schema_closed(bind: sa.engine.Connection, groups: Sequence[str]) -> None:
     """Fail closed if a runtime role could create objects in schema public, directly or via PUBLIC.
 
@@ -295,6 +316,7 @@ def upgrade() -> None:
     bind = op.get_bind()
     require_groups(bind, (API_GROUP, MANAGER_GROUP))
     require_login_roles(bind, {API_LOGIN: API_GROUP, MANAGER_LOGIN: MANAGER_GROUP})
+    require_role_definitions(bind)
     runtime_roles = (API_GROUP, MANAGER_GROUP, API_LOGIN, MANAGER_LOGIN)
     require_schema_closed(bind, runtime_roles)
 
