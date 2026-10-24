@@ -174,7 +174,8 @@ def require_role_definitions(bind: sa.engine.Connection) -> None:
     """Stop unless all four runtime roles still match the approved definition the bootstrap verified.
 
     Same read-only check as the bootstrap: no SUPERUSER, CREATEDB, CREATEROLE, REPLICATION or BYPASSRLS; groups
-    NOLOGIN and logins LOGIN, all INHERIT; each login a member of exactly its own group; and no other role holding a
+    NOLOGIN and logins LOGIN, all INHERIT; each login a member of exactly its own group, with the membership options
+    ADMIN FALSE, INHERIT TRUE and SET TRUE (so the login role cannot hand its group on); and no other role holding a
     group or a login role directly or indirectly, so a grant to a group cannot reach an unexpected member.
     """
     problems = role_definition_problems(bind)

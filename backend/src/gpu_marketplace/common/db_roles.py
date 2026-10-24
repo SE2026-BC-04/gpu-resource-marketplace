@@ -59,15 +59,19 @@ def _role_row(connection: Connection, name: str):
     ).mappings().one_or_none()
 
 
-def _memberships(connection: Connection, login: str) -> set[str]:
-    rows = connection.execute(
+def _memberships(connection: Connection, login: str):
+    """Every membership row of the role, with the PostgreSQL 16 per-grant options.
+
+    PostgreSQL 16 can hold several rows for the same pair (one per grantor), so each row is returned.
+    """
+    return connection.execute(
         text(
-            "SELECT g.rolname FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid "
+            "SELECT g.rolname AS grp, m.admin_option, m.inherit_option, m.set_option "
+            "FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid "
             "JOIN pg_roles r ON r.oid = m.member WHERE r.rolname = :login"
         ),
         {"login": login},
-    )
-    return set(rows.scalars())
+    ).mappings().all()
 
 
 def _effective_members(connection: Connection, group: str) -> set[str]:
@@ -101,9 +105,20 @@ def _drift(
         problems.append(f"{name}: expected {'LOGIN' if login else 'NOLOGIN'}")
     if not row["rolinherit"]:
         problems.append(f"{name}: expected INHERIT")
-    actual_groups = _memberships(connection, name)
+    memberships = _memberships(connection, name)
+    actual_groups = {membership["grp"] for membership in memberships}
     if actual_groups != expected_groups:
         problems.append(f"{name}: unexpected membership {sorted(actual_groups)}, expected {sorted(expected_groups)}")
+    # The bootstrap grants with the defaults ADMIN FALSE, INHERIT TRUE, SET TRUE. ADMIN would let the login role
+    # hand its group to other roles; INHERIT/SET are per grant in PostgreSQL 16, independent of rolinherit.
+    for membership in memberships:
+        group = membership["grp"]
+        if membership["admin_option"]:
+            problems.append(f"{name}: membership in {group} has ADMIN OPTION")
+        if not membership["inherit_option"]:
+            problems.append(f"{name}: membership in {group} has INHERIT FALSE")
+        if not membership["set_option"]:
+            problems.append(f"{name}: membership in {group} has SET FALSE")
     if allowed_members is not None:
         extra = _effective_members(connection, name) - allowed_members
         if extra:
@@ -124,8 +139,8 @@ def _definitions(names: RoleNames) -> tuple[tuple[str, bool, set[str], set[str]]
 def role_definition_problems(connection: Connection, names: RoleNames = RoleNames()) -> list[str]:
     """Read-only check of every existing runtime role against the approved definition.
 
-    Reports restricted attributes, LOGIN/NOLOGIN, INHERIT, exact memberships and unexpected direct or indirect
-    members. Missing roles are not reported here. Used by the bootstrap and by migration 0002 before it grants.
+    Reports restricted attributes, LOGIN/NOLOGIN, INHERIT, exact memberships, membership options other than
+    ADMIN FALSE / INHERIT TRUE / SET TRUE, and unexpected direct or indirect members. Missing roles are not reported here. Used by the bootstrap and by migration 0002 before it grants.
     """
     return [
         problem

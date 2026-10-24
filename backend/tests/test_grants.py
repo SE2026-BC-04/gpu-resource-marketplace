@@ -498,6 +498,32 @@ ROLE_DRIFT = [
         f"ALTER ROLE {API_GROUP} LOGIN", f"ALTER ROLE {API_GROUP} NOLOGIN", f"{API_GROUP}: expected NOLOGIN",
         id="login-on-the-api-group",
     ),
+    # PostgreSQL 16 per-membership options (forwarded TV5 finding): the only membership keeps its group but changes
+    # how it can be used, so no extra member exists for the membership-graph check to find.
+    pytest.param(
+        f"GRANT {API_GROUP} TO {API_LOGIN} WITH ADMIN TRUE",
+        f"REVOKE ADMIN OPTION FOR {API_GROUP} FROM {API_LOGIN}",
+        f"{API_LOGIN}: membership in {API_GROUP} has ADMIN OPTION",
+        id="admin-option-on-the-api-membership",
+    ),
+    pytest.param(
+        f"GRANT {MANAGER_GROUP} TO {MANAGER_LOGIN} WITH ADMIN TRUE",
+        f"REVOKE ADMIN OPTION FOR {MANAGER_GROUP} FROM {MANAGER_LOGIN}",
+        f"{MANAGER_LOGIN}: membership in {MANAGER_GROUP} has ADMIN OPTION",
+        id="admin-option-on-the-manager-membership",
+    ),
+    pytest.param(
+        f"GRANT {API_GROUP} TO {API_LOGIN} WITH INHERIT FALSE",
+        f"GRANT {API_GROUP} TO {API_LOGIN} WITH INHERIT TRUE",
+        f"{API_LOGIN}: membership in {API_GROUP} has INHERIT FALSE",
+        id="inherit-false-on-the-api-membership",
+    ),
+    pytest.param(
+        f"GRANT {MANAGER_GROUP} TO {MANAGER_LOGIN} WITH SET FALSE",
+        f"GRANT {MANAGER_GROUP} TO {MANAGER_LOGIN} WITH SET TRUE",
+        f"{MANAGER_LOGIN}: membership in {MANAGER_GROUP} has SET FALSE",
+        id="set-false-on-the-manager-membership",
+    ),
 ]
 
 
@@ -530,6 +556,21 @@ def test_upgrade_fails_closed_when_a_runtime_role_drifted_from_its_definition(
 
 def test_bootstrapped_roles_pass_the_role_definition_preflight(conn: Connection) -> None:
     grants_module().require_role_definitions(conn)
+
+
+def test_bootstrap_grants_memberships_with_the_checked_default_options(conn: Connection) -> None:
+    rows = conn.execute(
+        text(
+            "SELECT r.rolname, g.rolname, m.admin_option, m.inherit_option, m.set_option FROM pg_auth_members m "
+            "JOIN pg_roles g ON g.oid = m.roleid JOIN pg_roles r ON r.oid = m.member "
+            "WHERE r.rolname IN (:api, :manager) ORDER BY r.rolname"
+        ),
+        {"api": API_LOGIN, "manager": MANAGER_LOGIN},
+    ).all()
+    assert [tuple(row) for row in rows] == [
+        (API_LOGIN, API_GROUP, False, True, True),
+        (MANAGER_LOGIN, MANAGER_GROUP, False, True, True),
+    ]
 
 
 def test_the_role_definition_refusal_never_shows_a_password(conn: Connection) -> None:
