@@ -1,10 +1,10 @@
 # GPU Resource Marketplace - Codex Repository Instructions
 
-**Team Contribution Rules:** v1.0 APPROVED by project owner (2026-10-20).<br>
+**Team Contribution Rules:** proposed v1.1 amendment (2026-10-24); v1.0 remains active until merged.<br>
 **Project state:** Architecture and design documents accepted; coding has NOT been authorized merely by drafting these rules.<br>
 **Repository:** `SE2026-BC-04/gpu-resource-marketplace`.
 
-**MANDATORY for humans and agents:** [CONTRIBUTING.md](CONTRIBUTING.md) is the team entrypoint; [Team Contribution Rules](docs/development/team-contribution-rules.md) set branch/commit/PR/merge gates; [Change Control](docs/development/change-control.md) requires prior decisions for L2/L3 changes. The [PR template](.github/pull_request_template.md) records independent human approvals and actual tests. Do not treat Codex review as permission to merge or `AGENTS.md` as an automatically enforced GitHub branch rule.
+**MANDATORY for humans and agents:** [CONTRIBUTING.md](CONTRIBUTING.md) is the team entrypoint; [Team Contribution Rules](docs/development/team-contribution-rules.md) set branch/commit/PR/merge gates; [Change Control](docs/development/change-control.md) requires prior decisions for L2/L3 changes. The [PR template](.github/pull_request_template.md) records independent human review confirmations and actual tests. Do not treat Codex review as permission to merge or `AGENTS.md` as an automatically enforced GitHub branch rule.
 
 ## Read before acting
 
@@ -50,7 +50,7 @@ Review each PR for **materially consequential defects first**, not cosmetic form
 6. Dispute/retention: strict half-open 7-day cutoff, original receipt untouched, exactly-once correction and OPEN-evidence hold.
 7. Verification: acceptance test IDs and exact command/results for changed slices; real PostgreSQL multi-session races where needed; tests NOT_RUN must never be reported PASS. No invented performance numbers.
 
-Only review changed code against applicable approved gates; do not demand entire MVP implementation for an early foundation PR. Codex review is advisory and never replaces human review or required CI checks. Enforce the approved human-team rules: no direct push to main; one task per PR; Conventional Commit messages; no self-approval or self-merge; L0/L1 requires one independent human reviewer; L2/L3 requires two independent human reviewers. Any GitHub account with merge permission may perform the final merge after all applicable gates pass.
+Only review changed code against applicable approved gates; do not demand entire MVP implementation for an early foundation PR. Codex review is advisory and never counts as human review or replaces required CI checks. The proposed v1.1 process accepts either a submitted GitHub `Approve` or an explicit independent human approval comment made after reviewing the current diff; a new commit requires renewed confirmation. L0/L1 requires one reviewer and L2/L3 requires two. No author may review or merge their own PR. GitHub branch-protection requirements remain separate and must not be bypassed. Any GitHub account with merge permission may perform the final merge after all applicable gates pass.
 
 ## Mandatory Codex delivery format
 
