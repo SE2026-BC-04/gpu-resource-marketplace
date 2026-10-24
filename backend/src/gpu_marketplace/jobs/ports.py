@@ -14,8 +14,11 @@ from gpu_marketplace.jobs.models import FailureReason, JobRole, JobStatus
 class JobPrincipal(Protocol):
     """Structural view of GPU-003's authenticated principal; no JWT code here."""
 
-    user_id: UUID
-    role: JobRole | str
+    @property
+    def user_id(self) -> UUID: ...
+
+    @property
+    def role(self) -> str: ...
 
 
 @dataclass(frozen=True)

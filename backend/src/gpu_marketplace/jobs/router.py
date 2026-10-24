@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.routing import APIRoute
 
 from gpu_marketplace.jobs.errors import (
+    DependencyUnavailable,
     Forbidden,
     JobDomainError,
     Unauthenticated,
@@ -48,6 +49,10 @@ class JobsAPIRoute(APIRoute):
                 if exc.status_code == 403:
                     return job_error_response(
                         Forbidden(), request_id=_request_id(request)
+                    )
+                if exc.status_code == 503:
+                    return job_error_response(
+                        DependencyUnavailable(), request_id=_request_id(request)
                     )
                 raise
 

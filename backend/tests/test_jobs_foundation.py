@@ -56,7 +56,11 @@ from gpu_marketplace.jobs.service import JobsReadService
 
 
 CLIENT_ID = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
-WORKER_ID = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+WORKER_USER_ID = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+WORKER_PROFILE_ID = UUID("11111111-1111-4111-8111-111111111111")
+OTHER_WORKER_USER_ID = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+OTHER_WORKER_PROFILE_ID = UUID("22222222-2222-4222-8222-222222222223")
+ADMIN_ID = UUID("99999999-9999-4999-8999-999999999999")
 LISTING_ID = UUID("22222222-2222-4222-8222-222222222222")
 JOB_ID = UUID("33333333-3333-4333-8333-333333333333")
 NOW = datetime(2026, 10, 24, 8, 30, 0, 123456, tzinfo=timezone.utc)
@@ -72,7 +76,7 @@ def make_record(**overrides: object) -> JobRecord:
     fields: dict[str, object] = {
         "id": JOB_ID,
         "client_id": CLIENT_ID,
-        "worker_id": WORKER_ID,
+        "worker_id": WORKER_PROFILE_ID,
         "listing_id": LISTING_ID,
         "requested_gpu_count": 2,
         "duration_seconds": 60,
@@ -174,7 +178,7 @@ def test_submit_request_helpers_forbid_extra_fields(decoder_name: str) -> None:
         "listing_id": str(LISTING_ID),
         "gpu_count": 2,
         "duration_seconds": 60,
-        "worker_id": str(WORKER_ID),
+        "worker_id": str(WORKER_PROFILE_ID),
     }
     with pytest.raises(UnknownField):
         if decoder_name == "mapping":
@@ -253,7 +257,7 @@ def test_response_public_ids_must_be_uuid_v4() -> None:
         ClientJobResponse(
             id=UUID("33333333-3333-1333-8333-333333333333"),
             listing_id=LISTING_ID,
-            worker_id=WORKER_ID,
+            worker_id=WORKER_PROFILE_ID,
             gpu_count=1,
             duration_seconds=5,
             status=JobStatus.QUEUED,
@@ -267,11 +271,11 @@ def test_response_public_ids_must_be_uuid_v4() -> None:
 def test_projection_exposes_worker_id_only_to_job_owner_client() -> None:
     record = make_record()
     client_view = project_job(record, principal=Principal(CLIENT_ID, "CLIENT"))
-    worker_view = project_job(record, principal=Principal(WORKER_ID, "WORKER"))
+    worker_view = project_job(record, principal=Principal(WORKER_USER_ID, "WORKER"))
     admin_view = project_job(record, principal=Principal(CLIENT_ID, "ADMIN"))
 
     assert isinstance(client_view, ClientJobResponse)
-    assert client_view.worker_id == WORKER_ID
+    assert client_view.worker_id == WORKER_PROFILE_ID
     assert not hasattr(client_view, "client_id")
     assert not hasattr(client_view, "simulation_reference")
     assert "seed_value" not in client_view.model_dump()
@@ -304,7 +308,7 @@ def test_response_formats_utc_microseconds_and_failure_reason_consistently() -> 
         ClientJobResponse(
             id=JOB_ID,
             listing_id=LISTING_ID,
-            worker_id=WORKER_ID,
+            worker_id=WORKER_PROFILE_ID,
             gpu_count=1,
             duration_seconds=5,
             status=JobStatus.FAILED,
@@ -316,9 +320,21 @@ def test_response_formats_utc_microseconds_and_failure_reason_consistently() -> 
 
 
 class FakeReader:
-    def __init__(self, *, page: JobPage | None = None, record: JobRecord | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        page: JobPage | None = None,
+        record: JobRecord | None = None,
+        worker_user_by_profile: dict[UUID, UUID] | None = None,
+    ) -> None:
         self.page = page or JobPage(items=(), next_position=None)
         self.record = record
+        # Mirrors workers.id -> workers.user_id; Job.worker_id references the
+        # profile UUID, while an AuthenticatedPrincipal carries the user UUID.
+        self.worker_user_by_profile = worker_user_by_profile or {
+            WORKER_PROFILE_ID: WORKER_USER_ID,
+            OTHER_WORKER_PROFILE_ID: OTHER_WORKER_USER_ID,
+        }
         self.list_calls: list[dict[str, object]] = []
         self.get_calls: list[dict[str, object]] = []
 
@@ -336,14 +352,13 @@ class FakeReader:
             return None
         return self.record
 
-    @staticmethod
-    def _visible(record: JobRecord, principal: object) -> bool:
+    def _visible(self, record: JobRecord, principal: object) -> bool:
         role = JobRole(getattr(principal, "role"))
         user_id = getattr(principal, "user_id")
         if role is JobRole.CLIENT:
             return record.client_id == user_id
         if role is JobRole.WORKER:
-            return record.worker_id == user_id
+            return self.worker_user_by_profile.get(record.worker_id) == user_id
         return role is JobRole.ADMIN
 
 
@@ -377,8 +392,8 @@ def make_test_app(
 ) -> FastAPI:
     principal_id = {
         "CLIENT": CLIENT_ID,
-        "WORKER": WORKER_ID,
-        "ADMIN": UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+        "WORKER": WORKER_USER_ID,
+        "ADMIN": ADMIN_ID,
     }[role]
     principal = Principal(principal_id, role)
     reader = FakeReader(
@@ -453,7 +468,7 @@ def test_router_list_asgi_returns_safe_client_projection(
     assert response.status_code == 200
     assert_server_request_headers(response, supplied_id)
     payload = response.json()
-    assert payload["items"][0]["worker_id"] == str(WORKER_ID)
+    assert payload["items"][0]["worker_id"] == str(WORKER_PROFILE_ID)
     assert not {"client_id", "seed_value", "expected_digest"}.intersection(
         payload["items"][0]
     )
@@ -474,7 +489,7 @@ def test_router_detail_asgi_serializes_client_worker_id(
     assert response.status_code == 200
     assert_server_request_headers(response, supplied_id)
     payload = response.json()
-    assert payload["worker_id"] == str(WORKER_ID)
+    assert payload["worker_id"] == str(WORKER_PROFILE_ID)
     assert not {"client_id", "seed_value", "expected_digest"}.intersection(payload)
 
 
@@ -591,6 +606,37 @@ def test_dependency_403_maps_to_forbidden_not_unauthenticated(
     assert app.state.test_reader.list_calls == []
 
 
+def test_dependency_503_maps_to_dependency_unavailable_without_leaking_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def unavailable_provider():
+        raise HTTPException(status_code=503, detail="private storage failure")
+
+    app = make_test_app(principal_provider=unavailable_provider)
+    response = http_get(
+        app,
+        "/api/v1/jobs",
+        monkeypatch=monkeypatch,
+        headers={"X-Request-ID": "caller-controlled-id"},
+    )
+
+    assert response.status_code == 503
+    request_id = response.headers["X-Request-ID"]
+    assert UUID(request_id).version == 4
+    assert request_id != "caller-controlled-id"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.json() == {
+        "error": {
+            "code": "DEPENDENCY_UNAVAILABLE",
+            "message": "A required dependency is unavailable.",
+            "request_id": request_id,
+        }
+    }
+    assert "private storage failure" not in response.text
+    assert app.state.test_reader.list_calls == []
+    assert app.state.test_reader.get_calls == []
+
+
 def test_unexpected_dependency_error_is_not_misclassified_as_auth(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -656,21 +702,21 @@ def test_router_rejects_cross_role_scope(
 @pytest.mark.parametrize(
     ("role", "record_client", "record_worker", "expected_status"),
     [
-        ("CLIENT", CLIENT_ID, WORKER_ID, 200),
+        ("CLIENT", CLIENT_ID, WORKER_PROFILE_ID, 200),
         (
             "CLIENT",
             UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
-            WORKER_ID,
+            WORKER_PROFILE_ID,
             404,
         ),
-        ("WORKER", CLIENT_ID, WORKER_ID, 200),
+        ("WORKER", CLIENT_ID, WORKER_PROFILE_ID, 200),
         (
             "WORKER",
             CLIENT_ID,
-            UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
+            OTHER_WORKER_PROFILE_ID,
             404,
         ),
-        ("ADMIN", CLIENT_ID, WORKER_ID, 200),
+        ("ADMIN", CLIENT_ID, WORKER_PROFILE_ID, 200),
     ],
 )
 def test_router_detail_role_visibility(
@@ -690,6 +736,39 @@ def test_router_detail_role_visibility(
         payload = response.json()
         assert "client_id" not in payload
         assert not {"seed_value", "expected_digest"}.intersection(payload)
+
+
+@pytest.mark.parametrize(
+    ("principal_user_id", "expected_status"),
+    [
+        (WORKER_USER_ID, 200),
+        (OTHER_WORKER_USER_ID, 404),
+        (WORKER_PROFILE_ID, 404),
+    ],
+)
+def test_worker_visibility_resolves_profile_to_account_identity(
+    principal_user_id: UUID,
+    expected_status: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert WORKER_USER_ID != WORKER_PROFILE_ID
+
+    async def principal_provider():
+        return Principal(principal_user_id, "WORKER")
+
+    app = make_test_app(
+        role="WORKER",
+        record=make_record(worker_id=WORKER_PROFILE_ID),
+        principal_provider=principal_provider,
+    )
+    response = http_get(
+        app, f"/api/v1/jobs/{JOB_ID}", monkeypatch=monkeypatch
+    )
+    assert response.status_code == expected_status
+    if expected_status == 200:
+        assert response.json()["id"] == str(JOB_ID)
+    else:
+        assert response.json()["error"]["code"] == "JOB_NOT_FOUND"
 
 
 def test_pagination_uses_role_default_and_context_binds_cursor() -> None:
