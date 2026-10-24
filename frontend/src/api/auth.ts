@@ -32,7 +32,12 @@ const messages: Record<string, string> = {
   TIMEOUT: "Máy chủ không phản hồi. Vui lòng thử lại.",
   // /me rejected a token Login had just issued; "session expired" would be misleading here.
   SIGN_IN_UNCONFIRMED: "Không xác nhận được tài khoản. Vui lòng đăng nhập lại.",
+  // Login + /me finished after the token's conservative deadline (e.g. the device slept).
+  SIGN_IN_EXPIRED: "Phiên đăng nhập đã hết hạn trước khi hoàn tất. Vui lòng đăng nhập lại.",
 };
+
+/** API Contract section 4.2: `expires_in` and the JWT lifetime are exactly 900 seconds (API-OPEN-01). */
+export const ACCESS_TOKEN_TTL_SECONDS = 900;
 
 /** DOMException is not an Error subclass in every runtime (jsdom), so match the name only. */
 export function isAbortError(error: unknown): boolean {
@@ -72,9 +77,10 @@ function user(value: unknown): AuthUser {
 function loginResult(value: unknown): LoginResult {
   if (
     !object(value) || typeof value.access_token !== "string" || !token.test(value.access_token) ||
-    value.token_type !== "Bearer" || !Number.isInteger(value.expires_in) || (value.expires_in as number) <= 0
+    // Any other lifetime is a contract mismatch; never widen it on the client.
+    value.token_type !== "Bearer" || value.expires_in !== ACCESS_TOKEN_TTL_SECONDS
   ) throw invalidResponse();
-  return { accessToken: value.access_token, expiresInSeconds: value.expires_in as number, user: user(value.user) };
+  return { accessToken: value.access_token, expiresInSeconds: ACCESS_TOKEN_TTL_SECONDS, user: user(value.user) };
 }
 
 /** HTTP client for the three Auth routes. Holds no state: the token lives only in the session store. */

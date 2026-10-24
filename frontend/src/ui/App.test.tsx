@@ -97,6 +97,8 @@ describe("App shell with Login", () => {
     ["VALIDATION_ERROR", 422, "Vui lòng nhập tên đăng nhập và mật khẩu hợp lệ."],
     ["DEPENDENCY_UNAVAILABLE", 503, "Dịch vụ tạm thời chưa sẵn sàng. Hãy thử lại sau."],
     ["NETWORK_ERROR", 0, "Không kết nối được máy chủ. Kiểm tra mạng và thử lại."],
+    ["SIGN_IN_EXPIRED", 0, "Phiên đăng nhập đã hết hạn trước khi hoàn tất. Vui lòng đăng nhập lại."],
+    ["INVALID_RESPONSE", 502, "Không thể xử lý yêu cầu lúc này."],
   ])("shows the fixed message for %s", async (code, status, message) => {
     setup({ login: vi.fn().mockRejectedValue(new AuthApiError(code, status)) });
     fillAndSubmit("demo_client_01");

@@ -78,12 +78,15 @@ export function createSessionStore(api: AuthApi, timers: Timers = browserTimers)
       // Taken before Login is sent, so the UI never outlives the server's exp.
       const startedAt = timers.now();
       const result = await api.login(loginName, password, signal);
+      const expiresAt = startedAt + result.expiresInSeconds * 1000;
       let current: AuthUser;
       try {
         // Confirm the identity from the database before showing it (Phase 1C section 2.6).
         current = await api.me(result.accessToken, signal);
         if (attempt !== generation || signal?.aborted) throw new DOMException("Sign-in superseded", "AbortError");
         if (current.id !== result.user.id) throw new AuthApiError("INVALID_RESPONSE", 502);
+        // Never publish a session that is already past its deadline (slow /me, device sleep).
+        if (timers.now() >= expiresAt) throw new AuthApiError("SIGN_IN_EXPIRED", 0);
       } catch (error) {
         // Best effort: the token is not revoked server-side (section 4.4), but tell the API anyway.
         api.logout(result.accessToken).catch(() => undefined);
@@ -93,7 +96,7 @@ export function createSessionStore(api: AuthApi, timers: Timers = browserTimers)
         throw error;
       }
       token = result.accessToken;
-      deadline = startedAt + result.expiresInSeconds * 1000;
+      deadline = expiresAt;
       // The server rejects the token at exp anyway; this only returns the UI to Login on time.
       expiry = timers.setTimeout(() => clear("expired"), Math.max(0, deadline - timers.now()));
       publish({ status: "signed-in", user: current });

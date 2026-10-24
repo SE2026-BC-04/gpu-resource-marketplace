@@ -75,6 +75,49 @@ describe("volatile session store", () => {
     expect(store.getState()).toEqual({ status: "signed-out", reason: "expired" });
   });
 
+  it("never publishes a session whose deadline passed during /me (P2-02)", async () => {
+    let now = 1_000_000;
+    const api = fakeApi({
+      me: vi.fn(async () => {
+        now += 900_000; // device slept: exactly the conservative deadline
+        return CLIENT;
+      }),
+    });
+    const store = createSessionStore(api, { now: () => now, setTimeout: () => 0, clearTimeout: () => undefined });
+    const seen: string[] = [];
+    store.subscribe(() => seen.push(store.getState().status));
+    await expect(store.signIn("a", "b")).rejects.toMatchObject({ code: "SIGN_IN_EXPIRED" });
+    expect(seen).not.toContain("signed-in");
+    expect(store.getState().status).toBe("signed-out");
+    expect(store.getAccessToken()).toBeNull();
+    expect(api.logout).toHaveBeenCalledWith(TOKEN); // the issued token is discarded best-effort
+  });
+
+  it("still publishes when /me finishes 1 ms before the deadline", async () => {
+    let now = 1_000_000;
+    const api = fakeApi({ me: vi.fn(async () => { now += 899_999; return CLIENT; }) });
+    const store = createSessionStore(api, { now: () => now, setTimeout: () => 0, clearTimeout: () => undefined });
+    await store.signIn("a", "b");
+    expect(store.getAccessToken()).toBe(TOKEN);
+    now += 1;
+    expect(store.getAccessToken()).toBeNull();
+  });
+
+  it("checks a superseded attempt before the deadline", async () => {
+    let now = 1_000_000;
+    let store!: ReturnType<typeof createSessionStore>;
+    const api = fakeApi({
+      me: vi.fn(async () => {
+        now += 900_000;
+        await store.signOut();
+        return CLIENT;
+      }),
+    });
+    store = createSessionStore(api, { now: () => now, setTimeout: () => 0, clearTimeout: () => undefined });
+    await expect(store.signIn("a", "b")).rejects.toMatchObject({ name: "AbortError" });
+    expect(store.getAccessToken()).toBeNull();
+  });
+
   it("refuses the token after the deadline even if the timer never ran (device sleep)", async () => {
     let now = 1_000_000;
     const store = createSessionStore(fakeApi(), { now: () => now, setTimeout: () => 0, clearTimeout: () => undefined });

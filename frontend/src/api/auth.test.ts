@@ -51,6 +51,14 @@ describe("Auth API client", () => {
     [{ access_token: "", token_type: "Bearer", expires_in: 900, user: USER }],
     [{ access_token: "a b", token_type: "Bearer", expires_in: 900, user: USER }],
     [{ access_token: TOKEN, token_type: "Bearer", expires_in: "900", user: USER }],
+    // P2-01: the contract fixes expires_in at exactly 900.
+    [{ access_token: TOKEN, token_type: "Bearer", expires_in: 899, user: USER }],
+    [{ access_token: TOKEN, token_type: "Bearer", expires_in: 901, user: USER }],
+    [{ access_token: TOKEN, token_type: "Bearer", expires_in: 2 ** 31, user: USER }],
+    [{ access_token: TOKEN, token_type: "Bearer", expires_in: Number.MAX_SAFE_INTEGER, user: USER }],
+    [{ access_token: TOKEN, token_type: "Bearer", expires_in: 900.5, user: USER }],
+    [{ access_token: TOKEN, token_type: "Bearer", expires_in: null, user: USER }],
+    [{ access_token: TOKEN, token_type: "Bearer", user: USER }],
     [{ access_token: TOKEN, token_type: "Bearer", expires_in: 900, user: { ...USER, id: "not-a-uuid" } }],
   ])("rejects a malformed Login response %#", async (body) => {
     const { client } = api(reply(200, body));
