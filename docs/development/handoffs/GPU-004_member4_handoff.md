@@ -2,11 +2,12 @@
 
 > **Phase:** 1D / GPU-004
 > **Ngày phê duyệt thiết kế:** 21/10/2026
-> **Trạng thái:** `APPROVED DESIGN / IMPLEMENTATION NOT STARTED`
+> **Trạng thái:** `APPROVED DESIGN / IN_PROGRESS / INTEGRATION_BLOCKED` — core/router/UI được viết trên branch; chưa nghiệm thu với PostgreSQL/Auth thật
 > **Phụ trách:** Thành viên 4 (Listings), nhóm trưởng (shared integration)
 > **Baseline thiết kế ban đầu:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b`
 > **Rà soát đồng bộ ngày 23/10/2026:** `main@538802adebeaeb74dcccd0c025f3a7abc81336c0` và handoff tại `ffb17de39d32956087aca187d490bb03c32ee980`; chỉ rà soát tài liệu, không xác nhận dependency đã sẵn sàng hay test ứng dụng đã chạy.
 > **Đối chiếu upstream ngày 24/10/2026:** `main@21071549937888c997b250625607a16a97a20419`; Phase 1D §2.1/§3.2 đã ghi điều kiện nhận DB/Auth và dùng chung fixture. Schema matrix GPU-002-A revision 3 vẫn `PROPOSED`, D1–D12 và `XPH-GPU-002-01` chưa đóng; không coi bản cập nhật này là ACK hoặc dependency đã triển khai.
+> **Baseline coding hiện tại:** `main@f9124f72f12bd2b8ea6f76f66a81f02dfe33ec96` (PR #12 đã merge): ORM/migration GPU-002-B đã có, repository/UoW và Auth/session thật chưa bàn giao. Đây là cập nhật evidence, không duyệt thay các quyết định còn mở.
 > **Tài liệu:** [Phase 1D — GPU Listings Management](../../architecture/phases/phase1d_gpu_listings.md) — nguồn thiết kế chi tiết đã duyệt; trạng thái code/test được ghi riêng.
 > **Nguồn bắt buộc:** API Contract v0.6 §7; Database Design v0.4 §§9,11; Module Design; Test Design; Team Contribution Rules; Inter-Phase Change Control.
 
@@ -23,6 +24,7 @@
 **B. Kiến trúc & mẫu xác nhận:**
 
 - [Kiến trúc GPU-004 đã phê duyệt](../../architecture/phases/phase1d_gpu_listings.md) — phạm vi, invariants, status, acceptance gates của Phase này.
+- [Implementation README](../../../backend/src/gpu_marketplace/listings/README.md) — code slice, consumption ports, cách nối dependency thật và giới hạn của test doubles; cần TV2/TV3/nhóm trưởng review trước tích hợp.
 - [Inter-Phase Review Template](../../architecture/phases/_interphase_review_template.md) — mẫu bắt buộc dùng khi có thay đổi thực chất ảnh hưởng Phase khác.
 
 **C. Thiết kế / dependency phải đối chiếu theo nhiệm vụ:**
@@ -127,7 +129,9 @@ Với **thay đổi thật**, ghi old→new SHA/contract, ảnh hưởng thực 
 - Trước khi triển khai cần explicit assignment/authorization, dependency GPU-002/003 có evidence thật, và technical review shared changes.
 - `IMPLEMENTED` chỉ được ghi khi tất cả test áp dụng được đã chạy đúng phạm vi, PR review/merge hoàn tất và cross-phase gate không còn blocker.
 
-**Tình trạng khi giao file:** `APPROVED DESIGN / NOT IMPLEMENTED`. Chưa có ACK thực tế đối với diff code/contract vì chưa phát sinh.
+**Cập nhật coding slice 24/10/2026:** `IN_PROGRESS / INTEGRATION_BLOCKED`, branch `feat/gpu-004-listings` trên `main@f9124f7`, bàn giao bằng Draft PR. Backend/core/router và frontend component/client đã được viết; 154 backend tests đạt (102 Listings với doubles), 58 upstream PostgreSQL tests skipped do thiếu cluster test, 27 frontend tests và TypeScript/build đạt trong phạm vi Phase 1D §3.5. Consumption interfaces chưa có ACK TV2/TV3/nhóm trưởng cho diff implementation (`XPH-GPU-004-01`, `POTENTIAL_IMPACT / AWAITING_CROSS_PHASE_ACK`); adapter DB/Auth và shared wiring chưa có. Không gọi đây là full Phase 1D PASS hoặc `IMPLEMENTED`.
+
+**Auth coordination:** [TV4 đã gửi `ACK_WITH_ACTIONS` cho PR #13 revision `c61b8f2`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/13#issuecomment-6372588314), chỉ xác nhận hướng tiêu thụ `DEC-P1-03`, không phải human approval hoặc duyệt GPU-003-B. Sau PR #13, cập nhật riêng nhãn Auth cũ theo điều phối của nhóm trưởng. Khi TV2/TV3 bàn giao code thật, đối chiếu interface, cập nhật phần kết nối, phối hợp nhóm trưởng mount router/UI và chạy PostgreSQL/JWT/E2E trước nghiệm thu; không tự thay dependency bằng test doubles.
 
 ## Pre-PR Checklist — GPU-004 (chưa xác nhận)
 

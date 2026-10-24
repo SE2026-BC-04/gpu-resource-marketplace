@@ -5,10 +5,11 @@
 > **Ngày:** 21/10/2026<br>
 > **Owner:** Thành viên 4 — Listings / Registry<br>
 > **Trạng thái tài liệu:** `APPROVED DESIGN` — chủ dự án phê duyệt ngày 21/10/2026; tài liệu đã có trong repository, trạng thái triển khai ghi riêng bên dưới<br>
-> **Trạng thái triển khai:** `PLANNED / NOT_IMPLEMENTED` — phê duyệt kiến trúc không đồng nghĩa tính năng đã có code<br>
+> **Trạng thái triển khai:** `IN_PROGRESS / INTEGRATION_BLOCKED` — core/router/UI GPU-004 đã được viết trên branch; PostgreSQL/Auth thật và tích hợp shared app còn chờ GPU-002/003/nhóm trưởng, chưa nghiệm thu toàn Phase<br>
 > **Baseline thiết kế ban đầu:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b` — GPU-001 đã merge; GPU-002 và GPU-003 mới được chủ dự án duyệt **thiết kế**, chưa merge code trên `main` tại mốc này.<br>
 > **Rà soát đồng bộ ngày 23/10/2026:** `main@538802adebeaeb74dcccd0c025f3a7abc81336c0` và handoff tại `ffb17de39d32956087aca187d490bb03c32ee980`; chỉ rà soát tài liệu, không xác nhận dependency đã sẵn sàng hay test ứng dụng đã chạy.<br>
 > **Đối chiếu các Phase trước ngày 24/10/2026:** `main@21071549937888c997b250625607a16a97a20419` (PR #7, #9, #10 đã merge); đã đọc Foundation, Phase 1B, schema matrix GPU-002-A revision 3 và Phase 1C cập nhật. Matrix vẫn `PROPOSED / FOR LEAD REVIEW`; không coi tài liệu đã merge là quyết định duyệt D1–D12 hoặc evidence triển khai.<br>
+> **Baseline coding hiện tại:** `main@f9124f72f12bd2b8ea6f76f66a81f02dfe33ec96` (PR #12 đã merge); GPU-002-B đã có ORM/migration và harness an toàn, nhưng chưa bàn giao repository/UoW hoặc Auth thật. Phân biệt evidence này với lịch sử rà soát bên trên; xem §3.5.<br>
 > **Handoff thực hiện:** [GPU-004 — Thành viên 4](../../development/handoffs/GPU-004_member4_handoff.md) — nhiệm vụ, ownership và checklist PR.<br>
 > **Nguồn chuẩn:** [API Contract v0.6](../../design/api-contract.md) §7, [Database Design v0.4](../../design/database-design.md) §§9, 11, [Module Design](../../design/module-design.md) §§2–5, [Test Design](../../design/test-design.md), [Functional Requirements](../../functional-requirements.md) `FR-WR-01..04`, ADR-001/002/008 và [Team Contribution Rules](../../development/team-contribution-rules.md). Quy trình phối hợp: [Inter-Phase Change Control](../../development/interphase-change-control.md).
 
@@ -38,9 +39,9 @@ Không triển khai Worker public signup/onboarding/key provisioning, Job submis
 | Nguồn | Đã có / thiết kế đã duyệt | Phase 1D sử dụng hoặc bổ sung |
 |---|---|---|
 | GPU-001 — Foundation (`IMPLEMENTED`) | FastAPI app/health, frontend skeleton, PostgreSQL service, shared backend, CI/Compose; 5 services | Tích hợp router/UI vào app hiện hữu; không thay đổi runtime topology |
-| GPU-002 — Database (thiết kế đã có trên Git; code `NOT_IMPLEMENTED`) | Thiết kế 10 bảng Phase 1B, gồm `workers`, `gpu_listings`, `jobs`, `worker_reputation_aggregates`; UoW/repositories vẫn cần hiện thực. Matrix GPU-002-A có các đề xuất D1–D12 chưa được quyết định | Dùng migration/repository thực sau khi bàn giao; đọc Job để kiểm tra guard, không tự tạo schema hoặc triển khai nghiệp vụ Job |
+| GPU-002 — Database (`PARTIAL`: GPU-002-B đã merge) | ORM và migration `0001_phase1b_baseline` đã có qua PR #12; `repositories/` còn placeholder, UoW/readers chưa bàn giao. Matrix GPU-002-A vẫn ghi các đề xuất D1–D12, không suy diễn merge ORM là duyệt mọi đề xuất | Kế thừa schema hiện có; chờ repository/UoW và runtime-role evidence. Chỉ đọc Job để kiểm tra guard, không tự tạo schema hoặc triển khai nghiệp vụ Job |
 | GPU-003 — Authentication (thiết kế đã có trên Git; code `NOT_IMPLEMENTED`) | Thiết kế `AuthenticatedPrincipal`, HS256 JWT, role guard, Login UI và frontend volatile session; còn gate đồng bộ Auth contract và provisioning | Nhận principal/guard và Auth client thực; kiểm tra role/account hiện hành, rồi resolve Worker và kiểm tra Listing ownership trong GPU-004 |
-| GPU-004 — **MỚI** (`PLANNED`) | Chưa có nghiệp vụ Listing trên `main`; `listings/` mới có stub | Registry use cases, routes, DTO, Listing UI, tests và handoff GPU-005 |
+| GPU-004 (`IN_PROGRESS / INTEGRATION_BLOCKED`) | `main@f9124f7` chưa có nghiệp vụ Listing; branch `feat/gpu-004-listings` bổ sung core/use cases, router, DTO, Listing UI và unit/HTTP tests | Chờ adapter PostgreSQL/Auth thật và owner review để tích hợp router/UI; xem §3.5 |
 
 ```mermaid
 flowchart LR
@@ -67,6 +68,8 @@ flowchart LR
 | Principal/Auth client / TV3 | Nhận `AuthenticatedPrincipal(user_id, role, status=ACTIVE)` từ token hợp lệ + DB role/account hiện hành trên mỗi request; sau đó GPU-004 resolve `workers.id` và kiểm tra ownership. Dùng lại volatile session/Bearer client, xóa auth state khi hết hạn/401 theo GPU-003 | Contract khái niệm đã có; chữ ký interface thực cần bàn giao. Không tự viết JWT codec, login normalization hoặc provisioning trong Listings |
 
 **Gate trước tích hợp:** cần revision migration/UoW/repository của GPU-002 và principal/Auth client của GPU-003 có evidence thật. Phase 1C ghi `DEC-P1-03` đã được owner duyệt nhưng API Contract §4.5/§14.3 vẫn còn nhãn `NEEDS_OWNER_DECISION`; GPU-003-A phải đồng bộ qua review trước phần code phụ thuộc. Hash/password provisioning và credential provisioning vẫn cần TV2/TV3/nhóm trưởng chốt; GPU-004 không tự đặt tên biến owner DSN hay tạo account/profile. Có thể soạn policy/DTO/UI với doubles trên branch riêng, nhưng tích hợp PostgreSQL/Auth thật còn `BLOCKED/NOT_RUN` khi các gate này chưa sẵn sàng.
+
+**Theo dõi Auth ngày 24/10/2026:** [owner đã xác nhận `DEC-P1-03`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/13#issuecomment-6372245355); PR #13 revision `c61b8f2` đang chờ merge tại baseline trên. [TV4 đã gửi `ACK_WITH_ACTIONS`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/13#issuecomment-6372588314) cho `XPH-GPU-003-02`: dùng principal/session thật, cập nhật riêng các nhãn Auth của GPU-004 sau PR #13 và chạy kiểm thử JWT tích hợp. Không đổi nhãn hợp đồng hàng loạt trong coding PR này; không coi ACK là human approval, duyệt GPU-003-B, chốt interface adapter hay đóng gate nguồn.
 
 ### 2.2. Bộ 6 endpoint cố định
 
@@ -205,7 +208,7 @@ Dữ liệu reference dùng trong fixture (nếu DB FK yêu cầu) chỉ là tes
 | GPU-004 Listing DTO, `ACTIVE/PAUSED`, accepting_jobs, capacity & ownership | TV4 ↔ TV5 (GPU-005) | Thay hợp đồng mà Job Submit phải dùng; thông báo trước khi TV5 dựa vào revision mới |
 | GPU-004 semantics cho Manager future allocation | TV4 ↔ owner Phase 2 **khi được giao** | Có diff thực sự tác động scheduler; không tự dựng người xác nhận |
 
-**Trạng thái tại thời điểm lập tài liệu:** `NO_CHANGE_ASSESSED` (chưa có diff implementation/contract Phase 1D nào để hai bên đối chiếu); **chưa có ACK thực tế**. Mọi `XPH-GPU-004-nn` chỉ được mở khi có thay đổi thật; chủ dự án phê duyệt *quy trình* không đồng nghĩa xác nhận một diff cụ thể. Code GPU-002/003 chưa được triển khai tại baseline rà soát, nên không được tự khẳng định compatibility với implementation chưa tồn tại.
+**Lịch sử tại thời điểm lập thiết kế:** `NO_CHANGE_ASSESSED` (chưa có diff implementation/contract Phase 1D nào để hai bên đối chiếu); chưa có ACK implementation lúc đó. **Hiện tại:** diff coding ở §3.5 là `POTENTIAL_IMPACT / AWAITING_CROSS_PHASE_ACK`; có ACK của TV4 cho riêng đồng bộ tài liệu Auth `XPH-GPU-003-02`, không phải xác nhận các adapter implementation. Chủ dự án phê duyệt *quy trình* không đồng nghĩa xác nhận một diff cụ thể; không tự khẳng định compatibility với implementation chưa được bàn giao.
 
 **Đối chiếu upstream ngày 24/10/2026:** `XPH-GPU-002-01` revision 3 vẫn `AWAITING_CROSS_PHASE_ACK`, D1–D12 và consumer ACK còn pending trong matrix. Bản cập nhật này chỉ ghi nhận các phụ thuộc và điều kiện chờ, không phải `ACK_COMPATIBLE`, không đóng gate nguồn và không cho phép dùng đề xuất grants/trigger/test harness làm baseline đã duyệt. Không thay đổi public Listing contract hay test oracle của TV5/Phase 2.
 
@@ -229,9 +232,30 @@ Gate: AWAITING_CROSS_PHASE_ACK | BLOCKED_INTERPHASE | CLOSED
 ### 3.4. Kết quả thực tế và handoff
 
 - **`IMPLEMENTED` kế thừa:** GPU-001 foundation, 5-service Compose, empty Listing package, frontend placeholder, API health và CI foundation đã PASS trên PR #3. Đây **không** phải Listing implementation PASS.
-- **`APPROVED DESIGN`:** API Contract Listing §7; physical/transaction rules trong Database Design; quy tắc kiểm soát ảnh hưởng liên Phase do chủ dự án xác nhận. Thiết kế Phase 1B/1C đã được chủ dự án duyệt trong trao đổi nhưng code chưa có trên `main` tại baseline đã kiểm tra.
-- **`PLANNED`:** toàn bộ GPU-004-A..F, UI thật, Listing API và test evidence; không tuyên bố hoàn thành cho đến khi có SHA/migration revision, command/log PASS, human review, inter-phase ACK và PR merge.
+- **`APPROVED DESIGN`:** API Contract Listing §7; physical/transaction rules trong Database Design; quy tắc kiểm soát ảnh hưởng liên Phase do chủ dự án xác nhận. ORM/migration GPU-002-B đã có trên baseline coding hiện tại; điều đó không xác nhận repository/Auth hoặc nghiệm thu tích hợp GPU-004.
+- **`IN_PROGRESS`:** core/use cases, DTO, router 6 endpoint và component Listings đã được viết trên branch `feat/gpu-004-listings`; test dùng dependency doubles có evidence riêng ở §3.5. Adapter PostgreSQL/Auth thật, shared integration và acceptance E2E vẫn `BLOCKED/NOT_RUN`; không gọi toàn Phase là `IMPLEMENTED`.
 - **Handoff cho GPU-005:** TV4 giao cho TV5 Listing read/ownership contract, DTO, `ACTIVE/PAUSED`, cách check `requested_gpu_count <= total_gpu_count` và Listing-first locking. TV5 triển khai riêng `TX-SUBMIT` và atomic Job+protected reference; không được lấy `available_gpu_count` phía UI làm thẩm quyền cấp phát.
 - **Handoff cho Phase 2:** API Listings không ghi `allocated_gpu_count`; Manager sau này chỉ cập nhật count cùng Allocation trong transaction, tôn trọng trạng thái PAUSED và Listing-first locking.
 
-**Review gate:** chủ dự án đã phê duyệt **thiết kế** GPU-004 trong trao đổi ngày 21/10/2026. Trạng thái code và test vẫn là `PLANNED / NOT_RUN`; chỉ đánh dấu `IMPLEMENTED` sau PR có review, test evidence và merge hợp lệ. Chưa có xác nhận hai phía cho bất kỳ diff kỹ thuật cụ thể nào. Không tự tạo branch, code, sửa approved contracts, commit, push, mở PR hoặc merge khi chưa có yêu cầu tương ứng.
+**Review gate:** thiết kế GPU-004 đã được phê duyệt ngày 21/10/2026; người phụ trách yêu cầu coding slice ngày 24/10/2026. Code hiện `IN_PROGRESS / INTEGRATION_BLOCKED`, evidence cục bộ ở §3.5 không thay acceptance với DB/Auth thật. Chỉ đánh dấu `IMPLEMENTED` sau review, test evidence đúng phạm vi và merge hợp lệ; các consumption interfaces còn chờ xác nhận owner liên quan. Không tự sửa approved contracts, push/merge hoặc vượt slice được giao.
+
+### 3.5. Coding slice GPU-004 — 24/10/2026 (chưa nghiệm thu tích hợp)
+
+Người phụ trách đã yêu cầu bắt đầu code và commit GPU-004 trên nhánh riêng. Baseline `main@f9124f7`; code được bàn giao trên branch `feat/gpu-004-listings` dưới dạng Draft PR, chưa phải code đã merge hoặc được nghiệm thu. [Implementation README](../../../backend/src/gpu_marketplace/listings/README.md) mô tả consumption ports, cách nhóm trưởng/TV2/TV3 nối adapter thật và các bước cập nhật tiếp khi dependency được bàn giao.
+
+- Backend: `listings/` có validation, business guards, cursor HMAC, 6 routes và UoW/reader interfaces. Không có DB schema/SQL adapter, JWT codec, fake principal hoặc memory database dùng trong production.
+- Frontend: `src/api/listings.ts` và `src/ui/listings/` nhận token getter/Auth state từ GPU-003; tạo/sửa/đọc/pause/resume, paging, error states và chống bấm lặp. Không sửa shared `api/app.py` hoặc `App.tsx` khi dependency/integration chưa được bàn giao; màn hình mặc định vẫn là foundation.
+- `XPH-GPU-004-01` — `POTENTIAL_IMPACT / AWAITING_CROSS_PHASE_ACK`: trước đây chưa có Listing implementation; coding branch thêm consumption interfaces trong `ports.py`/`models.py` và API/UI chưa mount. TV2 (UoW/reader), TV3 (principal/session), nhóm trưởng (router/shell/cursor config) cần review; TV5 cần đối chiếu cùng Listing-first protocol khi tích hợp `TX-SUBMIT`. Các ACK cho diff implementation này còn pending, tách biệt với ACK Auth ở §2.1. Bản code không đổi public Listing contract, không chấp thuận D1–D12 hay đóng `XPH-GPU-002-01`. Draft PR là nơi cảnh báo/đối chiếu; chưa được merge/tích hợp phần phụ thuộc khi gate chưa được xử lý.
+
+| Kiểm tra đã chạy trước commit trên baseline coding hiện tại | Kết quả và phạm vi |
+|---|---|
+| `backend/.venv/Scripts/python.exe -m pytest backend/tests tests -q -p no:cacheprovider -rN` | `PASS`: 154 tests, gồm 102 test Listings với UoW/principal doubles; 58 upstream PostgreSQL tests `SKIPPED/NOT_RUN` vì thiếu cluster test riêng. Không chứng minh PostgreSQL locks/JWT thật |
+| Ruff 0.14.0 format + check `--select F,E9` cho source/test Listings | `PASS` |
+| Frontend Vitest | `PASS`: 27 tests, gồm tests component/API client dùng fake API và regression có sẵn |
+| TypeScript `tsc -b --pretty false`; Vite production build | `PASS`; build shell mặc định, component Listings được compile/render qua TypeScript/RTL |
+| Kiểm tra bố cục component bằng fixture riêng | Chỉ visual check, không phải DB/Auth/E2E acceptance |
+| PostgreSQL nhiều session, runtime DB grants, Auth thật, full `API-LIST-13..15`, browser E2E/benchmark | `BLOCKED/NOT_RUN` — chờ dependency/owner review, không thay bằng kết quả unit test |
+
+Runtime kiểm thử: Python 3.12.14, Node 24.19.0, dependency từ `uv.lock`/`package-lock.json` hiện có; không sửa lockfiles hay nâng runtime pins. Cảnh báo Starlette/httpx deprecation có sẵn không làm tests thất bại. Simulator/Compose smoke không được chạy trong lượt này.
+
+Các test Auth-boundary mới chỉ inject rejection `401` từ dependency và kiểm tra cả 6 routes không mở Listing UoW/không ghi dữ liệu/không lộ lỗi nội bộ. Chúng **không** kiểm tra chữ ký hay claim JWT thật. Khi TV2/TV3 bàn giao, TV4 cập nhật adapter theo interface đã thống nhất, phối hợp nhóm trưởng nối app/UI, chạy test tích hợp rồi cập nhật evidence và yêu cầu review trên cùng PR còn mở hoặc PR tiếp theo nếu bản trước đã được tích hợp.
