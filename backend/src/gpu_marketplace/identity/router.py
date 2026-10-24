@@ -7,7 +7,6 @@ to ``create_principal_dependency``; every service call runs in the threadpool.
 """
 
 from collections.abc import Callable
-import json
 import logging
 from typing import Any
 from uuid import UUID, uuid4
@@ -18,6 +17,16 @@ from fastapi.routing import APIRoute
 from starlette.concurrency import run_in_threadpool
 
 from gpu_marketplace.identity.dependencies import BEARER_CHALLENGE, bearer_token
+from gpu_marketplace.identity.request_body import (
+    MAX_LOGIN_BODY_BYTES,
+    BodyTooLarge,
+    InvalidBody,
+    UnexpectedBody,
+    parse_json,
+    read_bounded_body,
+    require_empty_body,
+    require_json_media_type,
+)
 from gpu_marketplace.identity.service import (
     AuthError,
     AuthService,
@@ -30,8 +39,8 @@ from gpu_marketplace.identity.service import (
 
 logger = logging.getLogger(__name__)
 
-# API Contract §4 does not name the 401 code for /me and /logout; §7.9 uses UNAUTHORIZED and
-# §8 uses UNAUTHENTICATED. Pending the team lead's decision, keep it in this one constant.
+# 401 code for /me and /logout, approved as D-C1 on PR #23 (API Contract §4.3, §14.5). It follows
+# Listings §7.9; Jobs keeps its own UNAUTHENTICATED mapping (§8).
 TOKEN_REJECTED_CODE = "UNAUTHORIZED"
 
 _LOGIN_FIELDS = frozenset({"login_name", "password"})
@@ -98,27 +107,14 @@ class AuthRoute(APIRoute):
         return handler
 
 
-def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate JSON key")
-        result[key] = value
-    return result
-
-
-def _reject_constant(_: str) -> None:
-    raise ValueError("non-JSON numeric constant")
-
-
 async def _login_body(request: Request) -> tuple[str, str]:
+    # Every check here runs before any account read (API Contract §4.2, §14.5).
     try:
-        data = json.loads(
-            (await request.body()).decode("utf-8"),
-            object_pairs_hook=_unique_object,
-            parse_constant=_reject_constant,
-        )
-    except (ValueError, UnicodeError) as exc:
+        require_json_media_type(request.headers.get("content-type"))
+        data = parse_json(await read_bounded_body(request, MAX_LOGIN_BODY_BYTES))
+    except BodyTooLarge as exc:
+        raise _RequestError(413, "PAYLOAD_TOO_LARGE", "The request body is too large.") from exc
+    except InvalidBody as exc:
         raise _RequestError(400, "INVALID_JSON", "The request body is not valid JSON.") from exc
     if not isinstance(data, dict):
         raise _RequestError(422, "VALIDATION_ERROR", "The request contains invalid values.")
@@ -169,6 +165,11 @@ def create_auth_router(*, service: AuthService) -> APIRouter:
 
     @router.post("/logout", status_code=204)
     async def logout(request: Request) -> Response:
+        # No body is accepted (API Contract §4.4); it is checked before the token and account.
+        try:
+            await require_empty_body(request)
+        except (InvalidBody, UnexpectedBody) as exc:
+            raise _RequestError(400, "INVALID_JSON", "This request does not accept a body.") from exc
         # Validates the caller only; an issued JWT is not revoked server-side (API Contract §4.4).
         await call(service.current_identity, token_or_reject(request))
         return Response(status_code=204)

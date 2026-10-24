@@ -9,6 +9,7 @@ from identity_fakes import C1, NUL_PASSWORD, PASSWORD, T0_US, build_service
 from gpu_marketplace.identity.dependencies import bearer_token, create_principal_dependency
 from gpu_marketplace.identity.tokens import MAX_TOKEN_LENGTH
 from gpu_marketplace.identity.principal import AuthenticatedPrincipal
+from gpu_marketplace.identity.request_body import MAX_JSON_DEPTH, MAX_LOGIN_BODY_BYTES
 from gpu_marketplace.identity.router import TOKEN_REJECTED_CODE, create_auth_router
 
 
@@ -91,6 +92,107 @@ def test_login_failures_are_generic_401(env, body) -> None:
 def test_login_bad_body_is_400(env, raw: str, code: str) -> None:
     client, reader, *_ = env
     assert_error(login(client, None, raw=raw), 400, code)
+    assert reader.reads == 0
+
+
+VALID_BODY = json.dumps({"login_name": "demo_client_01", "password": PASSWORD})
+
+
+def post_login(client: TestClient, content, headers: dict[str, str]):
+    return client.post("/api/v1/auth/login", content=content, headers=headers)
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    [None, "text/plain", "application/jsonx", "application/x-www-form-urlencoded", "application/json; charset=latin-1"],
+)
+def test_login_requires_json_media_type(env, content_type: str | None) -> None:
+    client, reader, *_ = env
+    headers = {} if content_type is None else {"Content-Type": content_type}
+    assert_error(post_login(client, VALID_BODY, headers), 400, "INVALID_JSON")
+    assert reader.reads == 0
+
+
+@pytest.mark.parametrize("content_type", ["application/json; charset=UTF-8", "Application/JSON", 'application/json;charset="utf-8"'])
+def test_login_accepts_json_media_type_variants(env, content_type: str) -> None:
+    client, *_ = env
+    assert post_login(client, VALID_BODY, {"Content-Type": content_type}).status_code == 200
+
+
+def padded_body(size: int) -> bytes:
+    # A valid Login body padded with JSON whitespace to exactly ``size`` bytes.
+    body = VALID_BODY.encode()
+    return body + b" " * (size - len(body))
+
+
+def test_login_body_at_the_limit_is_accepted(env) -> None:
+    client, *_ = env
+    response = post_login(client, padded_body(MAX_LOGIN_BODY_BYTES), {"Content-Type": "application/json"})
+    assert response.status_code == 200
+
+
+def chunks(body: bytes, size: int = 1024):
+    for start in range(0, len(body), size):
+        yield body[start : start + size]
+
+
+@pytest.mark.parametrize(
+    ("content", "extra_headers"),
+    [
+        (padded_body(MAX_LOGIN_BODY_BYTES + 1), {}),  # declared Content-Length over the limit
+        (chunks(padded_body(4 * MAX_LOGIN_BODY_BYTES)), {}),  # chunked: no Content-Length at all
+        (padded_body(4 * MAX_LOGIN_BODY_BYTES), {"Content-Length": "10"}),  # misleading Content-Length
+    ],
+    ids=["declared", "chunked", "misleading-length"],
+)
+def test_oversized_login_body_is_413_without_account_read(env, content, extra_headers) -> None:
+    client, reader, *_ = env
+    response = post_login(client, content, {"Content-Type": "application/json", **extra_headers})
+    assert_error(response, 413, "PAYLOAD_TOO_LARGE")
+    assert reader.reads == 0
+    assert "demo_client" not in response.text and PASSWORD not in response.text
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"login_name": "demo_client_01", "password": ' + b"[" * 5000 + b"]" * 5000 + b"}",
+        b"[" * MAX_LOGIN_BODY_BYTES,
+        b'{"login_name": "demo_client_01", "password": "x"' + b"}" * 3000,
+        b'{"login_name": "demo_client_01", "password": "' + bytes([0xFF]) + b'"}',
+        b'{"login_name": "demo_client_01", "password": ' + b"9" * 5000 + b"}",
+        b"",
+    ],
+    ids=["deep-value", "deep-only-brackets", "unbalanced", "invalid-utf8", "huge-integer", "empty"],
+)
+def test_adversarial_login_json_is_controlled(env, raw: bytes) -> None:
+    client, reader, *_ = env
+    response = post_login(client, raw, {"Content-Type": "application/json"})
+    assert_error(response, 400, "INVALID_JSON")  # never 500
+    assert reader.reads == 0
+    assert "demo_client" not in response.text
+
+
+def test_nesting_limit_rejects_before_parsing(env) -> None:
+    client, reader, *_ = env
+    nested = "[" * (MAX_JSON_DEPTH + 1) + "]" * (MAX_JSON_DEPTH + 1)
+    assert_error(login(client, None, raw='{"login_name": "demo_client_01", "password": ' + nested + "}"), 400, "INVALID_JSON")
+    allowed = "[" * (MAX_JSON_DEPTH - 1) + "]" * (MAX_JSON_DEPTH - 1)
+    assert_error(login(client, None, raw='{"login_name": "demo_client_01", "password": ' + allowed + "}"), 422, "VALIDATION_ERROR")
+    assert reader.reads == 0
+
+
+def test_brackets_inside_strings_do_not_count_as_nesting(env) -> None:
+    client, *_ = env
+    password = "[{" * 100 + '\\"' + "[" * 100  # escaped quote and backslash inside a string
+    response = login(client, {"login_name": "demo_client_01", "password": password})
+    assert_error(response, 401, "INVALID_CREDENTIALS")
+
+
+def test_malformed_content_length_is_400(env) -> None:
+    client, reader, *_ = env
+    response = post_login(client, VALID_BODY, {"Content-Type": "application/json", "Content-Length": "12abc"})
+    assert_error(response, 400, "INVALID_JSON")
     assert reader.reads == 0
 
 
@@ -180,6 +282,32 @@ def test_logout_is_204_twice_and_does_not_revoke(env) -> None:
 def test_logout_without_token_is_401(env) -> None:
     client, *_ = env
     assert_error(client.post("/api/v1/auth/logout"), 401, TOKEN_REJECTED_CODE)
+
+
+@pytest.mark.parametrize(
+    ("content", "headers"),
+    [
+        (b"{}", {"Content-Type": "application/json"}),
+        (b'{"token": "x"}', {"Content-Type": "application/json"}),
+        (b"x", {}),
+        (chunks(b"{}", 1), {"Content-Type": "application/json"}),
+    ],
+    ids=["empty-object", "json", "text", "chunked"],
+)
+def test_logout_with_a_body_is_400(env, content, headers) -> None:
+    client, reader, *_ = env
+    token = token_for(client)
+    reads = reader.reads
+    response = client.post("/api/v1/auth/logout", content=content, headers={**bearer(token), **headers})
+    assert_error(response, 400, "INVALID_JSON")
+    assert reader.reads == reads  # rejected before the account is read
+
+
+def test_logout_accepts_an_explicit_empty_body(env) -> None:
+    client, *_ = env
+    token = token_for(client)
+    response = client.post("/api/v1/auth/logout", content=b"", headers={**bearer(token), "Content-Length": "0"})
+    assert response.status_code == 204
 
 
 def test_no_public_signup_or_role_routes(env) -> None:
