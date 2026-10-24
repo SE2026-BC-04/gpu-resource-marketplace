@@ -411,3 +411,40 @@ def test_p1_privileges_the_matrix_grants_do_not_trip_the_check(conn: Connection)
     module = grants_module()
     conn.execute(text(f"GRANT SELECT ON jobs TO {API_LOGIN}"))  # already inherited through the group
     module.require_no_excess_privileges(conn, RUNTIME_ROLES)
+
+
+RUNTIME_LOGINS = {API_LOGIN: API_GROUP, MANAGER_LOGIN: MANAGER_GROUP}
+
+
+def test_p2_bootstrapped_login_roles_pass_the_preflight(conn: Connection) -> None:
+    grants_module().require_login_roles(conn, RUNTIME_LOGINS)
+
+
+def test_p2_migration_stops_when_a_login_role_is_missing(conn: Connection) -> None:
+    """Groups created by hand without their login roles must not let revision 0002 complete."""
+    module = grants_module()
+    missing = f"gpm_missing_{new_id()[:8]}"
+    with pytest.raises(RuntimeError, match=f"missing database login role.*{missing}.*role bootstrap"):
+        module.require_login_roles(conn, {missing: API_GROUP})
+
+
+def test_p2_migration_stops_when_a_login_role_is_not_a_member_of_its_group(conn: Connection) -> None:
+    module = grants_module()
+    conn.execute(text(f"REVOKE {API_GROUP} FROM {API_LOGIN}"))  # rolled back with the test transaction
+    with pytest.raises(RuntimeError, match=f"{API_LOGIN} is not a member of {API_GROUP}"):
+        module.require_login_roles(conn, RUNTIME_LOGINS)
+
+
+def test_p2_migration_stops_when_a_login_role_cannot_log_in(conn: Connection) -> None:
+    module = grants_module()
+    stand_in = f"gpm_nologin_{new_id()[:8]}"
+    conn.execute(text(f'CREATE ROLE "{stand_in}" NOLOGIN IN ROLE {API_GROUP}'))
+    with pytest.raises(RuntimeError, match=f"{stand_in} must be a LOGIN role"):
+        module.require_login_roles(conn, {stand_in: API_GROUP})
+
+
+def test_p2_upgrade_runs_the_login_role_preflight() -> None:
+    source = (VERSIONS / "0002_phase1b_grants.py").read_bytes().decode("utf-8")
+    upgrade_body = source.split("def upgrade() -> None:", 1)[1].split("def downgrade", 1)[0]
+    assert "require_login_roles(bind" in upgrade_body
+    assert upgrade_body.index("require_login_roles(") < upgrade_body.index("op.execute(")
