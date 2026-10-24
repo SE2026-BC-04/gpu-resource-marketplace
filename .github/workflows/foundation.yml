@@ -12,6 +12,22 @@ permissions:
 jobs:
   python:
     runs-on: ubuntu-latest
+    services:
+      # D8/D12: a fresh disposable cluster per job, same image digest as compose.yaml, data on tmpfs.
+      # Schema matrix 9.1/9.3: the job generates its own temporary password (next steps). The value below
+      # only bootstraps the container and stops working over TCP once the job has rotated the password.
+      postgres:
+        image: postgres:16.15-bookworm@sha256:0ea6700a3b4f0ae6ce746519073558aed4d88a79d8d07622a9a644946c7319c4
+        env:
+          POSTGRES_PASSWORD: bootstrap-only-rotated-by-the-job
+        ports:
+          - 55432:5432
+        options: >-
+          --tmpfs /var/lib/postgresql/data
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -22,7 +38,35 @@ jobs:
         with:
           python-version: 3.12.15
       - run: uv sync --project backend --locked --group dev
-      - run: uv run --project backend --locked --group dev pytest backend/tests tests
+      - name: Set a job-generated password and mark the disposable test cluster (backend/tests/db_safety.py)
+        # psql runs inside the container over the local socket; nothing here prints the password or the env.
+        run: |
+          password="$(openssl rand -hex 32)"
+          token="$(openssl rand -hex 16)"
+          echo "::add-mask::${password}"
+          docker exec "${{ job.services.postgres.id }}" psql -v ON_ERROR_STOP=1 -U postgres -q \
+            -c "ALTER ROLE postgres PASSWORD '${password}'" \
+            -c "CREATE DATABASE gpm_disposable_test_cluster" \
+            -c "COMMENT ON DATABASE gpm_disposable_test_cluster IS '${token}'" \
+            -c "CREATE DATABASE gpu_marketplace_test" \
+            -c "COMMENT ON DATABASE gpu_marketplace_test IS 'gpu-marketplace-disposable-test-db'"
+          {
+            echo "GPM_CI_PGPASSWORD=${password}"
+            echo "GPU_MARKETPLACE_TEST_CLUSTER_TOKEN=${token}"
+            echo "GPU_MARKETPLACE_TEST_DATABASE_URL=postgresql+psycopg://postgres:${password}@127.0.0.1:55432/gpu_marketplace_test"
+          } >> "$GITHUB_ENV"
+      - name: Only the job-generated password opens the published port
+        run: |
+          # Positive check first, so a missing psql client fails the job instead of passing the negative check.
+          PGPASSWORD="${GPM_CI_PGPASSWORD}" psql -h 127.0.0.1 -p 55432 -U postgres -d postgres -Atc 'SELECT 1' >/dev/null
+          if PGPASSWORD=bootstrap-only-rotated-by-the-job psql -h 127.0.0.1 -p 55432 -U postgres -d postgres -Atc 'SELECT 1' >/dev/null 2>&1; then
+            echo "bootstrap password still accepted" >&2
+            exit 1
+          fi
+      - name: Backend and topology tests, including PostgreSQL tests
+        env:
+          GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS: "1"
+        run: uv run --project backend --locked --group dev pytest backend/tests tests -rs
       - run: uv sync --project simulator --locked --group dev
       - run: uv run --project simulator --locked --group dev pytest simulator/tests
 
