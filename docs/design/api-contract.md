@@ -1,8 +1,8 @@
 # GPU Resource Marketplace - API Contract Design
 
-**Document version:** v0.8 — owner-approved `CR-GPU-003-UNICODE-01` login/password validation added on top of v0.7 (`DEC-P1-03` sync); Markdown only<br>
+**Document version:** v0.9 — Auth request-body bounds and the `D-C1`/`D-C2` decisions from the PR #23 review (§14.5) added on top of v0.8 (`CR-GPU-003-UNICODE-01`); Markdown only<br>
 **Date:** 2026-10-24<br>
-**Status:** **APPROVED_DESIGN** for the described API routes/DTOs, the 100 API contract-test IDs, and the owner-approved scope of `API-OPEN-01`, `API-OPEN-02`, and `API-OPEN-06` (2026-10-18). The additional JWT claim/header profile, fractional NumericDate representation and login-normalization repertoire were **owner-approved as `DEC-P1-03` on 2026-10-21** (recorded in [Phase 1 §6](../architecture/phases/phase1_project_foundation.md)) and are synchronized in §§4.5 and 14.3. The L2 change `CR-GPU-003-UNICODE-01` (rejection of U+0000 and surrogate code points in `login_name`, safe Unicode password handling) was **owner-approved on 2026-10-24** ([#16](https://github.com/SE2026-BC-04/gpu-resource-marketplace/issues/16)) and is recorded in §§4.2, 4.5, 6 and 14.4. ADR-008 Option B is **ACCEPTED** (2026-10-18). All implementation/API/database tests remain `NOT_RUN`; this document makes no claim that application code or migrations exist.
+**Status:** **APPROVED_DESIGN** for the described API routes/DTOs, the 100 API contract-test IDs, and the owner-approved scope of `API-OPEN-01`, `API-OPEN-02`, and `API-OPEN-06` (2026-10-18). The additional JWT claim/header profile, fractional NumericDate representation and login-normalization repertoire were **owner-approved as `DEC-P1-03` on 2026-10-21** (recorded in [Phase 1 §6](../architecture/phases/phase1_project_foundation.md)) and are synchronized in §§4.5 and 14.3. The L2 change `CR-GPU-003-UNICODE-01` (rejection of U+0000 and surrogate code points in `login_name`, safe Unicode password handling) was **owner-approved on 2026-10-24** ([#16](https://github.com/SE2026-BC-04/gpu-resource-marketplace/issues/16)) and is recorded in §§4.2, 4.5, 6 and 14.4. The Auth request-body bounds and the `D-C1`/`D-C2` error decisions directed by the team lead in the PR #23 review (2026-10-24) are recorded in §§3.3, 4.2–4.4, 6 and 14.5; they become approved with the L2 review of PR #23. ADR-008 Option B is **ACCEPTED** (2026-10-18). All implementation/API/database tests remain `NOT_RUN`; this document makes no claim that application code or migrations exist.
 **Target repository path:** `docs/design/api-contract.md`  
 **Output scope:** Markdown documentation only; no source code, SQL migration, OpenAPI generator, Docker file, or CI workflow.  
 **Product scope:** Real GPU Marketplace simulation-only MVP. NOT the separate AD-090 assignment variant.
@@ -99,6 +99,7 @@ All controlled public HTTP errors return this **candidate** structure (fields no
 | `403` | Validly authenticated account but wrong role/permission | No mutation, log redacted denial |
 | `404` | Resource absent, or private resource owned by another account when existence should be concealed | No cross-owner data disclosure; do not rely on client-side filtering |
 | `409` | Legal request shape but conflicting immutable or current state (future cancel/pause/duplicate dispute, etc.) | Do not commit a partial business effect |
+| `413` | Request body larger than the endpoint's limit (Login: 16 KiB, §14.5), detected while the body is received | Rejected before parsing and before any account read; body never echoed |
 | `422` | Well-formed JSON, but typed/field validation failed | Stable field validation details may be added in next group; no internal schema dump |
 | `429` | Only if a rate-limit control is later explicitly adopted | Do not claim a rate limiter already exists |
 | `500` / `503` | Internal failure / temporary dependency unavailable | Generic public message and request ID; no stack trace or secret |
@@ -130,12 +131,13 @@ All controlled public HTTP errors return this **candidate** structure (fields no
 | Access | Public (unauthenticated request allowed) |
 | Owner / reads | API Identity; `users` + `user_roles` (`roles` catalog) |
 | Body | Required `login_name` and `password` strings; no `role` or `user_id` accepted |
+| Request body bounds | `Content-Type: application/json` required (an optional `charset` must be `utf-8`), otherwise `400 INVALID_JSON`; raw body at most **16 KiB** (16,384 bytes), enforced from `Content-Length` and while the stream is received (also without or with a misleading `Content-Length`), otherwise `413 PAYLOAD_TOO_LARGE`; strict UTF-8 JSON with no duplicate keys, no `NaN`/`Infinity` and at most 8 nested arrays/objects, otherwise `400 INVALID_JSON`, never `500`. All of these are decided before any database query (§14.5) |
 | Input validation | `login_name` length 1..128 after applying the owner-approved surrounding-whitespace trim rule; `password` nonempty; malformed JSON or unexpected fields -> `400`; missing/empty/wrong-type required fields -> `422`; the trim set is exactly ASCII SP/HT/LF/CR (`DEC-P1-03`, §4.5); a `login_name` containing U+0000 or any surrogate code point U+D800..U+DFFF -> `422`, decided **before any database query** (`CR-GPU-003-UNICODE-01` R1) |
 | Login name matching | Trim only ASCII SP/HT/LF/CR at both ends and match case-sensitively; keep U+00A0 and other Unicode whitespace; apply no NFC/NFD normalization or case folding; accept otherwise-valid Unicode, including supplementary (non-BMP) code points; seeding/provisioning and Login use the **same** pure validation/normalization implementation in `identity/`, never a duplicate (`API-OPEN-02` + `DEC-P1-03`, §4.5; `CR-GPU-003-UNICODE-01` R2, R6) |
 | Authentication | Verify password against stored **hash**, require `users.status='ACTIVE'` and exactly one valid assigned role; never compare/store plaintext password. The password is never trimmed or normalized; U+0000 in a password is **not** rejected or truncated, and the exact password bytes are hashed and compared (R4). A password containing an unencodable surrogate code point returns the same generic `401 INVALID_CREDENTIALS` as a wrong password, never `500` (R3) |
 | Success | `200 OK`, `Cache-Control: no-store`, response JSON containing authenticated `user` and credential info (shape below) |
 | Wrong name/password/disabled account | `401 INVALID_CREDENTIALS` with the same generic message; do not reveal which condition failed |
-| Corrupt or missing role mapping | Refuse login; log redacted server-side failure and fail closed; never guess role or default to Admin |
+| Corrupt or missing role mapping | Refuse login with the same generic `401 INVALID_CREDENTIALS` as other login failures (`D-C2`, §14.5); log redacted server-side failure and fail closed; never guess role, default to Admin or reveal account existence |
 | Side effects | No GPU/Job/Worker/Reputation effect; optionally one sanitized audit event |
 | Error redaction | No raw `login_name`, password, password hash, token or driver/Unicode exception text in any public response or log (`CR-GPU-003-UNICODE-01` R5) |
 
@@ -173,8 +175,8 @@ All controlled public HTTP errors return this **candidate** structure (fields no
 | Owner / reads | API Identity; current account/role record |
 | Success | `200 OK`, `Cache-Control: no-store` |
 | Success body | `id` UUIDv4, `login_name`, `role`; only the account identified by the validated credential |
-| Missing/invalid/expired authentication | `401`; no identity body |
-| Disabled account or missing role mapping | Fail closed as `401` / invalid current session; never infer `ADMIN` |
+| Missing/invalid/expired authentication | `401 UNAUTHORIZED` with `WWW-Authenticate: Bearer` (`D-C1`, §14.5); no identity body |
+| Disabled account or missing role mapping | Fail closed as `401 UNAUTHORIZED` / invalid current session; never infer `ADMIN` |
 | Service-token attempt | `401`; internal service tokens are not user identities |
 
 **Proposed success response:**
@@ -193,11 +195,11 @@ An end-user token's role claim, if one exists, is not permission to ignore the a
 
 | Contract property | Proposed value |
 |---|---|
-| Access | Valid end-user authentication; no JSON body |
+| Access | Valid end-user authentication; no request body: any nonempty body -> `400 INVALID_JSON`, checked before authentication (§14.5) |
 | Success | Proposed `204 No Content` (no response body), `Cache-Control: no-store` |
 | Side effects | Does not cancel jobs, release GPU, revoke Worker signing keys or delete account data |
 | Idempotent visible behavior | Repeating logout with a still-valid credential yields a harmless `204`, with no domain business effect |
-| Missing/invalid user authentication | `401` per common convention |
+| Missing/invalid user authentication | `401 UNAUTHORIZED` with `WWW-Authenticate: Bearer` (`D-C1`, §14.5) |
 | Precise security semantics | **APPROVED LIMITATION:** Logout does not revoke an issued token on the server. The client discards it; a copied/stolen unexpired token could remain usable until expiry if the account is still ACTIVE. Do not misstate a `204` response as invalidating previously issued Bearer credentials. |
 
 **Do not label a stateless logout response as proof of immediate token invalidation.** The UI must disclose this approved limitation. The API cannot force a client to delete a copied credential. No automatic account deletion or personal-data-erasure behavior is implied by Logout.
@@ -247,7 +249,7 @@ The planned resource mutations in this table are **authorization requirements**,
 |---|---|---|---|
 | `API-AUTH-01-ROLES` | Login separately with valid C1/W1/A1 canonical credentials; repeat C1 with the same login surrounded by U+0020 spaces; seed/provision a whitespace-wrapped C1 name and login with its canonical form; try a U+0020-only login and a mixed-case variant | Canonical and U+0020-wrapped C1 requests return `200` with the same C1 identity; provisioning and Login resolve the same canonical name; U+0020-only input returns `422` after trim; mixed-case variant returns generic `401`; three role identities match DB; 0 secret fields in replies | Owner-approved trim/case/seed consistency rules; Unicode-specific subcases below follow `DEC-P1-03` |
 | `API-AUTH-02-GENERIC-FAIL` | Unknown login, wrong password and disabled D1 with otherwise valid password; valid C1 `login_name` with a password containing a lone surrogate code point; an account provisioned with a password containing U+0000 (for example `ab` U+0000 `cd`), logging in with the exact password and with the prefix `ab` | All failures return `401 INVALID_CREDENTIALS` with equivalent public message, including the surrogate password (never `500`); 0 role or account existence disclosure; the exact NUL-containing password returns `200` and the prefix `ab` returns `401`, proving no truncation (`CR-GPU-003-UNICODE-01` R3, R4) | Auth decision accepted; CR approved 2026-10-24 |
-| `API-AUTH-03-BAD-BODY` | Missing `login_name`, empty password, malformed JSON and injected `role='ADMIN'` in login body; `login_name` containing U+0000 at the start, middle and end; `login_name` containing a lone high surrogate, a lone low surrogate, or two surrogate code points | Malformed JSON and injected unknown `role` -> `400`; missing `login_name` or empty `password` -> `422`; every U+0000 or surrogate `login_name` -> `422` with **0 database queries**, no echo of the input in body or logs, and no `500`/encoding exception; no account/role mutation (`CR-GPU-003-UNICODE-01` R1, R5) | Validation contract approved; CR approved 2026-10-24 |
+| `API-AUTH-03-BAD-BODY` | Missing `login_name`, empty password, malformed JSON and injected `role='ADMIN'` in login body; `login_name` containing U+0000 at the start, middle and end; `login_name` containing a lone high surrogate, a lone low surrogate, or two surrogate code points | Malformed JSON and injected unknown `role` -> `400`; missing `login_name` or empty `password` -> `422`; missing or non-JSON `Content-Type`, invalid UTF-8, more than 8 nested arrays/objects and an over-limit integer -> `400 INVALID_JSON` (never `500`); a body over 16 KiB -> `413 PAYLOAD_TOO_LARGE` whether `Content-Length` is accurate, absent (chunked) or misleading; each body-bound case with **0 account reads** and no echo (§14.5); every U+0000 or surrogate `login_name` -> `422` with **0 database queries**, no echo of the input in body or logs, and no `500`/encoding exception; no account/role mutation (`CR-GPU-003-UNICODE-01` R1, R5) | Validation contract approved; CR approved 2026-10-24 |
 | `API-AUTH-04-ME-OWN` | GET `/auth/me` with valid C1 credential | `200` and C1 identity only; no password hash/token contents, other users or secrets | Auth decision accepted |
 | `API-AUTH-05-NO-AUTH` | GET `/auth/me` without a credential; with malformed/tampered JWT; with `exp` changed to a future value while keeping the original signature; with an unsupported signing algorithm such as `none` or `HS384`; or with a correctly signed token whose `typ`, `iss` or `aud` differs from §4.5 or whose `sub` is not a UUID; or with a correctly signed token that omits `typ`, `iss`, `aud` or `sub`, or carries a header/claim with the wrong JSON type (for example a numeric `sub`, a non-string `iss`/`aud`/`typ`, or a string `iat`/`exp`) | `401` for every invalid credential, including the modified-`exp` token, any `alg` other than HS256 and every `DEC-P1-03` header/claim mismatch, omission or type error; no identity body | Owner-approved HS256, expiry policy and `DEC-P1-03` profile |
 | `API-AUTH-06-EXPIRED` | Issue token at trusted fake `T0`; call `/auth/me` at `T0+899.999999s` and `T0+900.000000s` | Approved oracle: reject at exactly `now >= exp` with no tolerance; with the approved microsecond NumericDate representation in §4.5, `+899.999999s` returns `200` and `+900.000000s` returns `401` | Exact 900-second policy and `DEC-P1-03` NumericDate representation APPROVED; test `NOT_RUN` |
@@ -256,7 +258,7 @@ The planned resource mutations in this table are **authorization requirements**,
 | `API-AUTH-09-CROSS-ROLE` | C1 requests Worker write; W1 requests Client write; A1 requests any business write | `403` for each wrong-role request; no domain mutation | Related routes subsequently defined |
 | `API-AUTH-10-OBJECT-OWNER` | C2 requests C1's private Job/receipt/dispute | Uniform `404` for private resource, no C1 data disclosed | Related resource routes subsequently defined |
 | `API-AUTH-11-TOKEN-BOUNDARY` | Call `/auth/me` with Manager and Simulator service-only tokens; use a Client token for either internal route | Every call denied 401 with zero Inbox/dispatch/domain mutations | Internal API routes defined |
-| `API-AUTH-12-LOGOUT` | Call Logout twice with C1 token; try same token against `/auth/me` before expiry, then at expiry | Design expects `204` twice, 0 domain changes; same token can authenticate before expiry while account ACTIVE, must be `401` at expiry; client deletes its token locally | Logout non-revocation policy and route APPROVED_DESIGN; test `NOT_RUN` |
+| `API-AUTH-12-LOGOUT` | Call Logout twice with C1 token; try same token against `/auth/me` before expiry, then at expiry; call Logout with a JSON or non-JSON body, including a chunked one | Design expects `204` twice, 0 domain changes; any nonempty Logout body returns `400 INVALID_JSON` before the account is read; same token can authenticate before expiry while account ACTIVE, must be `401` at expiry; client deletes its token locally | Logout non-revocation policy and route APPROVED_DESIGN; test `NOT_RUN` |
 | `API-AUTH-13-NO-SECRETS` | Search public JSON replies, request traces, audit metadata, redacted errors, and browser persistent stores for injected passwords, password hashes, user token, service tokens, signing keys | 0 raw secrets exposed in artifacts/logs; user token appears only in volatile browser memory; correlation IDs present | Sanitized test environment |
 | `API-AUTH-14-NO-SIGNUP` | Probe public account-registration/role-assignment routes | No route allows creating user or changing role; unimplemented `/api/v1/auth/register` and role-assignment paths respond `404`; no account or role mutation | Public API routing implemented |
 
@@ -886,6 +888,22 @@ L2 change requested by TV2 during cross-phase ACK `XPH-GPU-003-02`, recorded in 
 
 No database schema or migration changes; the existing ASCII seed fixture is unaffected. Route-level evidence (HTTP `422`/`401`, no database access for an invalid `login_name`, redaction, shared provisioning function) remains `NOT_RUN` until the Auth endpoints and provisioning are integrated; unit tests alone do not make these oracles PASS.
 
+### 14.5. Auth request-body bounds and `D-C1`/`D-C2` — owner-directed in the PR #23 review (2026-10-24)
+
+The team lead's review of GPU-003-C ([PR #23](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/23)) found that the unauthenticated Login route parsed a body of unbounded size and nesting, and that Logout ignored a body the contract does not allow. The lead directed the values below and approved `D-C1` and `D-C2`; this section records them with the code and tests in the same L2 PR. They are **approved when the L2 review of PR #23 confirms this diff**.
+
+| Rule | Behavior | Oracle |
+|---|---|---|
+| B1 media type | Login requires `Content-Type: application/json`; an optional `charset` parameter must be `utf-8`; otherwise `400 INVALID_JSON` | `API-AUTH-03` |
+| B2 size | Login raw body at most 16 KiB (16,384 bytes). A declared `Content-Length` above the limit is rejected without reading the body; the received stream is counted chunk by chunk, so an absent or misleading `Content-Length` cannot make the API buffer more. Over the limit -> `413 PAYLOAD_TOO_LARGE` | `API-AUTH-03` |
+| B3 parsing | Strict UTF-8 JSON, no duplicate keys, no `NaN`/`Infinity`, at most 8 nested arrays/objects (checked before parsing); every parser failure -> `400 INVALID_JSON`, never `500`. A malformed `Content-Length` value -> `400 INVALID_JSON` | `API-AUTH-03` |
+| B4 order | B1–B3 are decided before any account read; responses and logs never echo the body | `API-AUTH-03`, `API-AUTH-13` |
+| B5 Logout | Any nonempty Logout body -> `400 INVALID_JSON`, checked before the token and the account read; an empty body (with or without `Content-Length: 0`) is accepted | `API-AUTH-12` |
+| `D-C1` | Missing, invalid or expired user JWT on `/auth/me` and `/auth/logout` -> `401 UNAUTHORIZED` with `WWW-Authenticate: Bearer`, aligned with Listings §7.9. The Jobs group keeps its separately specified `UNAUTHENTICATED` mapping (§8) | `API-AUTH-05`, `API-AUTH-06`, `API-AUTH-07` |
+| `D-C2` | Login for an account with a missing, invalid or ambiguous role mapping -> the same generic `401 INVALID_CREDENTIALS` as other login failures, plus a redacted server-side warning; never a default role or Admin, never a hint that the account exists | `API-AUTH-08` |
+
+A reverse-proxy or server-wide request-size limit is useful as an additional defense but does not replace B2, which is tested in the application. No database schema change. Route-level tests with test doubles exist in PR #23; database-backed and mounted-application evidence remains `NOT_RUN`.
+
 ## 15. Traceability: API contract → requirements → storage/transactions → test evidence
 
 | Requirements / policy | API section(s) | Owning database/transaction | Proposed validation |
@@ -902,7 +920,7 @@ No database schema or migration changes; the existing ASCII seed fixture is unaf
 
 ## 16. Review record and handoff — documentation only
 
-| Item | Status at v0.8 (2026-10-24) |
+| Item | Status at v0.9 (2026-10-24) |
 |---|---|
 | Logical/physical/transaction Database Design (18 tables) | **APPROVED_DESIGN**; no SQL migration run |
 | Stateless HS256 JWT / 900-second lifetime / volatile-memory storage / no refresh and no server-side Logout revocation | **APPROVED_DESIGN** at the owner-approved policy scope |
@@ -911,6 +929,7 @@ No database schema or migration changes; the existing ASCII seed fixture is unaf
 | Resolved API decisions | `API-OPEN-01/02/06` **APPROVED (2026-10-18)** at their scopes in §14.2 and recorded in this synchronization |
 | Additional Authentication profile details | **APPROVED as `DEC-P1-03` (2026-10-21)**; synchronized in §§4.5 and 14.3 at v0.7 |
 | Login/password Unicode validation | **APPROVED as `CR-GPU-003-UNICODE-01` (2026-10-24)**; recorded in §§4.2, 4.5, 6 and 14.4 at v0.8; route-level tests `NOT_RUN` |
+| Auth request-body bounds; `D-C1`, `D-C2` | **Owner-directed in the PR #23 review (2026-10-24)**; recorded in §§3.3, 4.2–4.4, 6 and 14.5 at v0.9; approved with the L2 review of PR #23; route tests with test doubles only |
 | ADR-008 technology stack | **ACCEPTED (2026-10-18)** in its own ADR; no implementation/test evidence |
 | Actual API code, DB migrations, test runners, benchmarks | **NOT_STARTED / NOT_RUN**; this document records design only |
 

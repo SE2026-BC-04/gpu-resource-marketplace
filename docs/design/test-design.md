@@ -110,7 +110,7 @@ Authentication/Logout `UC-G01` is cross-cutting rather than a separately numbere
 
 | Group | Count | Status of **test design** | Typical gate |
 |---|---:|---|---|
-| `API-AUTH-01..14` | 14 | APPROVED_DESIGN for owner-approved Auth policy, including the `DEC-P1-03` claim profile, NumericDate fractional precision and Unicode normalization/repertoire, and the `CR-GPU-003-UNICODE-01` NUL/surrogate cases added to `API-AUTH-01/02/03` (API Contract v0.8 §14.4; no new test ID); all `NOT_RUN` | Login/Me/Logout, role/token limits and normalization subcases |
+| `API-AUTH-01..14` | 14 | APPROVED_DESIGN for owner-approved Auth policy, including the `DEC-P1-03` claim profile, NumericDate fractional precision and Unicode normalization/repertoire, and the `CR-GPU-003-UNICODE-01` NUL/surrogate cases added to `API-AUTH-01/02/03` (API Contract v0.8 §14.4; no new test ID), and the request-body bound subcases added to `API-AUTH-03/12` (API Contract v0.9 §14.5; no new test ID); all `NOT_RUN` | Login/Me/Logout, role/token limits and normalization subcases |
 | `API-LIST-01..18` | 18 | Reviewed design baseline; tests `NOT_RUN` | 6 Listing endpoints, ownership/capacity/races |
 | `API-JOB-01..16` | 16 | APPROVED_DESIGN | QUEUED submit, persisted idempotency, cancel, FIFO |
 | `API-RES-01..06` | 6 | APPROVED_DESIGN | Immutable verified Signed Result read only |
