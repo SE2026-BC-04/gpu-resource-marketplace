@@ -370,8 +370,10 @@ def test_same_hardware_noop_and_queued_max_not_sum(env):
     assert response.json()["allocated_gpu_count"] == 3
 
 
-def test_hardware_change_without_nonterminal_jobs(env):
-    env.store.job_rows[env.store.l1.id] = [("COMPLETED", 8)]
+@pytest.mark.parametrize("terminal_state", ["COMPLETED", "FAILED", "CANCELLED"])
+def test_hardware_change_without_nonterminal_jobs(env, terminal_state):
+    # These are the terminal states in Database Design and ck_jobs_status.
+    env.store.job_rows[env.store.l1.id] = [(terminal_state, 8)]
     assert (
         env.client.patch(
             f"{BASE}/{env.store.l1.id}", json={"gpu_model": "New model", "vram_gb": 40}

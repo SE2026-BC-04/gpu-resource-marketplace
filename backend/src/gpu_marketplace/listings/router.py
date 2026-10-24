@@ -18,6 +18,9 @@ from pydantic import UUID4, ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
+from gpu_marketplace.identity.dependencies import create_principal_dependency
+from gpu_marketplace.identity.service import AuthService
+
 from .errors import ListingDependencyUnavailable, ListingError, invalid_fields
 from .models import TrustedPrincipal
 from .policy import MUTABLE_FIELDS
@@ -222,3 +225,18 @@ def create_listing_router(
         return await change_status(listing_id, request, principal, "ACTIVE")
 
     return router
+
+
+def create_authenticated_listing_router(
+    *, service: ListingService, auth_service: AuthService
+) -> APIRouter:
+    """Connect Listings to GPU-003's real JWT/current-account dependency.
+
+    The integration owner supplies the shared AuthService and a real Listing
+    UoW, then registers this router. No secret, engine, account adapter or test
+    principal is created here; production app registration remains separate.
+    """
+    return create_listing_router(
+        service=service,
+        principal_dependency=create_principal_dependency(auth_service),
+    )
