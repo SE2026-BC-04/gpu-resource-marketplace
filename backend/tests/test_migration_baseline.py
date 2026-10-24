@@ -49,7 +49,7 @@ def constraint_names(engine: Engine, kind: str) -> set[str]:
 
 
 def baseline_module():
-    files = sorted(VERSIONS.glob("0001_*.py"))
+    files = sorted(VERSIONS.glob("*.py"))
     assert len(files) == 1, "Phase 1B must ship exactly one baseline revision"
     spec = importlib.util.spec_from_file_location("baseline_revision", files[0])
     module = importlib.util.module_from_spec(spec)
