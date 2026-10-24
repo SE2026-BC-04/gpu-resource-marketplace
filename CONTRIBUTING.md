@@ -1,6 +1,6 @@
 # Contributing to GPU Resource Marketplace
 
-**Version:** 1.0 — APPROVED by project owner (2026-10-20)<br>
+**Version:** 1.1 — proposed 2026-10-24; effective if merged<br>
 **Applies to:** every contributor, including team leader, reviewers, GitHub-connected agents and Codex.<br>
 **Project:** `SE2026-BC-04/gpu-resource-marketplace` — simulation-only MVP.
 
@@ -11,10 +11,10 @@
 1. **Never push directly to `main` for a normal change.** Open a task-specific branch, commit there, and create a Pull Request (PR). The same applies to Markdown design changes.
 2. **One ticket/slice = one branch = one focused PR.** Do not combine unrelated API, DB, UI and documentation changes.
 3. **No unilateral contract changes.** Do not change accepted FR/NFR, ADR-001..008, the approved 18-table schema, the public/internal API or security invariants without prior design-change approval.
-4. **No self-merge or self-approval.** Every PR requires independent human review: one reviewer for L0/L1 and two reviewers for L2/L3. Codex review is advisory and does not count toward these human reviews.
+4. **No self-merge or self-review.** Every PR requires independent human review: one reviewer for L0/L1 and two reviewers for L2/L3. A reviewer may confirm in a submitted GitHub `Approve` review or an explicit PR comment made after reviewing the current diff; new commits require renewed confirmation. Codex does not count.
 5. **Evidence before merge.** Record exact tests executed, outcomes and relevant requirements/test IDs. `NOT_RUN` is never `PASS`.
 6. **No secrets, destructive commands or unrelated formatting.** Check staged diffs, dependency changes, config and data migration impact.
-7. **Codex review is supplementary.** A Codex comment does not replace human approval or required CI; Codex/agents follow the same change authority rules as humans.
+7. **Codex review is supplementary.** A Codex comment does not replace human review confirmation or required CI; Codex/agents follow the same change authority rules as humans.
 
 ## One PR from start to finish
 
@@ -24,7 +24,7 @@
 4. Review `git status`, `git diff --check`, `git diff` and `git diff --cached`; stage intentional paths, not incidental files.
 5. Commit with **Conventional Commits**: `type(scope): imperative summary` (examples below). Push the topic branch, not `main`.
 6. Create a PR into `main` using the [PR template](.github/pull_request_template.md). Link the task, FR/NFR/ADR, relevant tests, risk level and any skipped checks.
-7. Resolve review comments on the same PR with new commits; rerun affected checks; obtain the required independent human approvals. Any GitHub account with merge permission may merge after all applicable gates are satisfied. No author may approve or merge their own PR.
+7. Resolve review comments on the same PR with new commits; rerun affected checks; obtain the required independent human review confirmations. Any GitHub account with merge permission may merge after all applicable gates are satisfied. No author may review or merge their own PR. A formal GitHub branch-protection requirement still applies even when the team accepts a comment as review evidence.
 
 ```text
 feat(listings): create worker listing endpoint
