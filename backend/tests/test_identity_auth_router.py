@@ -1,15 +1,25 @@
+import asyncio
 import json
+import tracemalloc
 from uuid import UUID
 
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 import pytest
+from starlette.requests import Request
 
 from identity_fakes import C1, NUL_PASSWORD, PASSWORD, T0_US, build_service
 from gpu_marketplace.identity.dependencies import bearer_token, create_principal_dependency
 from gpu_marketplace.identity.tokens import MAX_TOKEN_LENGTH
 from gpu_marketplace.identity.principal import AuthenticatedPrincipal
-from gpu_marketplace.identity.request_body import MAX_JSON_DEPTH, MAX_LOGIN_BODY_BYTES
+from gpu_marketplace.identity.request_body import (
+    MAX_JSON_DEPTH,
+    MAX_LOGIN_BODY_BYTES,
+    BodyTooLarge,
+    UnexpectedBody,
+    read_bounded_body,
+    require_empty_body,
+)
 from gpu_marketplace.identity.router import TOKEN_REJECTED_CODE, create_auth_router
 
 
@@ -196,6 +206,84 @@ def test_malformed_content_length_is_400(env) -> None:
     assert reader.reads == 0
 
 
+HUGE_LENGTH = "9" * 5000  # past Python's int() digit limit (review P2-02)
+
+
+def test_very_long_content_length_is_413_not_500(env) -> None:
+    client, reader, *_ = env
+    response = post_login(client, VALID_BODY, {"Content-Type": "application/json", "Content-Length": HUGE_LENGTH})
+    assert_error(response, 413, "PAYLOAD_TOO_LARGE")
+    assert reader.reads == 0
+    assert "99999" not in response.text  # the header is not echoed
+
+
+def test_leading_zero_content_length_is_parsed(env) -> None:
+    client, *_ = env
+    body = VALID_BODY.encode()
+    length = "0" * 5000 + str(len(body))
+    response = post_login(client, body, {"Content-Type": "application/json", "Content-Length": length})
+    assert response.status_code == 200
+    over = "0" * 5000 + str(MAX_LOGIN_BODY_BYTES + 1)
+    assert_error(post_login(client, body, {"Content-Type": "application/json", "Content-Length": over}), 413, "PAYLOAD_TOO_LARGE")
+
+
+def asgi_request(parts: list[bytes], headers: dict[str, str] | None = None) -> Request:
+    """A raw ASGI request that delivers ``parts`` as separate http.request messages."""
+    queue = list(parts)
+
+    async def receive() -> dict:
+        body = queue.pop(0) if queue else b""
+        return {"type": "http.request", "body": body, "more_body": bool(queue)}
+
+    raw_headers = [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]
+    return Request({"type": "http", "method": "POST", "path": "/", "headers": raw_headers}, receive)
+
+
+@pytest.mark.parametrize(
+    ("parts", "accepted"),
+    [
+        ([b"x" * MAX_LOGIN_BODY_BYTES], True),
+        ([b"x" * (MAX_LOGIN_BODY_BYTES - 10), b"x" * 10], True),
+        ([b"x" * (MAX_LOGIN_BODY_BYTES + 1)], False),
+        ([b"x" * (MAX_LOGIN_BODY_BYTES - 10), b"x" * 11], False),
+        ([b"x" * 100, b"x" * 100, b"x" * MAX_LOGIN_BODY_BYTES], False),
+    ],
+    ids=["one-chunk-at-limit", "last-chunk-reaches-limit", "one-chunk-over", "last-chunk-crosses", "third-chunk-crosses"],
+)
+def test_stream_limit_by_chunk(parts: list[bytes], accepted: bool) -> None:
+    request = asgi_request(parts)
+    if accepted:
+        assert asyncio.run(read_bounded_body(request, MAX_LOGIN_BODY_BYTES)) == b"".join(parts)
+    else:
+        with pytest.raises(BodyTooLarge):
+            asyncio.run(read_bounded_body(request, MAX_LOGIN_BODY_BYTES))
+
+
+def test_oversized_chunk_is_rejected_before_it_is_copied() -> None:
+    # One 64 MiB ASGI chunk: if it were appended before the check, the buffer would
+    # allocate about 64 MiB. Rejecting before the copy keeps the new allocations tiny.
+    chunk = b"x" * (64 * 1024 * 1024)
+    request = asgi_request([chunk])
+    tracemalloc.start()
+    try:
+        with pytest.raises(BodyTooLarge):
+            asyncio.run(read_bounded_body(request, MAX_LOGIN_BODY_BYTES))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1024 * 1024
+
+
+@pytest.mark.parametrize("length", [HUGE_LENGTH, "1", "0" * 5000 + "1"], ids=["5000-digits", "one", "leading-zeros"])
+def test_empty_body_check_rejects_any_declared_length(length: str) -> None:
+    with pytest.raises(UnexpectedBody):
+        asyncio.run(require_empty_body(asgi_request([], {"Content-Length": length})))
+
+
+def test_empty_body_check_accepts_zero_length() -> None:
+    asyncio.run(require_empty_body(asgi_request([], {"Content-Length": "0" * 5000})))
+
+
 @pytest.mark.parametrize(
     "body",
     [
@@ -301,6 +389,16 @@ def test_logout_with_a_body_is_400(env, content, headers) -> None:
     response = client.post("/api/v1/auth/logout", content=content, headers={**bearer(token), **headers})
     assert_error(response, 400, "INVALID_JSON")
     assert reader.reads == reads  # rejected before the account is read
+
+
+def test_logout_with_huge_content_length_is_400(env) -> None:
+    client, reader, *_ = env
+    token = token_for(client)
+    reads = reader.reads
+    response = client.post("/api/v1/auth/logout", content=b"", headers={**bearer(token), "Content-Length": HUGE_LENGTH})
+    assert_error(response, 400, "INVALID_JSON")
+    assert reader.reads == reads
+    assert "99999" not in response.text
 
 
 def test_logout_accepts_an_explicit_empty_body(env) -> None:

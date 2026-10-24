@@ -895,10 +895,10 @@ The team lead's review of GPU-003-C ([PR #23](https://github.com/SE2026-BC-04/gp
 | Rule | Behavior | Oracle |
 |---|---|---|
 | B1 media type | Login requires `Content-Type: application/json`; an optional `charset` parameter must be `utf-8`; otherwise `400 INVALID_JSON` | `API-AUTH-03` |
-| B2 size | Login raw body at most 16 KiB (16,384 bytes). A declared `Content-Length` above the limit is rejected without reading the body; the received stream is counted chunk by chunk, so an absent or misleading `Content-Length` cannot make the API buffer more. Over the limit -> `413 PAYLOAD_TOO_LARGE` | `API-AUTH-03` |
+| B2 size | Login raw body at most 16 KiB (16,384 bytes). A declared `Content-Length` above the limit is rejected without reading the body; leading zeros are allowed, and a numeric value too long to convert safely counts as above the limit. Each received chunk is checked against the remaining quota **before** it is copied, so an absent or misleading `Content-Length` or one very large ASGI chunk cannot make the API buffer more than the limit. Over the limit -> `413 PAYLOAD_TOO_LARGE` | `API-AUTH-03` |
 | B3 parsing | Strict UTF-8 JSON, no duplicate keys, no `NaN`/`Infinity`, at most 8 nested arrays/objects (checked before parsing); every parser failure -> `400 INVALID_JSON`, never `500`. A malformed `Content-Length` value -> `400 INVALID_JSON` | `API-AUTH-03` |
 | B4 order | B1–B3 are decided before any account read; responses and logs never echo the body | `API-AUTH-03`, `API-AUTH-13` |
-| B5 Logout | Any nonempty Logout body -> `400 INVALID_JSON`, checked before the token and the account read; an empty body (with or without `Content-Length: 0`) is accepted | `API-AUTH-12` |
+| B5 Logout | Any nonempty Logout body or nonzero declared `Content-Length` (of any length) -> `400 INVALID_JSON`, checked before the token and the account read; an empty body (with or without a zero `Content-Length`) is accepted | `API-AUTH-12` |
 | `D-C1` | Missing, invalid or expired user JWT on `/auth/me` and `/auth/logout` -> `401 UNAUTHORIZED` with `WWW-Authenticate: Bearer`, aligned with Listings §7.9. The Jobs group keeps its separately specified `UNAUTHENTICATED` mapping (§8) | `API-AUTH-05`, `API-AUTH-06`, `API-AUTH-07` |
 | `D-C2` | Login for an account with a missing, invalid or ambiguous role mapping -> the same generic `401 INVALID_CREDENTIALS` as other login failures, plus a redacted server-side warning; never a default role or Admin, never a hint that the account exists | `API-AUTH-08` |
 

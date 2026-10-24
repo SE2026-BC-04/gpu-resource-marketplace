@@ -1,8 +1,9 @@
 """Bounded reading of the public Auth request bodies (API Contract §4.2 and §4.4).
 
 Login is reachable without authentication, so its body is limited while it is received:
-the declared ``Content-Length`` is checked first and the stream is counted chunk by chunk,
-so neither a missing nor a misleading length makes the API buffer more than the limit.
+the declared ``Content-Length`` is checked first, and each received chunk is checked against
+the remaining quota before it is copied, so neither a missing nor a misleading length nor a
+large ASGI chunk makes the API buffer more than the limit.
 Only a body that passed the size, media-type and nesting checks reaches the JSON parser.
 """
 
@@ -14,6 +15,10 @@ from starlette.requests import Request
 MAX_LOGIN_BODY_BYTES = 16 * 1024
 # A Login body is one flat object; deeper nesting only costs parser work.
 MAX_JSON_DEPTH = 8
+# Content-Length values with more significant digits than this are treated as "too large"
+# without int(), which raises ValueError past Python's integer-string digit limit.
+_MAX_LENGTH_DIGITS = 18
+_TOO_LARGE = 10**_MAX_LENGTH_DIGITS
 
 
 class BodyTooLarge(Exception):
@@ -46,9 +51,9 @@ async def read_bounded_body(request: Request, limit: int) -> bytes:
         raise BodyTooLarge()
     received = bytearray()
     async for chunk in request.stream():
+        if len(chunk) > limit - len(received):
+            raise BodyTooLarge()  # checked before the chunk is copied
         received += chunk
-        if len(received) > limit:
-            raise BodyTooLarge()
     return bytes(received)
 
 
@@ -80,7 +85,10 @@ def _declared_length(request: Request) -> int | None:
         return None
     if not (raw.isascii() and raw.isdigit()):
         raise InvalidBody()
-    return int(raw)
+    digits = raw.lstrip("0")
+    if len(digits) > _MAX_LENGTH_DIGITS:
+        return _TOO_LARGE
+    return int(digits or "0")
 
 
 def _within_depth(text: str, limit: int) -> bool:
