@@ -271,6 +271,46 @@ def test_a_role_with_update_grants_but_no_group_fails_closed(conn: Connection) -
     )
 
 
+@pytest.mark.parametrize("status", ["QUEUED", "RUNNING"])
+@pytest.mark.parametrize(
+    ("member_of", "reason"),
+    [((API_GROUP, MANAGER_GROUP), "job_update_role_ambiguous"), ((), "job_update_role_not_permitted")],
+    ids=["ambiguous", "unknown"],
+)
+def test_a_no_op_update_is_refused_for_an_ambiguous_or_unknown_role(
+    conn: Connection, status: str, member_of: tuple[str, ...], reason: str
+) -> None:
+    caller = new_role(conn, member_of=member_of)
+    job_id = make_job(conn, status)
+    before = conn.execute(text("SELECT xmin::text FROM jobs WHERE id = :id"), {"id": job_id}).scalar_one()
+    as_role(conn, caller)
+    assert_guard(conn, "UPDATE jobs SET status = status WHERE id = :id", reason, id=job_id)
+    conn.execute(text("RESET ROLE"))
+    after = conn.execute(text("SELECT status, xmin::text FROM jobs WHERE id = :id"), {"id": job_id}).one()
+    assert (after.status, after.xmin) == (status, before)
+
+
+@pytest.mark.parametrize("role", [API_GROUP, API_LOGIN])
+def test_a_no_op_update_stays_allowed_for_the_api(conn: Connection, role: str) -> None:
+    job_id = make_job(conn)
+    as_role(conn, role)
+    conn.execute(text("UPDATE jobs SET status = status WHERE id = :id"), {"id": job_id})
+    conn.execute(text("RESET ROLE"))
+    assert status_of(conn, job_id) == "QUEUED"
+
+
+def test_the_trigger_function_is_not_executable_by_public_or_runtime_roles(conn: Connection) -> None:
+    acl = conn.execute(
+        text("SELECT coalesce(proacl::text[], ARRAY[]::text[]) FROM pg_proc WHERE proname = 'fn_jobs_guard_update'")
+    ).scalar_one()
+    assert not any(entry.startswith("=") for entry in acl), acl  # an empty grantee is PUBLIC
+    for role in (API_GROUP, MANAGER_GROUP, API_LOGIN):
+        held = conn.execute(
+            text("SELECT has_function_privilege(:role, 'fn_jobs_guard_update()', 'EXECUTE')"), {"role": role}
+        ).scalar_one()
+        assert held is False, role
+
+
 def test_the_database_owner_without_superuser_is_maintenance_but_still_bound_by_the_common_rules(
     conn: Connection,
 ) -> None:
