@@ -18,7 +18,7 @@ Alembic is configured for the shared Backend API/Manager package.
 
 Downgrade only revokes what revision 0002 granted; it never drops roles because roles are cluster-wide, and it does not hand database privileges back to `PUBLIC` because it cannot know the state before the upgrade.
 
-The bootstrap also refuses (non-zero exit, nothing altered) when an unexpected role is a direct or indirect member of either group. Migration `0002` stops if the runtime groups could `CREATE` in schema `public` (for example `PUBLIC` on a cluster upgraded from PostgreSQL 14 or older); the operator fixes that explicitly. Role passwords are sent to the server as SCRAM verifiers computed by libpq, never as plaintext.
+The bootstrap also refuses (non-zero exit, nothing altered) when an unexpected role is a direct or indirect member of either group. Migration `0002` checks the effective privileges of all four runtime roles (both groups and both login roles) and stops with an error naming the role, privilege and object if any of them holds more than the approved matrix. The excess may be a direct grant to a login role, a grant to a group, or a privilege inherited from `PUBLIC` (for example `CREATE` on schema `public` on a cluster upgraded from PostgreSQL 14 or older, or `SELECT` on `simulation_references`). The migration never revokes anything itself: the operator reviews and revokes the privilege explicitly as the owner, then retries, and a refused upgrade leaves the database as it was. Role passwords are sent to the server as SCRAM verifiers computed by libpq, never as plaintext.
 
 Wiring the bootstrap into `compose.yaml`, `.env.example` and CI is shared infrastructure and is not part of this change. Lifecycle triggers (D2) and guarded delete (D3) are separate revisions.
 

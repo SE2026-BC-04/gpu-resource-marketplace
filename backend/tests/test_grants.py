@@ -310,3 +310,104 @@ def test_p2_migration_fails_closed_when_public_can_create_in_schema_public(conn:
     conn.execute(text("GRANT CREATE ON SCHEMA public TO PUBLIC"))
     with pytest.raises(RuntimeError, match="CREATE on schema public"):
         module.require_schema_closed(conn, (API_GROUP, MANAGER_GROUP))
+
+
+RUNTIME_ROLES = (API_GROUP, MANAGER_GROUP, API_LOGIN, MANAGER_LOGIN)
+BASELINE = "0001_phase1b_baseline"
+
+# (grant applied by the owner to a database that is at the baseline, revoke used to clean up afterwards).
+# The runtime roles must end up with exactly the matrix privileges, so none of these may survive an upgrade.
+EXCESS_PRIVILEGES = [
+    pytest.param(
+        "GRANT CREATE ON SCHEMA public TO gpm_api_app",
+        "REVOKE CREATE ON SCHEMA public FROM gpm_api_app",
+        id="direct-schema-create-on-api-login",
+    ),
+    pytest.param(
+        "GRANT CREATE ON SCHEMA public TO gpm_manager_app",
+        "REVOKE CREATE ON SCHEMA public FROM gpm_manager_app",
+        id="direct-schema-create-on-manager-login",
+    ),
+    pytest.param("GRANT DELETE ON jobs TO gpm_api_app", "REVOKE DELETE ON jobs FROM gpm_api_app", id="direct-delete-on-api-login"),
+    pytest.param(
+        "GRANT SELECT ON jobs TO gpm_manager_app",
+        "REVOKE SELECT ON jobs FROM gpm_manager_app",
+        id="direct-select-on-manager-login",
+    ),
+    pytest.param(
+        "GRANT SELECT (expected_digest) ON simulation_references TO gpm_api_app",
+        "REVOKE SELECT (expected_digest) ON simulation_references FROM gpm_api_app",
+        id="direct-oracle-column-on-api-login",
+    ),
+    pytest.param(
+        "GRANT SELECT ON simulation_references TO PUBLIC",
+        "REVOKE SELECT ON simulation_references FROM PUBLIC",
+        id="public-select-on-the-oracle",
+    ),
+    pytest.param(
+        "GRANT SELECT ON audit_events TO gpm_api_rw",
+        "REVOKE SELECT ON audit_events FROM gpm_api_rw",
+        id="direct-select-on-audit-events-for-the-api-group",
+    ),
+    pytest.param(
+        "GRANT TEMPORARY ON DATABASE {database} TO gpm_api_app",
+        "REVOKE TEMPORARY ON DATABASE {database} FROM gpm_api_app",
+        id="direct-temporary-on-the-database",
+    ),
+    pytest.param(
+        "GRANT USAGE ON SEQUENCE {sequence} TO gpm_api_app",
+        "REVOKE USAGE ON SEQUENCE {sequence} FROM gpm_api_app",
+        id="direct-usage-on-the-enqueue-sequence",
+    ),
+]
+
+
+def object_names(connection: Connection) -> dict[str, str]:
+    return {
+        "database": connection.execute(text("SELECT quote_ident(current_database())")).scalar_one(),
+        "sequence": connection.execute(text("SELECT pg_get_serial_sequence('jobs', 'enqueue_seq')")).scalar_one(),
+    }
+
+
+@pytest.mark.parametrize(("grant", "revoke"), EXCESS_PRIVILEGES)
+def test_p1_upgrade_fails_closed_when_existing_acls_exceed_the_matrix(
+    baseline_database: Engine, alembic_config: Config, grant: str, revoke: str
+) -> None:
+    command.downgrade(alembic_config, BASELINE)
+    try:
+        with baseline_database.begin() as connection:
+            names = object_names(connection)
+            connection.execute(text(grant.format(**names)))
+        with pytest.raises(RuntimeError, match="unexpected privilege"):
+            command.upgrade(alembic_config, "head")
+        with baseline_database.connect() as connection:
+            version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+            assert version == BASELINE, "a refused upgrade must leave the revision unchanged"
+            acl = public_database_acl(connection)
+            assert API_GROUP not in acl and MANAGER_GROUP not in acl, "a refused upgrade must not grant anything"
+    finally:
+        with baseline_database.begin() as connection:
+            connection.execute(text(revoke.format(**object_names(connection))))
+        command.upgrade(alembic_config, "head")
+
+
+def test_p1_clean_matrix_state_passes_the_effective_privilege_check(conn: Connection) -> None:
+    grants_module().require_no_excess_privileges(conn, RUNTIME_ROLES)
+
+
+def test_p1_the_error_names_the_role_privilege_object_and_the_remedy(conn: Connection) -> None:
+    module = grants_module()
+    conn.execute(text("GRANT SELECT ON simulation_references TO PUBLIC"))
+    with pytest.raises(RuntimeError) as failure:
+        module.require_no_excess_privileges(conn, RUNTIME_ROLES)
+    message = str(failure.value)
+    assert "gpm_api_rw" in message and "SELECT" in message and "simulation_references" in message
+    assert "REVOKE" in message and "no ACL was changed" in message
+    assert "password" not in message.lower()
+
+
+def test_p1_privileges_the_matrix_grants_do_not_trip_the_check(conn: Connection) -> None:
+    """Whole-table SELECT on the API tables and column-level INSERT/UPDATE are inside the matrix."""
+    module = grants_module()
+    conn.execute(text(f"GRANT SELECT ON jobs TO {API_LOGIN}"))  # already inherited through the group
+    module.require_no_excess_privileges(conn, RUNTIME_ROLES)
