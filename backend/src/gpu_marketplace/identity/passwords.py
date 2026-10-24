@@ -71,8 +71,9 @@ class ScryptPasswordHasher:
     * Every ``verify_password`` and ``burn_verification`` call runs **exactly one** scrypt
       derivation with an approved profile, whatever the input: right or wrong password, a
       password that cannot be encoded (lone surrogate), or an unusable stored hash. The
-      existing-account and missing-account Login branches therefore cost the same, so their
-      timing does not reveal whether an account exists.
+      existing-account and missing-account Login branches therefore do the same scrypt work.
+      This is not a constant-time guarantee: parsing and database time can still differ, and a
+      verified legacy profile from ``accepted_profiles`` costs differently from the dummy.
     * A stored hash can never request more work than an approved profile.
     * At most ``max_concurrent`` derivations (each about ``profile.memory_bytes`` of RAM) run at
       once. The cap is per instance: create **one hasher per process** and share it; a new
