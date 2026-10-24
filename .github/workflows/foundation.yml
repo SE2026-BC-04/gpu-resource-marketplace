@@ -12,6 +12,21 @@ permissions:
 jobs:
   python:
     runs-on: ubuntu-latest
+    services:
+      # D8/D12: a fresh disposable cluster per job, same image digest as compose.yaml, data on tmpfs.
+      # Trust auth keeps credentials out of the workflow; the cluster lives only for this job.
+      postgres:
+        image: postgres:16.15-bookworm@sha256:0ea6700a3b4f0ae6ce746519073558aed4d88a79d8d07622a9a644946c7319c4
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55432:5432
+        options: >-
+          --tmpfs /var/lib/postgresql/data
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -22,7 +37,20 @@ jobs:
         with:
           python-version: 3.12.15
       - run: uv sync --project backend --locked --group dev
-      - run: uv run --project backend --locked --group dev pytest backend/tests tests
+      - name: Mark the disposable test cluster (backend/tests/db_safety.py)
+        run: |
+          token="$(openssl rand -hex 16)"
+          docker exec "${{ job.services.postgres.id }}" psql -v ON_ERROR_STOP=1 -U postgres -q \
+            -c "CREATE DATABASE gpm_disposable_test_cluster" \
+            -c "COMMENT ON DATABASE gpm_disposable_test_cluster IS '${token}'" \
+            -c "CREATE DATABASE gpu_marketplace_test" \
+            -c "COMMENT ON DATABASE gpu_marketplace_test IS 'gpu-marketplace-disposable-test-db'"
+          echo "GPU_MARKETPLACE_TEST_CLUSTER_TOKEN=${token}" >> "$GITHUB_ENV"
+      - name: Backend and topology tests, including PostgreSQL tests
+        env:
+          GPU_MARKETPLACE_TEST_DATABASE_URL: postgresql+psycopg://postgres@127.0.0.1:55432/gpu_marketplace_test
+          GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS: "1"
+        run: uv run --project backend --locked --group dev pytest backend/tests tests -rs
       - run: uv sync --project simulator --locked --group dev
       - run: uv run --project simulator --locked --group dev pytest simulator/tests
 
