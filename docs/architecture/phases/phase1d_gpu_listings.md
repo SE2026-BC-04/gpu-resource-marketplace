@@ -266,10 +266,11 @@ Nhánh đã merge `main@028c355` theo lịch sử thường, không rewrite comm
 
 | Kiểm tra thực tế | Kết quả / giới hạn |
 |---|---|
-| `backend/.venv/Scripts/python.exe -m pytest backend/tests tests -q -p no:cacheprovider -rN` | **459 passed, 58 skipped**, một Starlette/httpx deprecation warning; PostgreSQL skipped là `NOT_RUN` |
-| Riêng `backend/tests/listings` | **169 passed**; gồm **65** test dùng real AccessTokenCodec/AuthService/principal dependency với account/UoW doubles |
+| `backend/.venv/Scripts/python.exe -m pytest backend/tests tests -q -p no:cacheprovider -rN` | **491 passed, 58 skipped**, một Starlette/httpx deprecation warning; PostgreSQL skipped là `NOT_RUN` |
+| Riêng `backend/tests/listings` | **201 passed**; gồm **65** test dùng real AccessTokenCodec/AuthService/principal dependency với account/UoW doubles |
 | JWT/authorization trên 6 routes | Valid token; thiếu/tampered/expired; signed claim thiếu/sai kiểu; account disabled/mất role/store unavailable; đổi role và cross-Worker 404. Auth reject không mở Listing UoW. Không phải DB-backed Login/E2E |
 | Terminal Job guard | Doubles bao phủ `COMPLETED`, `FAILED`, `CANCELLED` đúng `domain/jobs.py` / `ck_jobs_status`. `COMPLETED` hợp lệ; không đổi accepted enum để xử lý câu review. Chưa phải fixture Job PostgreSQL đầy đủ |
+| UUID path P2 của PR #17 | Sửa 4 routes có ID để kiểm tra raw lowercase hyphenated UUIDv4 trước conversion, đúng API §3.1/§7.5. **32** regression cases; trước fix **16 failed / 16 passed**, sau fix đều pass trong suite Listings; invalid ID trả 422 và không mở UoW |
 | Ruff 0.14.0 format/check `--select F,E9` | **PASS** cho source/test Listings |
 | Frontend Vitest / TypeScript / Vite | **27 passed** / typecheck **PASS** / build **PASS**; shell mặc định vẫn Foundation |
 

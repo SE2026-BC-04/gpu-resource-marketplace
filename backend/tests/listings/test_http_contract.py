@@ -248,6 +248,63 @@ def test_marketplace_mine_admin_and_paused_detail(env):
 
 
 @pytest.mark.parametrize(
+    "method,suffix,body",
+    [
+        ("GET", "", None),
+        ("PATCH", "", {"mock_price_per_hour": "1.00"}),
+        ("POST", "/pause", None),
+        ("POST", "/resume", None),
+    ],
+)
+@pytest.mark.parametrize(
+    "spelling",
+    ["canonical", "hex", "uppercase", "braces", "urn", "version", "variant", "invalid"],
+)
+def test_listing_id_requires_canonical_uuid4(
+    env, monkeypatch, method, suffix, body, spelling
+):
+    canonical = "abcdef01-2345-4678-9abc-def012345678"
+    listing_id = UUID(canonical)
+    env.store.records[listing_id] = replace(env.store.l1, id=listing_id)
+    path_id = {
+        "canonical": canonical,
+        "hex": listing_id.hex,
+        "uppercase": canonical.upper(),
+        "braces": "{" + canonical + "}",
+        "urn": "urn:uuid:" + canonical,
+        "version": "abcdef01-2345-1678-9abc-def012345678",
+        "variant": "abcdef01-2345-4678-7abc-def012345678",
+        "invalid": "not-a-uuid",
+    }[spelling]
+    calls = []
+
+    def open_uow():
+        calls.append(True)
+        return env.store.open()
+
+    monkeypatch.setattr(env.service, "_uow", open_uow)
+    before = dict(env.store.records)
+    response = env.client.request(
+        method,
+        BASE + "/" + path_id + suffix,
+        **({"json": body} if body is not None else {}),
+    )
+    if spelling == "canonical":
+        assert response.status_code == 200
+        assert calls == [True]
+    else:
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert (
+            response.json()["error"]["request_id"] == response.headers["x-request-id"]
+        )
+        assert calls == []
+        assert env.store.records == before
+        assert env.store.events == []
+        assert env.store.commits == env.store.rollbacks == 0
+
+
+@pytest.mark.parametrize(
     "role,scope",
     [("client", "mine"), ("client", "all"), ("w1", "all"), ("admin", "mine")],
 )

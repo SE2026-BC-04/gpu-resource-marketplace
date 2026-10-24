@@ -154,8 +154,8 @@ frontend-shell or cross-process E2E acceptance evidence. The normal
 frontend build still builds the foundation shell; TypeScript and RTL tests
 compile/render the separate Listings component.
 
-Observed on 25/10/2026 after syncing `main@028c355`: backend **459 passed / 58
-skipped**, including **169** Listings tests (**65** real-Auth/double-persistence
+Observed on 25/10/2026 after syncing `main@028c355`: backend **491 passed / 58
+skipped**, including **201** Listings tests (**65** real-Auth/double-persistence
 consumer tests); frontend **27 passed**, TypeScript and Vite build
 passed. The 58 skipped tests are upstream PostgreSQL checks without a configured
 disposable cluster, not successful DB tests. Python 3.12.14 and Node 24.19.0 were
@@ -164,6 +164,12 @@ expired credentials, signed missing/ill-typed claims, fresh account/role changes
 safe account-store 503, and cross-Worker 404. Auth rejection never enters the
 Listing UoW. Terminal Job-guard doubles now cover COMPLETED/FAILED/CANCELLED,
 the existing DB enum; these are not complete persisted Job fixtures.
+
+The UUID-path review finding is also fixed: all four ID-bearing routes require
+lowercase hyphenated UUIDv4 text before conversion. **32** regression cases cover
+canonical/hex/uppercase/braced/URN/wrong-version/wrong-variant/malformed IDs;
+invalid forms return safe 422 without entering the Listing UoW. Before the fix,
+16 of these cases failed by accepting alternate spellings with 200.
 
 Remaining **BLOCKED / NOT_RUN**: PostgreSQL Listing/account adapters and router/shell wiring;
 PostgreSQL multi-session lock/rollback/role tests; full API-LIST-13/14/15

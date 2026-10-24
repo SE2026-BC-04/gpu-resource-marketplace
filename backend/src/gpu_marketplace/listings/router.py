@@ -7,14 +7,14 @@ is installed. The integration owner includes this router only with real adapters
 from collections.abc import Callable
 import json
 import logging
-from typing import Any
-from uuid import uuid4
+from typing import Annotated, Any
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
-from pydantic import UUID4, ValidationError
+from pydantic import UUID4, BeforeValidator, ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
@@ -28,6 +28,16 @@ from .schemas import ListingCreate, ListingDTO, ListingPageDTO, ListingPatch
 from .service import ListingService, require_principal, require_worker
 
 logger = logging.getLogger(__name__)
+
+
+def _canonical_uuid_text(value: Any) -> str:
+    # UUID4 alone normalizes hex/uppercase/braced/URN forms; API §3.1 forbids them.
+    if not isinstance(value, str) or len(value) != 36 or str(UUID(value)) != value:
+        raise ValueError("Expected a lowercase hyphenated UUIDv4.")
+    return value
+
+
+ListingId = Annotated[UUID4, BeforeValidator(_canonical_uuid_text)]
 
 
 def _error(request_id: str, status: int, code: str, message: str) -> JSONResponse:
@@ -173,7 +183,7 @@ def create_listing_router(
 
     @router.get("/{listing_id}", response_model=ListingDTO)
     async def detail(
-        listing_id: UUID4, principal=Depends(principal_dependency)
+        listing_id: ListingId, principal=Depends(principal_dependency)
     ) -> ListingDTO:
         record = await run_in_threadpool(service.detail, principal, listing_id)
         return ListingDTO.from_record(record)
@@ -190,7 +200,7 @@ def create_listing_router(
 
     @router.patch("/{listing_id}", response_model=ListingDTO)
     async def patch(
-        listing_id: UUID4, request: Request, principal=Depends(principal_dependency)
+        listing_id: ListingId, request: Request, principal=Depends(principal_dependency)
     ) -> ListingDTO:
         require_worker(principal)
         body = await _body(request, ListingPatch)
@@ -214,13 +224,13 @@ def create_listing_router(
 
     @router.post("/{listing_id}/pause", response_model=ListingDTO)
     async def pause(
-        listing_id: UUID4, request: Request, principal=Depends(principal_dependency)
+        listing_id: ListingId, request: Request, principal=Depends(principal_dependency)
     ) -> ListingDTO:
         return await change_status(listing_id, request, principal, "PAUSED")
 
     @router.post("/{listing_id}/resume", response_model=ListingDTO)
     async def resume(
-        listing_id: UUID4, request: Request, principal=Depends(principal_dependency)
+        listing_id: ListingId, request: Request, principal=Depends(principal_dependency)
     ) -> ListingDTO:
         return await change_status(listing_id, request, principal, "ACTIVE")
 
