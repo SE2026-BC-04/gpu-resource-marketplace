@@ -54,6 +54,13 @@ class LoginResult:
 
 
 class AuthService:
+    """Construct once per process with one shared ``PasswordHasher`` (PR #18 re-review P2).
+
+    The hasher's concurrency cap is per instance, so a hasher built per request would defeat
+    it. Methods block on scrypt and the database: call them from a worker thread (the router
+    uses ``run_in_threadpool``), never directly on the event loop.
+    """
+
     def __init__(self, accounts: AccountReader, tokens: AccessTokenCodec, passwords: PasswordHasher) -> None:
         self._accounts = accounts
         self._tokens = tokens

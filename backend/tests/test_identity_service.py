@@ -1,8 +1,23 @@
 import pytest
 
-from identity_fakes import A1, C1, NUL_PASSWORD, PASSWORD, T0_US, W1, build_service
+from gpu_marketplace.identity import passwords
+from gpu_marketplace.identity.passwords import ScryptPasswordHasher, ScryptProfile
+from identity_fakes import (
+    A1,
+    C1,
+    NUL_PASSWORD,
+    PASSWORD,
+    SECRET,
+    T0_US,
+    W1,
+    FakeAccountReader,
+    FakeClock,
+    build_service,
+)
 from gpu_marketplace.identity.principal import AuthenticatedPrincipal
+from gpu_marketplace.identity.tokens import AccessTokenCodec
 from gpu_marketplace.identity.service import (
+    AuthService,
     AuthUnavailable,
     InvalidCredentials,
     InvalidLoginName,
@@ -126,3 +141,47 @@ def test_full_hashing_slots_are_unavailable_not_wrong_password(login_name: str) 
     hasher.busy = True
     with pytest.raises(AuthUnavailable):
         service.login(login_name, PASSWORD)
+
+
+def real_hasher_service(**hasher_options: object) -> tuple[AuthService, ScryptPasswordHasher]:
+    """AuthService wired like production: one shared real ScryptPasswordHasher."""
+    hasher = ScryptPasswordHasher(profile=ScryptProfile(n=2**10, r=8, p=1), **hasher_options)  # type: ignore[arg-type]
+    return AuthService(FakeAccountReader(), AccessTokenCodec(SECRET, clock=FakeClock()), hasher), hasher
+
+
+@pytest.mark.parametrize(
+    ("login_name", "password"),
+    [
+        ("demo_client_01", "p" + chr(0xD800)),  # existing account, unencodable password
+        ("nobody", "p" + chr(0xD800)),  # missing account, unencodable password
+        ("demo_client_01", "wrong"),  # existing account, wrong password
+        ("nobody", "wrong"),  # missing account
+    ],
+)
+def test_login_failure_paths_run_exactly_one_derivation(
+    monkeypatch: pytest.MonkeyPatch, login_name: str, password: str
+) -> None:
+    # PR #18 re-review P1, end to end through AuthService: existence must not change the work done.
+    service, _ = real_hasher_service()
+    calls: list[int] = []
+    real = passwords._derive
+
+    def counting(*args):  # type: ignore[no-untyped-def]
+        calls.append(1)
+        return real(*args)
+
+    monkeypatch.setattr(passwords, "_derive", counting)
+    with pytest.raises(InvalidCredentials):
+        service.login(login_name, password)
+    assert len(calls) == 1
+
+
+def test_shared_hasher_cap_maps_to_unavailable() -> None:
+    # PR #18 re-review P2: a full cap on the shared hasher is a sanitized 503, not a 500 or a 401.
+    service, hasher = real_hasher_service(max_concurrent=1, acquire_timeout_seconds=0.05)
+    hasher._slots.acquire()
+    try:
+        with pytest.raises(AuthUnavailable):
+            service.login("demo_client_01", PASSWORD)
+    finally:
+        hasher._slots.release()

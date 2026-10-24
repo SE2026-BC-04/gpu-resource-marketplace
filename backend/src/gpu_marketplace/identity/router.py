@@ -1,7 +1,9 @@
 """The three approved Auth routes (API Contract §4.2–4.4).
 
 Not registered in ``api/app.py``: the team lead integrates the router together with
-the JWT secret configuration and the GPU-002 account adapter.
+the JWT secret configuration and the GPU-002 account adapter. Build ``AuthService`` (and its
+password hasher) once at application start and pass the same instance to this router and
+to ``create_principal_dependency``; every service call runs in the threadpool.
 """
 
 from collections.abc import Callable
