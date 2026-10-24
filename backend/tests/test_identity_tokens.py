@@ -2,11 +2,15 @@ import base64
 import hashlib
 import hmac
 import json
+import random
+import string
 from uuid import UUID
 
 import pytest
 
+from gpu_marketplace.identity import tokens
 from gpu_marketplace.identity.tokens import (
+    MAX_TOKEN_LENGTH,
     TOKEN_AUDIENCE,
     TOKEN_ISSUER,
     AccessTokenCodec,
@@ -219,3 +223,80 @@ def test_error_reason_does_not_contain_the_token(codec: AccessTokenCodec, clock:
     with pytest.raises(InvalidTokenError) as excinfo:
         codec.verify(token)
     assert token not in str(excinfo.value)
+
+
+def test_issued_tokens_fit_the_size_limit(codec: AccessTokenCodec) -> None:
+    assert len(codec.issue(SUBJECT).token) < MAX_TOKEN_LENGTH // 4
+
+
+@pytest.mark.parametrize("length", [MAX_TOKEN_LENGTH + 1, 64 * 1024, 4 * 1024 * 1024])
+def test_over_limit_token_is_rejected_before_parsing(
+    codec: AccessTokenCodec, monkeypatch: pytest.MonkeyPatch, length: int
+) -> None:
+    # C4 on PR #18: no base64/JSON work for an oversized token.
+    def must_not_parse(*_: object) -> object:
+        raise AssertionError("oversized token reached the parser")
+
+    monkeypatch.setattr(tokens, "_decode_json_object", must_not_parse)
+    monkeypatch.setattr(tokens, "_decode_segment", must_not_parse)
+    with pytest.raises(InvalidTokenError) as excinfo:
+        codec.verify("a" * (length - 2) + ".b")
+    assert excinfo.value.reason == "too_long"
+
+
+def test_token_at_exactly_the_limit_is_parsed(codec: AccessTokenCodec) -> None:
+    header, payload, signature = codec.issue(SUBJECT).token.split(".")
+    padded = header + "." + payload + "." + signature + "A" * (MAX_TOKEN_LENGTH - len(header) - len(payload) - len(signature) - 2)
+    assert len(padded) == MAX_TOKEN_LENGTH
+    with pytest.raises(InvalidTokenError) as excinfo:
+        codec.verify(padded)
+    assert excinfo.value.reason != "too_long"
+
+
+def _mutations(token: str, rng: random.Random) -> str:
+    alphabet = string.ascii_letters + string.digits + "-_.=+/ " + chr(0) + chr(0xE9) + chr(0x1F600)
+    choice = rng.randrange(7)
+    position = rng.randrange(len(token))
+    if choice == 0:  # replace one character
+        return token[:position] + rng.choice(alphabet) + token[position + 1 :]
+    if choice == 1:  # insert one character
+        return token[:position] + rng.choice(alphabet) + token[position:]
+    if choice == 2:  # delete one character
+        return token[:position] + token[position + 1 :]
+    if choice == 3:  # truncate
+        return token[:position]
+    if choice == 4:  # swap two segments
+        parts = token.split(".")
+        i, j = rng.sample(range(3), 2)
+        parts[i], parts[j] = parts[j], parts[i]
+        return ".".join(parts)
+    if choice == 5:  # duplicate a segment
+        return token + "." + token.split(".")[rng.randrange(3)]
+    return "".join(rng.choice(alphabet) for _ in range(rng.randrange(1, 200)))  # random noise
+
+
+def test_adversarial_mutations_only_raise_invalid_token(codec: AccessTokenCodec) -> None:
+    # C2 on PR #18: fuzz-like negative tests with a fixed seed, so failures are reproducible.
+    rng = random.Random(20261024)
+    token = codec.issue(SUBJECT).token
+    rejected = 0
+    for _ in range(3000):
+        mutated = _mutations(token, rng)
+        if mutated == token:
+            continue
+        try:
+            codec.verify(mutated)
+        except InvalidTokenError:
+            rejected += 1
+        else:
+            raise AssertionError(f"mutated token was accepted: {mutated!r}")
+    assert rejected > 2900
+
+
+def test_forged_tokens_with_valid_shape_are_rejected(codec: AccessTokenCodec) -> None:
+    rng = random.Random(7)
+    for _ in range(500):
+        payload = _payload(sub=json.dumps(str(UUID(int=rng.getrandbits(128), version=4))))
+        forged = _sign_raw(HEADER, payload, secret=bytes(rng.getrandbits(8) for _ in range(32)))
+        with pytest.raises(InvalidTokenError):
+            codec.verify(forged)

@@ -1,7 +1,11 @@
 """HS256 user access tokens with exact microsecond NumericDate (DEC-P1-03, Phase 1C §2.3).
 
 Standard library only, so ``iat``/``exp`` are written and read as exact six-decimal JSON
-numbers instead of being rounded through ``float`` or truncated to whole seconds.
+numbers instead of being rounded through ``float`` or truncated to whole seconds. The team
+lead accepted this fixed-profile codec for the simulation-only MVP on PR #18 (C2), approved
+the API process clock as the issuing clock (C3) and required a 4096-byte token limit (C4).
+Because ``exp`` is compared strictly with no leeway, API hosts must keep their clocks
+synchronized (for example with NTP).
 """
 
 import base64
@@ -21,6 +25,7 @@ TOKEN_ISSUER = "gpu-marketplace-api"
 TOKEN_AUDIENCE = "gpu-marketplace-web"
 TOKEN_LIFETIME_SECONDS = 900
 MIN_SECRET_BYTES = 32  # 256 bits
+MAX_TOKEN_LENGTH = 4096  # C4: checked before any base64 or JSON work
 
 _MICROSECONDS_PER_SECOND = 1_000_000
 _LIFETIME_MICROSECONDS = TOKEN_LIFETIME_SECONDS * _MICROSECONDS_PER_SECOND
@@ -88,6 +93,8 @@ class AccessTokenCodec:
         """Return the claims or raise; account status and role must still be checked in the DB."""
         if not isinstance(token, str):
             raise InvalidTokenError("malformed")
+        if len(token) > MAX_TOKEN_LENGTH or not token.isascii():
+            raise InvalidTokenError("too_long" if len(token) > MAX_TOKEN_LENGTH else "malformed")
         segments = token.split(".")
         # Validate every segment's alphabet before signing, so non-ASCII input cannot raise.
         if len(segments) != 3 or not all(_BASE64URL_SEGMENT.fullmatch(segment) for segment in segments):
