@@ -66,8 +66,18 @@ class PasswordHasher(Protocol):
 class ScryptPasswordHasher:
     """Hashes with one profile and verifies only stored hashes whose profile is allowlisted.
 
-    A stored hash can therefore never request more work than an approved profile, and at most
-    ``max_concurrent`` derivations (each about ``profile.memory_bytes`` of RAM) run at once.
+    Guarantees, held here in the pure core rather than in the Login route:
+
+    * Every ``verify_password`` and ``burn_verification`` call runs **exactly one** scrypt
+      derivation with an approved profile, whatever the input: right or wrong password, a
+      password that cannot be encoded (lone surrogate), or an unusable stored hash. The
+      existing-account and missing-account Login branches therefore cost the same, so their
+      timing does not reveal whether an account exists.
+    * A stored hash can never request more work than an approved profile.
+    * At most ``max_concurrent`` derivations (each about ``profile.memory_bytes`` of RAM) run at
+      once. The cap is per instance: create **one hasher per process** and share it; a new
+      instance per request would defeat it. Keep ``accepted_profiles`` to deliberately
+      approved, resource-bounded profiles (in production, normally just ``profile``).
     """
 
     def __init__(
@@ -107,40 +117,52 @@ class ScryptPasswordHasher:
 
     def verify_password(self, password: str, encoded: str) -> bool:
         """Return False for a wrong password or an unusable stored hash; raise only PasswordHashingBusy."""
-        if not isinstance(password, str) or not isinstance(encoded, str):
-            return False
-        if len(encoded) > _MAX_ENCODED_LENGTH:
-            logger.warning("password_hash_unusable")
-            return False
-        match = _ENCODED.fullmatch(encoded)
-        if match is None:
-            logger.warning("password_hash_unusable")
-            return False
+        stored = self._parse_stored(encoded)
         try:
-            profile = ScryptProfile(int(match["n"]), int(match["r"]), int(match["p"]))
-        except ValueError:
-            profile = None
-        if profile not in self._accepted:
-            logger.warning("password_hash_profile_unsupported")
+            password_bytes = _encode_password(password) if isinstance(password, str) else None
+        except UnicodeEncodeError:
+            password_bytes = None  # lone surrogate: can never match, but must cost the same
+        if stored is None or password_bytes is None:
+            self._dummy_derivation()
             return False
-        try:
-            salt = base64.b64decode(match["salt"], validate=True)
-            expected = base64.b64decode(match["key"], validate=True)
-            password_bytes = _encode_password(password)
-        except (binascii.Error, UnicodeEncodeError):
-            return False
-        if len(salt) not in _SALT_BYTES_RANGE or len(expected) not in _KEY_BYTES_RANGE:
-            logger.warning("password_hash_unusable")
-            return False
+        profile, salt, expected = stored
         actual = self._derive(password_bytes, salt, profile, len(expected))
         return actual is not None and hmac.compare_digest(actual, expected)
 
     def burn_verification(self, password: str) -> None:
+        self._dummy_derivation()
+
+    def _dummy_derivation(self) -> None:
+        # Same profile, salt size and key size as a real verification; the input is irrelevant.
+        self._derive(b"", self._dummy_salt, self._profile, self._key_bytes)
+
+    def _parse_stored(self, encoded: str) -> tuple[ScryptProfile, bytes, bytes] | None:
+        if not isinstance(encoded, str):
+            return None
+        if len(encoded) > _MAX_ENCODED_LENGTH:
+            logger.warning("password_hash_unusable")
+            return None
+        match = _ENCODED.fullmatch(encoded)
+        if match is None:
+            logger.warning("password_hash_unusable")
+            return None
         try:
-            password_bytes = _encode_password(password if isinstance(password, str) else "")
-        except UnicodeEncodeError:
-            password_bytes = b""
-        self._derive(password_bytes, self._dummy_salt, self._profile, self._key_bytes)
+            profile = ScryptProfile(int(match["n"]), int(match["r"]), int(match["p"]))
+        except ValueError:
+            profile = None
+        if profile is None or profile not in self._accepted:
+            logger.warning("password_hash_profile_unsupported")
+            return None
+        try:
+            salt = base64.b64decode(match["salt"], validate=True)
+            expected = base64.b64decode(match["key"], validate=True)
+        except binascii.Error:
+            logger.warning("password_hash_unusable")
+            return None
+        if len(salt) not in _SALT_BYTES_RANGE or len(expected) not in _KEY_BYTES_RANGE:
+            logger.warning("password_hash_unusable")
+            return None
+        return profile, salt, expected
 
     def _derive(self, password: bytes, salt: bytes, profile: ScryptProfile, key_bytes: int) -> bytes | None:
         if not self._slots.acquire(timeout=self._acquire_timeout):

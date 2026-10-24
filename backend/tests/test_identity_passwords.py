@@ -74,19 +74,87 @@ def test_unreadable_stored_hash_fails_closed(hasher: ScryptPasswordHasher, encod
     assert hasher.verify_password("anything", encoded) is False
 
 
+def record_derivations(monkeypatch: pytest.MonkeyPatch) -> list[tuple[ScryptProfile, int, int]]:
+    """Replace scrypt with a recorder of (profile, salt length, key length); no real work."""
+    calls: list[tuple[ScryptProfile, int, int]] = []
+
+    def fake(password: bytes, salt: bytes, profile: ScryptProfile, key_bytes: int) -> bytes:
+        calls.append((profile, len(salt), key_bytes))
+        return b"x" * key_bytes
+
+    monkeypatch.setattr(passwords, "_derive", fake)
+    return calls
+
+
 @pytest.mark.parametrize(
     "profile",
     ["n=1048576,r=8,p=1", "n=1048576,r=32,p=16", "n=4194304,r=8,p=1", "n=32768,r=8,p=3", "n=1024,r=8,p=2"],
 )
-def test_stored_hash_with_unapproved_profile_never_derives(
+def test_stored_hash_with_unapproved_profile_never_drives_the_work(
     hasher: ScryptPasswordHasher, monkeypatch: pytest.MonkeyPatch, profile: str
 ) -> None:
-    # P1 on PR #18: a stored row cannot choose its own cost; only allowlisted profiles are computed.
-    def must_not_run(*_: object) -> bytes:
-        raise AssertionError("scrypt must not run for an unapproved profile")
-
-    monkeypatch.setattr(passwords, "_derive", must_not_run)
+    # P1 (first review): a stored row cannot choose its own cost; only the approved profile runs.
+    calls = record_derivations(monkeypatch)
     assert hasher.verify_password("anything", stored(profile)) is False
+    assert calls == [(FAST, 16, 32)]
+
+
+def _existing_account_paths() -> dict[str, tuple[str, str]]:
+    encoded = ScryptPasswordHasher(profile=FAST).hash_password("pw")
+    return {
+        "correct password": ("pw", encoded),
+        "wrong password": ("other", encoded),
+        "lone surrogate password": ("p" + chr(0xD800), encoded),
+        "surrogate pair password": (SURROGATE_PAIR, encoded),
+        "non-string password": (None, encoded),  # type: ignore[dict-item]
+        "corrupt stored hash": ("pw", "scrypt$n=1024,r=8,p=1$!!!$a2V5"),
+        "unsupported stored profile": ("pw", stored("n=1048576,r=8,p=1")),
+        "oversized stored hash": ("pw", "scrypt$" + "A" * 10_000),
+        "non-string stored hash": ("pw", None),  # type: ignore[dict-item]
+    }
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "correct password",
+        "wrong password",
+        "lone surrogate password",
+        "surrogate pair password",
+        "non-string password",
+        "corrupt stored hash",
+        "unsupported stored profile",
+        "oversized stored hash",
+        "non-string stored hash",
+    ],
+)
+def test_every_verification_runs_exactly_one_approved_derivation(
+    hasher: ScryptPasswordHasher, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    # P1 (re-review): the existing-account branch must cost the same as the missing-account branch.
+    password, encoded = _existing_account_paths()[case]
+    calls = record_derivations(monkeypatch)
+    hasher.verify_password(password, encoded)
+    assert calls == [(FAST, 16, 32)]
+
+
+@pytest.mark.parametrize("password", ["pw", "", "p" + chr(0xD800), SURROGATE_PAIR, None])
+def test_missing_account_branch_runs_the_same_single_derivation(
+    hasher: ScryptPasswordHasher, monkeypatch: pytest.MonkeyPatch, password: object
+) -> None:
+    calls = record_derivations(monkeypatch)
+    hasher.burn_verification(password)  # type: ignore[arg-type]
+    assert calls == [(FAST, 16, 32)]
+
+
+def test_surrogate_password_costs_the_same_with_or_without_an_account(
+    hasher: ScryptPasswordHasher, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    encoded = ScryptPasswordHasher(profile=FAST).hash_password("pw")
+    calls = record_derivations(monkeypatch)
+    assert hasher.verify_password(SURROGATE_PAIR, encoded) is False  # account exists
+    hasher.burn_verification(SURROGATE_PAIR)  # no account
+    assert calls == [(FAST, 16, 32), (FAST, 16, 32)]
 
 
 def test_accepted_profiles_allow_verifying_an_older_profile() -> None:
