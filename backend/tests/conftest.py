@@ -1,5 +1,4 @@
 import os
-import secrets
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -9,7 +8,6 @@ from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 
-from gpu_marketplace.common.db_roles import bootstrap_roles
 from db_safety import TestDatabase, UnsafeTestDatabase, resolve_test_database, verify_cluster
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -48,16 +46,6 @@ def db_engine(test_database: TestDatabase) -> Iterator[Engine]:
         engine.dispose()
 
 
-@pytest.fixture(scope="session")
-def cluster_roles(db_engine: Engine) -> None:
-    """Bootstrap the API/Manager roles on the vetted disposable cluster, create-only (C4).
-
-    Passwords are random and discarded: tests switch role with SET ROLE and never log in as them.
-    """
-    with db_engine.begin() as connection:
-        bootstrap_roles(connection, secrets.token_hex(16), secrets.token_hex(16))
-
-
 def reset_schema(engine: Engine, target: TestDatabase) -> None:
     """Empty the test database. The cluster and database guards are re-checked on every call (G8)."""
     with engine.begin() as connection:
@@ -76,7 +64,7 @@ def clean_database(db_engine: Engine, test_database: TestDatabase) -> Engine:
 
 
 @pytest.fixture
-def alembic_config(test_database: TestDatabase, cluster_roles: None, monkeypatch: pytest.MonkeyPatch) -> Config:
+def alembic_config(test_database: TestDatabase, monkeypatch: pytest.MonkeyPatch) -> Config:
     # migrations/env.py reads the database URL from Settings, so point it at the vetted test database.
     monkeypatch.setenv("GPU_MARKETPLACE_DATABASE_URL", test_database.url)
     return Config(str(BACKEND_ROOT / "alembic.ini"))
@@ -89,7 +77,7 @@ def migrated_database(clean_database: Engine, alembic_config: Config) -> Engine:
 
 
 @pytest.fixture(scope="module")
-def baseline_database(db_engine: Engine, test_database: TestDatabase, cluster_roles: None) -> Iterator[Engine]:
+def baseline_database(db_engine: Engine, test_database: TestDatabase) -> Iterator[Engine]:
     """Schema at ``head`` for a whole module; tests isolate themselves with a rolled-back transaction."""
     reset_schema(db_engine, test_database)
     with pytest.MonkeyPatch.context() as patch:
