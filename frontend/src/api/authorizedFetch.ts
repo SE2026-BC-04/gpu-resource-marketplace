@@ -18,8 +18,9 @@ export function createAuthorizedFetch(session: SessionStore, fetcher: typeof fet
     headers.set("Authorization", `Bearer ${sent}`);
     let response: Response;
     try {
+      // Protected fields come after the spread so a caller cannot weaken them (XPH-GPU-003-D TV5 P2).
       response = await fetcher(`${config.apiBaseUrl}${path}`, {
-        cache: "no-store", ...init, headers, credentials: "omit",
+        ...init, headers, credentials: "omit", cache: "no-store",
       });
     } catch (error) {
       if (init.signal?.aborted || isAbortError(error)) throw error;

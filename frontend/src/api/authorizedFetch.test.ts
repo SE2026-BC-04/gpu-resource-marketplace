@@ -27,6 +27,24 @@ describe("shared Bearer client", () => {
     expect(headers.get("Accept")).toBe("application/json");
   });
 
+  it.each(["force-cache", "default", "reload", "only-if-cached"] as const)(
+    "keeps no-store and omits cookies even when the caller asks for cache %s",
+    async (cache) => {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status: 200 }));
+      const send = createAuthorizedFetch(await signedIn("token.a"), fetcher);
+      await send("/api/v1/jobs", { method: "POST", body: "{}", cache, credentials: "include" });
+      const [, init] = fetcher.mock.calls[0];
+      expect(init).toMatchObject({ method: "POST", body: "{}", cache: "no-store", credentials: "omit" });
+    },
+  );
+
+  it("does not let a caller replace the Authorization header", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status: 200 }));
+    const send = createAuthorizedFetch(await signedIn("token.a"), fetcher);
+    await send("/api/v1/jobs", { headers: { Authorization: "Bearer forged" } });
+    expect((fetcher.mock.calls[0][1]?.headers as Headers).get("Authorization")).toBe("Bearer token.a");
+  });
+
   it("does not send anything without a session", async () => {
     const fetcher = vi.fn<typeof fetch>();
     const session = createSessionStore({ login: vi.fn(), me: vi.fn(), logout: vi.fn() });
