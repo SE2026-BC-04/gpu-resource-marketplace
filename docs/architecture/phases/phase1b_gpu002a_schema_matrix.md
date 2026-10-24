@@ -537,13 +537,13 @@ Ghi chú bằng chứng: `ISO-03..06` tự tạo tình huống "giống cluster 
 
 ### 11.1. Quyết định đã ghi nhận (cập nhật 25/10/2026)
 
-Bảng này chỉ ghi lại quyết định nhóm trưởng đã đưa ra và nơi lưu bản ghi; nội dung kỹ thuật của từng mục vẫn là phần đề xuất ở trên. Mục không có trong bảng vẫn `PENDING LEAD DECISION`.
+Bảng này chỉ ghi lại quyết định nhóm trưởng đã đưa ra và nơi lưu bản ghi; nội dung kỹ thuật của từng mục vẫn là phần đề xuất ở trên. Mục không có trong bảng vẫn `PENDING LEAD DECISION`. D2 và D3 được TV2 đăng lại thay nhóm trưởng (nhóm trưởng gửi qua kênh khác vì PR #24 đã merge); khi nhóm trưởng xác nhận trên PR #27, link xác nhận sẽ thay ghi chú "chờ xác nhận".
 
 | ID | Quyết định | Ngày | Bản ghi | Hiện thực |
 |---|---|---|---|---|
 | D1 | **APPROVED** — thiết kế role bootstrap + grant; re-land qua PR mới sau khi PR #14 bị revert vì quy trình | 24/10/2026 | [PR #22, 06:36Z](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/22#issuecomment-6380984025); [PR #22, 13:26Z](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/22#issuecomment-6384777132) | PR #27 (đang review); wiring `compose.yaml`/`.env.example` là PR riêng |
-| D2 | **APPROVED** — `trg_jobs_guard_update` theo mục 7 | 25/10/2026 | [PR #27 (chuyển tiếp từ nhóm trưởng)](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/27#issuecomment-6387687194) | PR #28 (draft, xếp trên #27) |
-| D3 | **APPROVED cho Phase 1B** — `trg_jobs_guard_delete` theo mục 8; phần Dispute `OPEN` của `DBP-09` là `BLOCKED` tới Phase 3; không bật cleanup production tới khi có bằng chứng giữ Dispute chưa giải quyết và test tích hợp | 25/10/2026 | [PR #27 (chuyển tiếp từ nhóm trưởng)](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/27#issuecomment-6387687194) | PR #29 (draft, xếp trên #28) |
+| D2 | **APPROVED** — `trg_jobs_guard_update` theo mục 7 | 25/10/2026 | [PR #27 (TV2 chuyển tiếp từ nhóm trưởng)](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/27#issuecomment-6387687194); **chờ nhóm trưởng xác nhận bản chuyển tiếp trên GitHub** | PR #28 (draft, xếp trên #27) |
+| D3 | **APPROVED cho Phase 1B** — `trg_jobs_guard_delete` theo mục 8; phần Dispute `OPEN` của `DBP-09` là `BLOCKED` tới Phase 3; không bật cleanup production tới khi có bằng chứng giữ Dispute chưa giải quyết và test tích hợp | 25/10/2026 | [PR #27 (TV2 chuyển tiếp từ nhóm trưởng)](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/27#issuecomment-6387687194); **chờ nhóm trưởng xác nhận bản chuyển tiếp trên GitHub** | PR #29 (draft, xếp trên #28) |
 | D8 | **APPROVED** — PostgreSQL 16.15 service dùng một lần trong CI, mật khẩu sinh trong job, marker an toàn của cluster; không đổi runtime production hay topology Compose | 24/10/2026 | [PR #24](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/24#issuecomment-6386249190) | PR #24 (đã merge) |
 
 Ghi chú: D6 (`clock_timestamp()`), D10 (SQLSTATE 23000 + tên trigger), D11 và D12 (hàng rào DB test, cluster dùng một lần) đang được code của D2/D3/D8 và test dùng tới nhưng chưa có quyết định riêng; nhờ nhóm trưởng xác nhận.
