@@ -1,9 +1,9 @@
 # GPU Resource Marketplace — Team Contribution & Git Workflow Rules
 
-**Version:** 1.0 — APPROVED by project owner (2026-10-20)<br>
+**Version:** 1.1 — proposed 2026-10-24; effective if merged<br>
 **Owner:** Team leader, SE2026-T23<br>
 **Applies to:** all team members and AI coding/review agents; Markdown, app code, database, tests, configuration and workflow changes.<br>
-**Status:** APPROVED v1.0 by the project owner on 2026-10-20. This document sets the human team process; GitHub enforcement requires a separate repository ruleset setting.
+**Status:** Proposed amendment to approved v1.0. Version 1.0 remains effective on `main` until this PR is approved and merged. This document sets the human team process; GitHub enforcement requires separate repository settings.
 
 ## 1. Goal and precedence
 
@@ -29,13 +29,13 @@ Read the relevant source documents before editing:
 
 | Actor | Allowed responsibility | Must not do |
 |---|---|---|
-| Task author | Implement assigned scope on a topic branch; commit, test, document, respond to review | Merge own PR, self-approve, silently change requirements or other modules |
-| Independent reviewer | Inspect full changed diff, design compatibility, tests, security and failures; approve or request changes | Approve own PR, rubber-stamp without reading, overlook blocking FAIL |
+| Task author | Implement assigned scope on a topic branch; commit, test, document, respond to review | Review or merge own PR, self-approve, silently change requirements or other modules |
+| Independent reviewer | Inspect full changed diff, design compatibility, tests, security and failures; record acceptance with a submitted GitHub review or explicit PR comment | Review own PR, rubber-stamp without reading, overlook blocking FAIL |
 | Domain reviewer (as assigned) | Review relevant DB/API/Manager/Simulator/security boundaries | Change another domain's accepted contract without cross-owner review |
 | Team leader / delegated maintainer | Coordinate work, record decisions; may merge only when the account has GitHub merge permission and all required gates pass | Bypass review/CI gates, self-approve or self-merge |
 | Codex / automation | Propose changes and review against `AGENTS.md` and approved docs | Push/merge/change settings autonomously; count as required independent human review |
 
-**Minimum independent human reviews (APPROVED):** L0/L1 changes require **one independent human reviewer**; L2/L3 changes require **two independent human reviewers**. Reviewers must be independent of the PR author, and no author may approve or merge their own PR. Each review covers the latest meaningful diff; new logic after approval requires renewed review. Consult [Change Control](change-control.md) for levels.
+**Minimum independent human reviews:** L0/L1 changes require **one independent human reviewer**; L2/L3 changes require **two independent human reviewers**. The reviewer count is unchanged. A human reviewer may record acceptance either by submitting GitHub's `Approve` review or by posting an explicit approval comment on the PR conversation or a review thread. For comment-based acceptance, the reviewer must clearly say `Approved for merge` (optionally naming the reviewed HEAD SHA) after reviewing the current diff. The reviewer must be independent of the PR author; the author cannot review, approve, or merge their own PR. Vague positive comments do not count. Any new commit invalidates prior acceptance until the required reviewer(s) confirm the new HEAD. Codex or other automated comments never count. These comments satisfy the team's review-evidence rule only; if GitHub branch protection separately requires submitted approvals, that technical gate still applies and must not be bypassed. For L2/L3, this review confirmation does not replace the prior team-lead/stakeholder decision required for the change itself. Consult [Change Control](change-control.md) for levels.
 
 ## 3. Before a change: task assignment and scope
 
@@ -95,12 +95,12 @@ git commit -m "docs(api): record approved login rules"
 - Complete [.github PR template](../../.github/pull_request_template.md), including the *actual* observed tests and `NOT_RUN` cases. If the PR changes an approved design, link its **prior** team-lead change decision.
 - Include screenshots only when a visible UI change merits them; sensitive data must be removed. Reproduce bug fixes through a regression scenario (manual only if automated test is not yet possible and the reason is recorded).
 - Use `@codex review` on an open PR if Codex GitHub review is enabled. Codex findings are advisory; reviewer and leader resolve P0/P1 concerns independently.
-- A reviewer must read the actual diff and check business boundaries (not only green CI). Each comment should give a file/line, expected contract and practical fix. The author fixes in the **same PR**, pushes again and requests re-review; do not resolve threads by hiding failing behavior.
-- **Default merge approach:** `Squash and merge` is recommended with a clear Conventional Commit PR title; preserve appropriate co-authorship credit. Any GitHub account with merge permission may perform the final merge after all required human approvals and applicable CI gates pass. Authors must never self-approve or self-merge.
+- A reviewer must read the actual diff and check business boundaries (not only green CI). Findings should give a file/line, expected contract and practical fix. The author fixes in the **same PR**, pushes again and requests re-review; do not resolve threads by hiding failing behavior. To accept, each reviewer submits GitHub `Approve` or clearly comments `Approved for merge` on the latest diff.
+- **Default merge approach:** `Squash and merge` is recommended with a clear Conventional Commit PR title; preserve appropriate co-authorship credit. Any GitHub account with merge permission may perform the final merge after all required human review confirmations and applicable CI gates pass. Authors must never review or merge their own PR.
 
 ### Do not merge if any applies
 
-- Required independent approvals are missing, a blocking review thread is unresolved, or a reviewer approved an obsolete diff.
+- Required independent human review confirmations are missing, a blocking review thread is unresolved, or a reviewer confirmed an obsolete diff.
 - The change contradicts an accepted FR/NFR/ADR/Database/API design, or a required L2/L3 design decision has not been approved.
 - A relevant P0 integrity/security/regression test is **FAIL** or **NOT_RUN without an expressly accepted blocker**. Do not weaken assertions or bypass checks to force green CI.
 - New secrets are exposed, authorization allows cross-account reads, Simulator receives DB/oracle access, signed bytes are silently changed, FIFO/capacity/retention invariants are weakened, or the PR introduces unauthorized scope.
@@ -135,14 +135,14 @@ A changed API/DB/ADR contract requires synchronized documentation **in the same 
 
 Markdown is **team policy, not an automatic permission barrier**. A repository admin/owner should separately enable a GitHub **branch ruleset** for `main` (Settings → Rules → Rulesets, if accessible):
 
-1. Require a Pull Request before merging; apply the approved reviewer minimum (one independent human reviewer for L0/L1, two for L2/L3) and dismiss/refresh stale reviews after new changes where supported.
+1. Require a Pull Request before merging; apply the reviewer minimum (one independent human reviewer for L0/L1, two for L2/L3) and dismiss/refresh stale reviews after new changes where supported.
 2. Block force pushes and deletions of `main`; prevent normal direct-push bypass and limit who may bypass, if allowed by the organization's plan/permissions.
 3. Require conversation resolution and, **when CI workflows actually exist**, require the agreed status checks to pass. Do not configure imaginary check names before workflows exist.
-4. Enforce the approved level-based human review minimum: one independent reviewer for L0/L1 and two for L2/L3. A GitHub ruleset configured for only one approval does not enforce the approved L2/L3 requirement; a suitable ruleset/CODEOWNERS process can be designed separately if needed.
+4. Enforce the level-based human review minimum: one independent reviewer for L0/L1 and two for L2/L3. GitHub may not treat a PR comment as a submitted review approval. If a branch rule requires submitted approvals, it remains a separate technical gate; only an authorized repository admin may change it, and contributors must never bypass it.
 5. Verify the ruleset with a harmless docs-only PR. The rules are not considered technically enforced until GitHub Settings confirms they are active.
 
 **No GitHub settings are changed by the presence of this Markdown file.** A protected `main` rule and authorized merge permissions must be configured separately by an authorized repository admin.
 
 ## 10. Approval and versioning of this policy
 
-**Approval record:** The project owner approved this v1.0 policy on 2026-10-20. Communicate it to all five team members and designate reviewers/delegates without hard-coding personal identities in the repo. Future modifications to this policy itself go through a `docs/` PR and the change-control level corresponding to the affected rule; no member can silently relax their own review requirement.
+**Approval record:** The project owner approved v1.0 on 2026-10-20. The v1.1 amendment proposed on 2026-10-24 changes only the accepted form of human review evidence; reviewer counts, independence, CI gates, change approvals, and self-merge prohibition remain. This amendment takes effect only when its PR is approved and merged. Communicate the active policy to all team members and designate reviewers/delegates without hard-coding personal identities. Future modifications go through a `docs/` PR and the change-control level corresponding to the affected rule; no member can silently relax their own review requirement.

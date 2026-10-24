@@ -1,1 +1,1 @@
-"""Authentication belongs to Member 3. GPU-001 implements no login, JWT or RBAC."""
+"""Authentication belongs to Member 3. GPU-003-B adds pure normalization, token and password modules."""

@@ -1,6 +1,6 @@
 # Pull Request — GPU Resource Marketplace
 
-> Follow [Team Contribution Rules](../docs/development/team-contribution-rules.md) and [Change Control](../docs/development/change-control.md). This template does not itself prevent a direct push to `main`; GitHub Rulesets must enforce that separately.
+> Follow [Team Contribution Rules](../docs/development/team-contribution-rules.md) and [Change Control](../docs/development/change-control.md). Human reviewers may submit GitHub `Approve` or post an explicit approval comment after reviewing the current diff. GitHub branch-protection requirements remain separate; do not bypass them.
 
 ## 1. Task and purpose
 
@@ -50,9 +50,9 @@
 
 ## 6. Reviewer and merge gate
 
-- [ ] L0/L1: **one independent human reviewer**; L2/L3: **two independent human reviewers** have approved the latest meaningful diff.
-- [ ] No PR author self-approved; Codex review does not count toward the required human reviewer total.
+- [ ] L0/L1: **one independent human reviewer**; L2/L3: **two independent human reviewers** have confirmed the latest diff through GitHub `Approve` or an explicit PR comment such as `Approved for merge`.
+- [ ] No PR author self-reviewed or self-merged; Codex review does not count toward the required human reviewer total.
 - [ ] Required discussions resolved; no unresolved P0/P1 issue, secret leak or failing required test.
 - [ ] CI status checks passed where configured, or absence/blocker is explicitly recorded.
-- [ ] Codex review requested where connected (`@codex review`); advisory only, **not** a substitute for human approval.
+- [ ] Codex review requested where connected (`@codex review`); advisory only, **not** a substitute for human review confirmation.
 - [ ] A GitHub account with merge permission performs the final merge only after all gates pass; the PR author does not self-merge.
