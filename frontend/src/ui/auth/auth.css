@@ -1,0 +1,16 @@
+.auth-form,
+.auth-account { display: grid; gap: 10px; margin-top: 24px; max-width: 420px; }
+.auth-form h2 { margin: 0 0 6px; font-size: 1.3rem; }
+.auth-form label { color: #c8d4e6; font-size: 0.92rem; font-weight: 600; }
+.auth-form input { padding: 11px 13px; border: 1px solid #3b4d68; border-radius: 10px; color: #e8eef9; background: #0f1828; font: inherit; }
+.auth-form input:focus-visible { outline: 2px solid #88b7ff; outline-offset: 1px; }
+.auth-form button,
+.auth-account button { justify-self: start; margin-top: 6px; padding: 10px 18px; border: 0; border-radius: 10px; color: #0d1524; background: #88b7ff; font: inherit; font-weight: 700; cursor: pointer; }
+.auth-form button:disabled,
+.auth-account button:disabled { opacity: 0.6; cursor: progress; }
+.auth-error { margin: 0; color: #ffb4b4; font-size: 0.95rem; }
+.auth-notice { margin: 0; color: #b4f4d5; font-size: 0.95rem; }
+.auth-account dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+.auth-account dt { color: #adbbcf; }
+.auth-account dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+.auth-hint { margin: 4px 0 0; font-size: 0.88rem; line-height: 1.5; }
