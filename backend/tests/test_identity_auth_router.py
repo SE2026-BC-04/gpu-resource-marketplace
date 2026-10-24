@@ -6,7 +6,8 @@ from fastapi.testclient import TestClient
 import pytest
 
 from identity_fakes import C1, NUL_PASSWORD, PASSWORD, T0_US, build_service
-from gpu_marketplace.identity.dependencies import create_principal_dependency
+from gpu_marketplace.identity.dependencies import bearer_token, create_principal_dependency
+from gpu_marketplace.identity.tokens import MAX_TOKEN_LENGTH
 from gpu_marketplace.identity.principal import AuthenticatedPrincipal
 from gpu_marketplace.identity.router import TOKEN_REJECTED_CODE, create_auth_router
 
@@ -23,7 +24,7 @@ def env():
     def probe(p: AuthenticatedPrincipal = Depends(principal)) -> dict[str, str]:
         return {"user_id": str(p.user_id), "role": p.role, "status": p.status}
 
-    return TestClient(app), reader, clock
+    return TestClient(app), reader, clock, hasher
 
 
 def login(client: TestClient, body: object, raw: str | None = None):
@@ -88,7 +89,7 @@ def test_login_failures_are_generic_401(env, body) -> None:
     ],
 )
 def test_login_bad_body_is_400(env, raw: str, code: str) -> None:
-    client, reader, _ = env
+    client, reader, *_ = env
     assert_error(login(client, None, raw=raw), 400, code)
     assert reader.reads == 0
 
@@ -114,7 +115,7 @@ def test_login_invalid_fields_are_422(env, body) -> None:
     [chr(0) + "demo_client_01", "demo" + chr(0) + "client", "demo_client_01" + chr(0), chr(0xD800), "a" + chr(0xDFFF)],
 )
 def test_unstorable_login_name_is_422_without_database_access(env, login_name: str) -> None:
-    client, reader, _ = env
+    client, reader, *_ = env
     response = login(client, {"login_name": login_name, "password": PASSWORD})
     assert_error(response, 422, "VALIDATION_ERROR")
     assert reader.reads == 0  # CR R1
@@ -128,7 +129,7 @@ def test_nul_password_round_trips_over_http(env) -> None:
 
 
 def test_store_unavailable_is_503(env) -> None:
-    client, reader, _ = env
+    client, reader, *_ = env
     reader.unavailable = True
     assert_error(login(client, {"login_name": "demo_client_01", "password": PASSWORD}), 503, "DEPENDENCY_UNAVAILABLE")
 
@@ -157,7 +158,7 @@ def test_me_without_valid_bearer_is_401(env, headers) -> None:
 
 
 def test_me_rechecks_account_and_expiry(env) -> None:
-    client, reader, clock = env
+    client, reader, clock, _ = env
     token = token_for(client)
     reader.set(C1, status="DISABLED")
     assert_error(client.get("/api/v1/auth/me", headers=bearer(token)), 401, TOKEN_REJECTED_CODE)
@@ -188,7 +189,7 @@ def test_no_public_signup_or_role_routes(env) -> None:
 
 
 def test_shared_dependency_follows_agreed_convention(env) -> None:
-    client, reader, _ = env
+    client, reader, *_ = env
     token = token_for(client)
     assert client.get("/probe", headers=bearer(token)).json() == {
         "user_id": str(C1),
@@ -199,3 +200,23 @@ def test_shared_dependency_follows_agreed_convention(env) -> None:
     assert rejected.status_code == 401 and rejected.headers["WWW-Authenticate"] == "Bearer"
     reader.unavailable = True
     assert client.get("/probe", headers=bearer(token)).status_code == 503
+
+
+def test_hashing_busy_is_503(env) -> None:
+    client, _, _, hasher = env
+    hasher.busy = True
+    assert_error(login(client, {"login_name": "demo_client_01", "password": PASSWORD}), 503, "DEPENDENCY_UNAVAILABLE")
+
+
+def test_bearer_extraction_enforces_the_c4_limit() -> None:
+    assert bearer_token("Bearer " + "a" * MAX_TOKEN_LENGTH) == "a" * MAX_TOKEN_LENGTH
+    assert bearer_token("Bearer " + "a" * (MAX_TOKEN_LENGTH + 1)) is None
+    assert bearer_token("Bearer abc" + chr(0xE9)) is None
+
+
+@pytest.mark.parametrize("path", ["/api/v1/auth/me", "/probe"])
+def test_oversized_authorization_header_is_401(env, path: str) -> None:
+    client, *_ = env
+    response = client.get(path, headers={"Authorization": "Bearer " + "a" * (MAX_TOKEN_LENGTH + 1)})
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Bearer"

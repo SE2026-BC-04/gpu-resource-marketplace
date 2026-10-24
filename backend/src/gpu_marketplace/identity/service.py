@@ -11,7 +11,7 @@ from typing import cast
 from uuid import UUID
 
 from gpu_marketplace.identity.normalization import LoginNameError, normalize_login_name
-from gpu_marketplace.identity.passwords import PasswordHasher
+from gpu_marketplace.identity.passwords import PasswordHasher, PasswordHashingBusy
 from gpu_marketplace.identity.ports import AccountReader, AccountRecord, AccountStoreUnavailable
 from gpu_marketplace.identity.principal import ROLES, AuthenticatedPrincipal, Role
 from gpu_marketplace.identity.tokens import AccessTokenCodec, InvalidTokenError
@@ -36,7 +36,7 @@ class NotAuthenticated(AuthError):
 
 
 class AuthUnavailable(AuthError):
-    """503: the account store could not be read."""
+    """503: the account store could not be read, or every password-hashing slot is busy."""
 
 
 @dataclass(frozen=True)
@@ -65,12 +65,17 @@ class AuthService:
         except LoginNameError as exc:
             raise InvalidLoginName() from exc
         account = self._read(lambda: self._accounts.find_by_login_name(normalized))
-        if account is None:
-            # Spend the same verification cost as an existing account.
-            self._passwords.burn_verification(password)
-            raise InvalidCredentials()
-        if not self._passwords.verify_password(password, account.password_hash):
-            raise InvalidCredentials()
+        try:
+            if account is None:
+                # Spend the same verification cost as an existing account.
+                self._passwords.burn_verification(password)
+                raise InvalidCredentials()
+            if not self._passwords.verify_password(password, account.password_hash):
+                raise InvalidCredentials()
+        except PasswordHashingBusy as exc:
+            # C1 (PR #18): the concurrency cap is full; report temporary unavailability, not a wrong password.
+            logger.warning("password_hashing_busy")
+            raise AuthUnavailable() from exc
         if account.status != "ACTIVE":
             raise InvalidCredentials()
         if account.role not in ROLES:

@@ -117,3 +117,12 @@ def test_deleted_account_and_garbage_token_are_not_authenticated() -> None:
     del reader.by_id[C1]
     with pytest.raises(NotAuthenticated):
         service.authenticate(token)
+
+
+@pytest.mark.parametrize("login_name", ["demo_client_01", "nobody"])
+def test_full_hashing_slots_are_unavailable_not_wrong_password(login_name: str) -> None:
+    # C1 (PR #18): the concurrency cap must not be reported as invalid credentials.
+    service, _, _, hasher = build_service()
+    hasher.busy = True
+    with pytest.raises(AuthUnavailable):
+        service.login(login_name, PASSWORD)

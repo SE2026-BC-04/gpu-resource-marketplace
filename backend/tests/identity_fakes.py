@@ -2,14 +2,14 @@
 
 from uuid import UUID
 
-from gpu_marketplace.identity.passwords import ScryptPasswordHasher
+from gpu_marketplace.identity.passwords import PasswordHashingBusy, ScryptPasswordHasher, ScryptProfile
 from gpu_marketplace.identity.ports import AccountRecord, AccountStoreUnavailable
 from gpu_marketplace.identity.service import AuthService
 from gpu_marketplace.identity.tokens import AccessTokenCodec
 
 SECRET = b"t" * 32
 T0_US = 1_792_041_000_123_456
-HASHER = ScryptPasswordHasher(n=2**10, r=8, p=1)
+HASHER = ScryptPasswordHasher(profile=ScryptProfile(n=2**10, r=8, p=1))
 
 C1 = UUID("8bf66294-daf8-42fa-a167-50a3a43b7b66")
 W1 = UUID("0cbce840-2b5b-4eb8-83dc-968e5d47871b")
@@ -81,14 +81,19 @@ class SpyHasher:
 
     def __init__(self) -> None:
         self.burned = 0
+        self.busy = False
 
     def hash_password(self, password: str) -> str:
         return HASHER.hash_password(password)
 
     def verify_password(self, password: str, encoded: str) -> bool:
+        if self.busy:
+            raise PasswordHashingBusy()
         return HASHER.verify_password(password, encoded)
 
     def burn_verification(self, password: str) -> None:
+        if self.busy:
+            raise PasswordHashingBusy()
         self.burned += 1
         HASHER.burn_verification(password)
 

@@ -11,13 +11,18 @@ from fastapi import HTTPException, Request
 
 from gpu_marketplace.identity.principal import AuthenticatedPrincipal
 from gpu_marketplace.identity.service import AuthService, AuthUnavailable, NotAuthenticated
+from gpu_marketplace.identity.tokens import MAX_TOKEN_LENGTH
 
 BEARER_CHALLENGE = {"WWW-Authenticate": "Bearer"}
 
 
 def bearer_token(authorization: str | None) -> str | None:
-    """Return the token of ``Authorization: Bearer <token>`` or None for any other shape."""
-    if authorization is None:
+    """Return the token of ``Authorization: Bearer <token>`` or None for any other shape.
+
+    C4 (PR #18): a token over MAX_TOKEN_LENGTH or with non-ASCII characters is refused here,
+    before the codec, so oversized headers never reach base64/JSON parsing.
+    """
+    if authorization is None or len(authorization) > MAX_TOKEN_LENGTH + len("Bearer ") or not authorization.isascii():
         return None
     scheme, separator, token = authorization.partition(" ")
     if not separator or scheme.lower() != "bearer" or not token or " " in token:
