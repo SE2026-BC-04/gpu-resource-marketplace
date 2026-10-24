@@ -13,6 +13,8 @@ A rejection is SQLSTATE 23000 with CONSTRAINT set to the trigger name and ``job_
 as the message (D10). TRUNCATE does not fire row-level DELETE triggers; only the owner may use it,
 on test databases (schema matrix section 9).
 
+The trigger function is not executable by PUBLIC (schema matrix 6.2); firing a trigger needs no EXECUTE.
+
 Revision ID: 0004_phase1b_jobs_guard_delete
 Revises: 0003_phase1b_jobs_guard_update
 Create Date: 2026-10-24
@@ -47,6 +49,8 @@ $guard$
 
 def upgrade() -> None:
     op.execute(FUNCTION)
+    # Schema matrix 6.2: trigger functions are not executable by PUBLIC. Firing the trigger needs no EXECUTE.
+    op.execute("REVOKE EXECUTE ON FUNCTION fn_jobs_guard_delete() FROM PUBLIC")
     op.execute(
         "CREATE TRIGGER trg_jobs_guard_delete BEFORE DELETE ON jobs "
         "FOR EACH ROW EXECUTE FUNCTION fn_jobs_guard_delete()"
