@@ -2,8 +2,10 @@
 
 Second layer behind the grants: no runtime role holds DELETE or TRUNCATE on ``jobs`` (D1), and this
 row-level trigger refuses, for every caller including the owner, the deletion of a Job that is not
-terminal, has no ``terminal_at``, or became terminal less than 23 days ago. The cutoff is half-open:
-deletion is allowed from ``terminal_at + 23 days`` onwards, measured with ``clock_timestamp()`` (D6).
+terminal, has no ``terminal_at``, or became terminal less than 23 x 24 elapsed hours ago (NFR BL-02). The
+cutoff is half-open: deletion is allowed from ``terminal_at + interval '552 hours'`` onwards, measured with
+``clock_timestamp()`` (D6). It is written in hours, not ``'23 days'``: adding days to a ``timestamptz`` follows the
+session time zone, so across a daylight saving change the window would be one hour short or long.
 The cascade to ``simulation_references`` only happens when the trigger lets the row go.
 
 The OPEN Dispute condition cannot exist yet because Phase 1B has no ``disputes`` table; a Phase 3
@@ -37,7 +39,7 @@ AS $guard$
 BEGIN
     IF OLD.status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
        OR OLD.terminal_at IS NULL
-       OR clock_timestamp() < OLD.terminal_at + interval '23 days' THEN
+       OR clock_timestamp() < OLD.terminal_at + interval '552 hours' THEN
         RAISE EXCEPTION 'job_delete_not_eligible'
             USING ERRCODE = 'integrity_constraint_violation', CONSTRAINT = 'trg_jobs_guard_delete';
     END IF;

@@ -132,6 +132,35 @@ def test_a_terminal_job_at_least_23_days_old_can_be_deleted(conn: Connection, st
     assert not exists(conn, "jobs", "id", job_id)
 
 
+def posix_zone_with_dst_start(days_ago: int, connection: Connection) -> str:
+    """A POSIX time zone whose daylight saving time started ``days_ago`` days before the database's today.
+
+    ``Jn`` counts days 1..365 and never Feb 29, so the leap day is skipped the same way.
+    """
+    day = connection.execute(text("SELECT current_date - :days"), {"days": days_ago}).scalar_one()
+    julian = day.timetuple().tm_yday
+    if day.year % 4 == 0 and (day.year % 100 != 0 or day.year % 400 == 0) and day.month > 2:
+        julian -= 1
+    end = (julian - 60 - 1) % 365 + 1  # DST ends 60 days before it starts, far outside the 23-day window
+    return f"XST0XDT,J{julian}/0,J{end}/0"
+
+
+def test_the_cutoff_is_23_times_24_elapsed_hours_across_a_dst_change(conn: Connection) -> None:
+    # NFR BL-02: eligible 23 x 24 hours after terminal_at. Calendar-day arithmetic in a session time zone that
+    # moved its clocks forward inside the window would end the window one hour early.
+    zone = posix_zone_with_dst_start(10, conn)
+    conn.execute(text(f"SET LOCAL TIME ZONE '{zone}'"))
+    shift = conn.execute(
+        text("SELECT (clock_timestamp() - interval '552 hours') + interval '23 days' - clock_timestamp()")
+    ).scalar_one()
+    assert timedelta(minutes=-61) < shift < timedelta(minutes=-59)  # precondition: the zone really changed
+    young = make_job(conn, "COMPLETED", CUTOFF - timedelta(minutes=30))
+    old = make_job(conn, "COMPLETED", CUTOFF + MARGIN)
+    assert_refused(conn, young)
+    conn.execute(text("DELETE FROM jobs WHERE id = :id"), {"id": old})
+    assert not exists(conn, "jobs", "id", old)
+
+
 def test_an_eligible_delete_cascades_to_the_simulation_reference(conn: Connection) -> None:
     job_id = make_job(conn, "COMPLETED", CUTOFF + MARGIN)
     add_reference(conn, job_id)
