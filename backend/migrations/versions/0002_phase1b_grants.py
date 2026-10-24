@@ -19,7 +19,7 @@ Revision ID: 0002_phase1b_grants
 Revises: 0001_phase1b_baseline
 Create Date: 2026-10-24
 """
-from typing import Sequence, Union
+from typing import Mapping, Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -126,6 +126,43 @@ def require_groups(bind: sa.engine.Connection, groups: Sequence[str]) -> None:
             "missing database role group(s) "
             + ", ".join(missing)
             + ": run the role bootstrap (python -m gpu_marketplace.common.db_roles) before the migration"
+        )
+
+
+def require_login_roles(bind: sa.engine.Connection, logins: Mapping[str, str]) -> None:
+    """Stop unless every runtime login role exists, can log in and is a direct member of its group.
+
+    Groups created by hand without their login roles must not let this revision complete; the bootstrap creates
+    and verifies all four roles, so a failure here means it has not run or the roles were changed afterwards.
+    """
+    rows = bind.execute(
+        sa.text(
+            "SELECT r.rolname, r.rolcanlogin, "
+            "ARRAY(SELECT g.rolname FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid WHERE m.member = r.oid) "
+            "FROM pg_roles r WHERE r.rolname = ANY(:names)"
+        ),
+        {"names": list(logins)},
+    ).all()
+    found = {name: (can_login, set(groups)) for name, can_login, groups in rows}
+    missing = [login for login in logins if login not in found]
+    if missing:
+        raise RuntimeError(
+            "missing database login role(s) "
+            + ", ".join(missing)
+            + ": run the role bootstrap (python -m gpu_marketplace.common.db_roles) before the migration"
+        )
+    problems = []
+    for login, group in logins.items():
+        can_login, groups = found[login]
+        if not can_login:
+            problems.append(f"{login} must be a LOGIN role")
+        if group not in groups:
+            problems.append(f"{login} is not a member of {group}")
+    if problems:
+        raise RuntimeError(
+            "runtime login roles differ from the bootstrap definition: "
+            + "; ".join(problems)
+            + ". Fix them explicitly as the owner (the bootstrap reports drift without altering roles), then retry"
         )
 
 
@@ -257,6 +294,7 @@ def require_no_excess_privileges(bind: sa.engine.Connection, roles: Sequence[str
 def upgrade() -> None:
     bind = op.get_bind()
     require_groups(bind, (API_GROUP, MANAGER_GROUP))
+    require_login_roles(bind, {API_LOGIN: API_GROUP, MANAGER_LOGIN: MANAGER_GROUP})
     runtime_roles = (API_GROUP, MANAGER_GROUP, API_LOGIN, MANAGER_LOGIN)
     require_schema_closed(bind, runtime_roles)
 
