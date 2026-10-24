@@ -1,8 +1,8 @@
 # GPU Resource Marketplace - API Contract Design
 
-**Document version:** v0.7 — owner-approved `DEC-P1-03` Authentication profile synchronized; Markdown only<br>
+**Document version:** v0.8 — owner-approved `CR-GPU-003-UNICODE-01` login/password validation added on top of v0.7 (`DEC-P1-03` sync); Markdown only<br>
 **Date:** 2026-10-24<br>
-**Status:** **APPROVED_DESIGN** for the described API routes/DTOs, the 100 API contract-test IDs, and the owner-approved scope of `API-OPEN-01`, `API-OPEN-02`, and `API-OPEN-06` (2026-10-18). The additional JWT claim/header profile, fractional NumericDate representation and login-normalization repertoire were **owner-approved as `DEC-P1-03` on 2026-10-21** (recorded in [Phase 1 §6](../architecture/phases/phase1_project_foundation.md)) and are synchronized in §§4.5 and 14.3. ADR-008 Option B is **ACCEPTED** (2026-10-18). All implementation/API/database tests remain `NOT_RUN`; this document makes no claim that application code or migrations exist.
+**Status:** **APPROVED_DESIGN** for the described API routes/DTOs, the 100 API contract-test IDs, and the owner-approved scope of `API-OPEN-01`, `API-OPEN-02`, and `API-OPEN-06` (2026-10-18). The additional JWT claim/header profile, fractional NumericDate representation and login-normalization repertoire were **owner-approved as `DEC-P1-03` on 2026-10-21** (recorded in [Phase 1 §6](../architecture/phases/phase1_project_foundation.md)) and are synchronized in §§4.5 and 14.3. The L2 change `CR-GPU-003-UNICODE-01` (rejection of U+0000 and surrogate code points in `login_name`, safe Unicode password handling) was **owner-approved on 2026-10-24** ([#16](https://github.com/SE2026-BC-04/gpu-resource-marketplace/issues/16)) and is recorded in §§4.2, 4.5, 6 and 14.4. ADR-008 Option B is **ACCEPTED** (2026-10-18). All implementation/API/database tests remain `NOT_RUN`; this document makes no claim that application code or migrations exist.
 **Target repository path:** `docs/design/api-contract.md`  
 **Output scope:** Markdown documentation only; no source code, SQL migration, OpenAPI generator, Docker file, or CI workflow.  
 **Product scope:** Real GPU Marketplace simulation-only MVP. NOT the separate AD-090 assignment variant.
@@ -11,7 +11,7 @@
 
 ### 1.1 Goal for this iteration
 
-Define a reviewable API interface against the **approved 18-table Database Design** without silently changing business rules or runtime responsibilities. v0.1 specified common conventions and Authentication/RBAC; v0.2 recorded the **approved 15-minute stateless access-token decision** and designed **Worker GPU Listings** contracts. v0.3 drafted the remaining API groups; v0.4 records their acceptance as a design baseline. v0.5 synchronized the owner's approval of the broad JWT policy, trimmed case-sensitive login matching, and exact `simulation_input` allowlist. v0.6 separates those approved decisions from extra Authentication details that still need owner review. v0.7 records the owner's later approval of those extra details (`DEC-P1-03`, 2026-10-21) without changing their technical content. No endpoint or test is claimed implemented or verified.
+Define a reviewable API interface against the **approved 18-table Database Design** without silently changing business rules or runtime responsibilities. v0.1 specified common conventions and Authentication/RBAC; v0.2 recorded the **approved 15-minute stateless access-token decision** and designed **Worker GPU Listings** contracts. v0.3 drafted the remaining API groups; v0.4 records their acceptance as a design baseline. v0.5 synchronized the owner's approval of the broad JWT policy, trimmed case-sensitive login matching, and exact `simulation_input` allowlist. v0.6 separates those approved decisions from extra Authentication details that still need owner review. v0.7 records the owner's later approval of those extra details (`DEC-P1-03`, 2026-10-21) without changing their technical content. v0.8 adds the owner-approved change `CR-GPU-003-UNICODE-01` (2026-10-24): login names containing U+0000 or a surrogate code point are rejected before any database access, and passwords are handled without Unicode-encoding failures or truncation; `DEC-P1-03` semantics are unchanged. No endpoint or test is claimed implemented or verified.
 
 ### 1.2 Design and review workflow
 
@@ -130,13 +130,14 @@ All controlled public HTTP errors return this **candidate** structure (fields no
 | Access | Public (unauthenticated request allowed) |
 | Owner / reads | API Identity; `users` + `user_roles` (`roles` catalog) |
 | Body | Required `login_name` and `password` strings; no `role` or `user_id` accepted |
-| Input validation | `login_name` length 1..128 after applying the owner-approved surrounding-whitespace trim rule; `password` nonempty; malformed JSON or unexpected fields -> `400`; missing/empty/wrong-type required fields -> `422`; the trim set is exactly ASCII SP/HT/LF/CR (`DEC-P1-03`, §4.5) |
-| Login name matching | Trim only ASCII SP/HT/LF/CR at both ends and match case-sensitively; keep U+00A0 and other Unicode whitespace; apply no NFC/NFD normalization or case folding; seeding/provisioning and Login use the same approved rule (`API-OPEN-02` + `DEC-P1-03`, §4.5) |
-| Authentication | Verify password against stored **hash**, require `users.status='ACTIVE'` and exactly one valid assigned role; never compare/store plaintext password |
+| Input validation | `login_name` length 1..128 after applying the owner-approved surrounding-whitespace trim rule; `password` nonempty; malformed JSON or unexpected fields -> `400`; missing/empty/wrong-type required fields -> `422`; the trim set is exactly ASCII SP/HT/LF/CR (`DEC-P1-03`, §4.5); a `login_name` containing U+0000 or any surrogate code point U+D800..U+DFFF -> `422`, decided **before any database query** (`CR-GPU-003-UNICODE-01` R1) |
+| Login name matching | Trim only ASCII SP/HT/LF/CR at both ends and match case-sensitively; keep U+00A0 and other Unicode whitespace; apply no NFC/NFD normalization or case folding; accept otherwise-valid Unicode, including supplementary (non-BMP) code points; seeding/provisioning and Login use the **same** pure validation/normalization implementation in `identity/`, never a duplicate (`API-OPEN-02` + `DEC-P1-03`, §4.5; `CR-GPU-003-UNICODE-01` R2, R6) |
+| Authentication | Verify password against stored **hash**, require `users.status='ACTIVE'` and exactly one valid assigned role; never compare/store plaintext password. The password is never trimmed or normalized; U+0000 in a password is **not** rejected or truncated, and the exact password bytes are hashed and compared (R4). A password containing an unencodable surrogate code point returns the same generic `401 INVALID_CREDENTIALS` as a wrong password, never `500` (R3) |
 | Success | `200 OK`, `Cache-Control: no-store`, response JSON containing authenticated `user` and credential info (shape below) |
 | Wrong name/password/disabled account | `401 INVALID_CREDENTIALS` with the same generic message; do not reveal which condition failed |
 | Corrupt or missing role mapping | Refuse login; log redacted server-side failure and fail closed; never guess role or default to Admin |
 | Side effects | No GPU/Job/Worker/Reputation effect; optionally one sanitized audit event |
+| Error redaction | No raw `login_name`, password, password hash, token or driver/Unicode exception text in any public response or log (`CR-GPU-003-UNICODE-01` R5) |
 
 **Proposed request:**
 
@@ -216,6 +217,8 @@ An end-user token's role claim, if one exists, is not permission to ignore the a
 
 **Login normalization repertoire — APPROVED (`DEC-P1-03`, 2026-10-21):** the owner first approved trimming surrounding whitespace, case-sensitive matching, and applying one consistent rule to seeded/provisioned names and Login (`API-OPEN-02`), then approved the exact repertoire: trim ASCII space, tab, line feed, and carriage return only; preserve other Unicode whitespace (including U+00A0) as part of the name; do not apply NFC/NFD or case folding. This avoids silently treating all Unicode whitespace as trim characters.
 
+**Unstorable code points — APPROVED (`CR-GPU-003-UNICODE-01`, 2026-10-24, [#16](https://github.com/SE2026-BC-04/gpu-resource-marketplace/issues/16)):** PostgreSQL `text`/`varchar` cannot store U+0000, and surrogate code points U+D800..U+DFFF (which a JSON `\u` escape can produce) cannot be encoded as UTF-8. A `login_name` containing either is therefore rejected with `422` at the application boundary, before any database query, by the same `identity/` function used for provisioning. This adds a rejection only; the `DEC-P1-03` trim, case and no-normalization rules above are unchanged, and every other valid Unicode character, including supplementary code points, remains part of the name.
+
 ## 5. Authorization and error decision matrix (APPROVED_DESIGN)
 
 | Caller / action | Login | `/auth/me` | Worker-only mutation | Client-only mutation | Admin dashboard read | Internal dispatch/callback |
@@ -243,8 +246,8 @@ The planned resource mutations in this table are **authorization requirements**,
 | ID | Action | Binary PASS oracle | Prerequisite |
 |---|---|---|---|
 | `API-AUTH-01-ROLES` | Login separately with valid C1/W1/A1 canonical credentials; repeat C1 with the same login surrounded by U+0020 spaces; seed/provision a whitespace-wrapped C1 name and login with its canonical form; try a U+0020-only login and a mixed-case variant | Canonical and U+0020-wrapped C1 requests return `200` with the same C1 identity; provisioning and Login resolve the same canonical name; U+0020-only input returns `422` after trim; mixed-case variant returns generic `401`; three role identities match DB; 0 secret fields in replies | Owner-approved trim/case/seed consistency rules; Unicode-specific subcases below follow `DEC-P1-03` |
-| `API-AUTH-02-GENERIC-FAIL` | Unknown login, wrong password and disabled D1 with otherwise valid password | All return `401 INVALID_CREDENTIALS` with equivalent public message; 0 role or account existence disclosure | Auth decision accepted |
-| `API-AUTH-03-BAD-BODY` | Missing `login_name`, empty password, malformed JSON and injected `role='ADMIN'` in login body | Malformed JSON and injected unknown `role` -> `400`; missing `login_name` or empty `password` -> `422`; no account/role mutation | Validation contract approved |
+| `API-AUTH-02-GENERIC-FAIL` | Unknown login, wrong password and disabled D1 with otherwise valid password; valid C1 `login_name` with a password containing a lone surrogate code point; an account provisioned with a password containing U+0000 (for example `ab` U+0000 `cd`), logging in with the exact password and with the prefix `ab` | All failures return `401 INVALID_CREDENTIALS` with equivalent public message, including the surrogate password (never `500`); 0 role or account existence disclosure; the exact NUL-containing password returns `200` and the prefix `ab` returns `401`, proving no truncation (`CR-GPU-003-UNICODE-01` R3, R4) | Auth decision accepted; CR approved 2026-10-24 |
+| `API-AUTH-03-BAD-BODY` | Missing `login_name`, empty password, malformed JSON and injected `role='ADMIN'` in login body; `login_name` containing U+0000 at the start, middle and end; `login_name` containing a lone high surrogate, a lone low surrogate, or two surrogate code points | Malformed JSON and injected unknown `role` -> `400`; missing `login_name` or empty `password` -> `422`; every U+0000 or surrogate `login_name` -> `422` with **0 database queries**, no echo of the input in body or logs, and no `500`/encoding exception; no account/role mutation (`CR-GPU-003-UNICODE-01` R1, R5) | Validation contract approved; CR approved 2026-10-24 |
 | `API-AUTH-04-ME-OWN` | GET `/auth/me` with valid C1 credential | `200` and C1 identity only; no password hash/token contents, other users or secrets | Auth decision accepted |
 | `API-AUTH-05-NO-AUTH` | GET `/auth/me` without a credential; with malformed/tampered JWT; with `exp` changed to a future value while keeping the original signature; with an unsupported signing algorithm such as `none` or `HS384`; or with a correctly signed token whose `typ`, `iss` or `aud` differs from §4.5 or whose `sub` is not a UUID; or with a correctly signed token that omits `typ`, `iss`, `aud` or `sub`, or carries a header/claim with the wrong JSON type (for example a numeric `sub`, a non-string `iss`/`aud`/`typ`, or a string `iat`/`exp`) | `401` for every invalid credential, including the modified-`exp` token, any `alg` other than HS256 and every `DEC-P1-03` header/claim mismatch, omission or type error; no identity body | Owner-approved HS256, expiry policy and `DEC-P1-03` profile |
 | `API-AUTH-06-EXPIRED` | Issue token at trusted fake `T0`; call `/auth/me` at `T0+899.999999s` and `T0+900.000000s` | Approved oracle: reject at exactly `now >= exp` with no tolerance; with the approved microsecond NumericDate representation in §4.5, `+899.999999s` returns `200` and `+900.000000s` returns `401` | Exact 900-second policy and `DEC-P1-03` NumericDate representation APPROVED; test `NOT_RUN` |
@@ -264,6 +267,8 @@ The planned resource mutations in this table are **authorization requirements**,
 - **Unicode whitespace (`U+00A0` NO-BREAK SPACE):** fixture uses `\u00A0demo_client\u00A0` against a seeded canonical ASCII `demo_client`. Approved oracle (`DEC-P1-03` ASCII-only trim, §4.5): U+00A0 is part of the login name, so the request returns generic `401`, not `200`.
 - **Unicode normalization-sensitive name:** seed the exact precomposed `caf\u00E9` login and verify that exact sequence succeeds. Approved oracle (`DEC-P1-03` no-normalization rule): decomposed `cafe\u0301` is a distinct name and returns generic `401`; no NFC/NFD equivalence is assumed.
 - **Provisioning/Login consistency:** apply the same normalization function once when writing the seeded `users.login_name` and when parsing Login input. A seed input of `  demo_client  ` and login input `demo_client` must resolve to the same account; the same oracle applies to HT, LF and CR at either end, and not to any other character.
+- **Supplementary and precomposed names (`CR-GPU-003-UNICODE-01` R6):** seed a login containing a non-BMP character (for example U+1F600) and a precomposed Vietnamese name; the exact sequences succeed, length is counted in code points (128 non-BMP characters are accepted, 129 are rejected with `422`).
+- **Provisioning rejects unstorable names (R2):** the provisioning path, using the same `identity/` function, refuses a seed `login_name` containing U+0000 or a surrogate code point and writes nothing to the database.
 
 ## 7. Worker GPU Listings contract (v0.2 design baseline; tests `NOT_RUN`)
 
@@ -866,6 +871,21 @@ These choices were not covered by the 2026-10-18 decisions or by ADR-008. The ow
 | Fractional NumericDate representation | **APPROVED (`DEC-P1-03`)**: trusted UTC `iat`/`exp` as JSON NumericDate numbers with six decimal places, exact microsecond comparison, `exp=iat+900.000000`, and no truncation, rounding, or expiry tolerance. RFC 7519 permits non-integer NumericDate values; see §4.5. | Authentication implementation and `API-AUTH-06` |
 | Login whitespace and Unicode normalization | **APPROVED (`DEC-P1-03`)**: trim ASCII SP/HT/LF/CR only, preserve other Unicode whitespace, apply no NFC/NFD normalization, and keep case-sensitive matching. U+00A0 and composed/decomposed fixture oracles are documented under the existing `API-AUTH-01-ROLES` ID. | Authentication implementation, provisioning and `API-AUTH-01` |
 
+### 14.4. `CR-GPU-003-UNICODE-01` — APPROVED (2026-10-24)
+
+L2 change requested by TV2 during cross-phase ACK `XPH-GPU-003-02`, recorded in [#16](https://github.com/SE2026-BC-04/gpu-resource-marketplace/issues/16) and approved by the team lead ([decision](https://github.com/SE2026-BC-04/gpu-resource-marketplace/issues/16#issuecomment-6373492816)). The approval covers R1–R6 below only; it does not approve the password-hash parameters, JWT implementation, issuance clock or token-size limit, which are reviewed separately.
+
+| Rule | Approved behavior | Oracle |
+|---|---|---|
+| R1 | `login_name` containing U+0000 or any surrogate code point U+D800..U+DFFF -> `422`, before any database query | `API-AUTH-03` |
+| R2 | Login and account provisioning use the same pure validation/normalization implementation in `identity/`; no duplicate logic | `API-AUTH-01`, GPU-002 provisioning suite |
+| R3 | Password containing an unencodable surrogate -> generic `401 INVALID_CREDENTIALS`, never `500` or a password-revealing error | `API-AUTH-02` |
+| R4 | U+0000 in a password is neither rejected nor truncated; exact password bytes are hashed and compared | `API-AUTH-02` |
+| R5 | No raw input, hash, token or driver exception in public responses or logs | `API-AUTH-02`, `API-AUTH-03`, `API-AUTH-13` |
+| R6 | `DEC-P1-03` unchanged: ASCII SP/HT/LF/CR edge trim only, case-sensitive, no NFC/NFD or case folding; other valid Unicode, including supplementary code points, accepted | `API-AUTH-01` |
+
+No database schema or migration changes; the existing ASCII seed fixture is unaffected. Route-level evidence (HTTP `422`/`401`, no database access for an invalid `login_name`, redaction, shared provisioning function) remains `NOT_RUN` until the Auth endpoints and provisioning are integrated; unit tests alone do not make these oracles PASS.
+
 ## 15. Traceability: API contract → requirements → storage/transactions → test evidence
 
 | Requirements / policy | API section(s) | Owning database/transaction | Proposed validation |
@@ -882,7 +902,7 @@ These choices were not covered by the 2026-10-18 decisions or by ADR-008. The ow
 
 ## 16. Review record and handoff — documentation only
 
-| Item | Status at v0.7 (2026-10-24) |
+| Item | Status at v0.8 (2026-10-24) |
 |---|---|
 | Logical/physical/transaction Database Design (18 tables) | **APPROVED_DESIGN**; no SQL migration run |
 | Stateless HS256 JWT / 900-second lifetime / volatile-memory storage / no refresh and no server-side Logout revocation | **APPROVED_DESIGN** at the owner-approved policy scope |
@@ -890,7 +910,8 @@ These choices were not covered by the 2026-10-18 decisions or by ADR-008. The ow
 | Internal HTTP dispatch / callback | **APPROVED_DESIGN**; exact `simulation_input` allowlist is `{ "workload_profile": "demo-v1" }`; ADR-004 V1 remains authoritative |
 | Resolved API decisions | `API-OPEN-01/02/06` **APPROVED (2026-10-18)** at their scopes in §14.2 and recorded in this synchronization |
 | Additional Authentication profile details | **APPROVED as `DEC-P1-03` (2026-10-21)**; synchronized in §§4.5 and 14.3 at v0.7 |
+| Login/password Unicode validation | **APPROVED as `CR-GPU-003-UNICODE-01` (2026-10-24)**; recorded in §§4.2, 4.5, 6 and 14.4 at v0.8; route-level tests `NOT_RUN` |
 | ADR-008 technology stack | **ACCEPTED (2026-10-18)** in its own ADR; no implementation/test evidence |
 | Actual API code, DB migrations, test runners, benchmarks | **NOT_STARTED / NOT_RUN**; this document records design only |
 
-**Handoff:** `API-OPEN-01/02/06` are resolved at the owner-approved scope in §14.2, and the extra Auth profile details in §§4.5 and 14.3 are resolved by `DEC-P1-03`. Any implementation must follow a separately authorized coding slice and the normal branch/PR gates. This document approval validates design text, not executable behavior or measured performance.
+**Handoff:** `API-OPEN-01/02/06` are resolved at the owner-approved scope in §14.2, and the extra Auth profile details in §§4.5 and 14.3 are resolved by `DEC-P1-03`; `CR-GPU-003-UNICODE-01` (§14.4) adds the approved NUL/surrogate validation. Any implementation must follow a separately authorized coding slice and the normal branch/PR gates. This document approval validates design text, not executable behavior or measured performance.
