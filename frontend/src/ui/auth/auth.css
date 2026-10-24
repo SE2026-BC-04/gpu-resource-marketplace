@@ -8,6 +8,8 @@
 .auth-account button { justify-self: start; margin-top: 6px; padding: 10px 18px; border: 0; border-radius: 10px; color: #0d1524; background: #88b7ff; font: inherit; font-weight: 700; cursor: pointer; }
 .auth-form button:disabled,
 .auth-account button:disabled { opacity: 0.6; cursor: progress; }
+.auth-actions { display: flex; gap: 10px; }
+.auth-form .auth-secondary { color: #e8eef9; background: transparent; border: 1px solid #3b4d68; }
 .auth-error { margin: 0; color: #ffb4b4; font-size: 0.95rem; }
 .auth-notice { margin: 0; color: #b4f4d5; font-size: 0.95rem; }
 .auth-account dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }

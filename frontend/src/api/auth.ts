@@ -29,7 +29,15 @@ const messages: Record<string, string> = {
   UNAUTHORIZED: "Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.",
   DEPENDENCY_UNAVAILABLE: "Dịch vụ tạm thời chưa sẵn sàng. Hãy thử lại sau.",
   NETWORK_ERROR: "Không kết nối được máy chủ. Kiểm tra mạng và thử lại.",
+  TIMEOUT: "Máy chủ không phản hồi. Vui lòng thử lại.",
+  // /me rejected a token Login had just issued; "session expired" would be misleading here.
+  SIGN_IN_UNCONFIRMED: "Không xác nhận được tài khoản. Vui lòng đăng nhập lại.",
 };
+
+/** DOMException is not an Error subclass in every runtime (jsdom), so match the name only. */
+export function isAbortError(error: unknown): boolean {
+  return (error as { name?: unknown } | null)?.name === "AbortError";
+}
 
 export class AuthApiError extends Error {
   constructor(public readonly code: string, public readonly status: number, public readonly requestId?: string) {
@@ -81,8 +89,7 @@ export function createAuthApi(fetcher: typeof fetch = fetch): AuthApi {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     } catch (error) {
-      // DOMException is not an Error subclass in every runtime, so match the name only.
-      if (signal?.aborted || (error as { name?: unknown } | null)?.name === "AbortError") throw error;
+      if (signal?.aborted || isAbortError(error)) throw error;
       throw new AuthApiError("NETWORK_ERROR", 0);
     }
   }
