@@ -2,12 +2,13 @@
 
 Status: **core/router/UI on `feat/gpu-004-listings`; real Auth dependency connected;
 PostgreSQL/shared-app integration BLOCKED**.
-Baseline: `main@028c355` (25/10/2026). The user explicitly authorized GPU-004 coding.
+Baseline: `main@6434ee3` (25/10/2026, PR #27 D1 and PR #26 session UI merged).
+The user explicitly authorized GPU-004 coding.
 This does not claim that the complete Phase 1D acceptance gates have passed.
 GPU-002-B now supplies ORM mappings and migration `0001_phase1b_baseline`, but
 Listing repositories/UoW are not handed off. GPU-003 core and Auth routes are on
-this baseline; the PostgreSQL account reader in PR #25 and session UI in PR #26
-remain separate, unmerged prerequisites at this review.
+this baseline, including the volatile session store. The PostgreSQL account
+reader in PR #25 is still Draft/unmerged at this review; Listing UoW/D7 are not delivered.
 
 ## Implemented scope
 
@@ -24,12 +25,18 @@ remain separate, unmerged prerequisites at this review.
 - HMAC-authenticated keyset cursors bound to scope/filter and the trusted actor for `mine`.
 - React `ListingsPage`, create/edit form, detail, filters, paging, status actions,
   loading/empty/error states, duplicate-submit protection and request cancellation.
+- `createSessionListingsApi` and `SessionListingsPage` consume GPU-003's real
+  SessionStore, preserving the sent-token guard and stable API instance.
+- Trusted middleware request IDs are reused; absent/invalid state gets a fresh
+  server UUIDv4. Incoming client request-ID headers are never trusted.
 
 ## Required owner handoffs
 
 `ports.py` contains **GPU-004 consumption interfaces**, not an implementation of
-GPU-002 persistence or a claim that GPU-002 has approved these exact signatures.
-TV2/TV3 and the shared integration owner must review the adapters before integration.
+GPU-002 persistence. [TV2 ACK_WITH_ACTIONS on `f7d3c0d`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6388130749)
+confirmed these ports and service usage; they remain unchanged. This is not a
+delivered adapter or PostgreSQL Listing test PASS. TV3 also
+[confirmed the Auth connection](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6389075737).
 
 | Owner | Required implementation / evidence |
 |---|---|
@@ -39,8 +46,9 @@ TV2/TV3 and the shared integration owner must review the adapters before integra
 | TV2/TV3/leader | Resolution of the documented Auth sync/provisioning gates and applicable D1–D12 decisions/ACKs |
 
 The production `api/app.py` and frontend `App.tsx` are intentionally not changed:
-their ownership is shared and required DB adapters/configuration are absent. The foundation page
-therefore remains the default application screen. Do not mount test doubles,
+their ownership is shared and required DB adapters/configuration are absent. The
+merged GPU-003 Login-first shell remains the default screen, without Listings.
+Do not mount test doubles,
 accept a user/role header as authentication, or use a privileged DB connection as
 a substitute for the missing runtime adapters.
 
@@ -88,8 +96,10 @@ human review, or close shared-app/PostgreSQL/E2E gates.
 
 TV4's [D1 ACK on PR #27 at `ab32545`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/27#issuecomment-6387610827)
 is `ACK_WITH_ACTIONS`: the column grants match these consumption requirements,
-but real restricted-role/UoW/timestamp tests remain open. D1 is not activated by
-this branch. A joined projection must lock only the Listing row, not every
+but real restricted-role/UoW/timestamp tests remain open. D1 revision `0002` is
+now on the merged baseline (`2b9a4c7` hardens membership options without changing
+Listing column grants); no local migration or runtime-DSN activation was done.
+A joined projection must lock only the Listing row, not every
 read-only joined table. Do not broaden API timestamp/counter grants to make an
 adapter pass.
 
@@ -119,13 +129,28 @@ It is not a JWT implementation. Never hardcode a production signing key.
 
 ### Frontend wiring (GPU-003 / shared-shell task)
 
-Import `createListingsApi` from `frontend/src/api/listings.ts` and
-`ListingsPage` from `frontend/src/ui/listings/ListingsPage.tsx`.
-Construct a stable API instance with the actual volatile token getter and the
-existing session-clear handler. Supply `session={user ? {userId: user.id,
-role: user.role} : null}` and `api={listingsApi}` to the page. No token is stored
-in browser storage, cookies or URLs. An old request's 401 cannot clear a newer
-session's different token.
+Mount `SessionListingsPage` from
+`frontend/src/ui/listings/SessionListingsPage.tsx` with the **same** SessionStore
+instance already passed to `App`: `<SessionListingsPage session={session} />`.
+The component subscribes to the real store, creates a stable auth-aware API, maps
+`state.user.id/role`, and supplies null when signed out. Logout/expiry unmounts
+the protected workspace. The generic `ListingsPage`/`createListingsApi` remain
+available; `createSessionListingsApi(session)` implements the bridge agreed in
+GPU-003 handoff §9. No token is persisted; current 401 clears the store, old 401
+does not clear a newer token, and 403 keeps the session. This leaf component is
+ready for integrator review, **not mounted into the shared shell by this change**.
+
+### Remaining HTTP security decision
+
+Pause/resume reuse GPU-003's `require_empty_body`: nonzero declared length or the
+first nonempty chunk is rejected without buffering the rest. Parser
+`RecursionError` maps to safe 400 INVALID_JSON. These preserve existing contracts.
+
+**POST/PATCH byte/depth bounds remain an open P1 integration blocker.** API
+Contract §14.5 approves 16 KiB/depth 8 for Auth only, not Listings. GPU-004 does
+not silently apply those values to Listings or claim bounded create/PATCH
+reading is complete. The lead must approve the endpoint limits/error/order and
+the design-update path before that normative behavior is implemented.
 
 ## Verification and limits
 
@@ -149,15 +174,16 @@ The HTTP contract tests instantiate a real FastAPI router with an explicitly
 **test-only** transactional double and server-injected principal.
 `test_auth_integration.py` instead uses the real GPU-003 AccessTokenCodec,
 AuthService and principal dependency, with account/Listing persistence doubles.
-The React tests inject a test API. These are not PostgreSQL, production
-frontend-shell or cross-process E2E acceptance evidence. The normal
-frontend build still builds the foundation shell; TypeScript and RTL tests
-compile/render the separate Listings component.
+The new session consumer tests use the real store/client/component with fake
+Auth HTTP/fetch/clock; other React tests inject a test API. These are not
+PostgreSQL, production-shell or cross-process E2E evidence. The normal build
+builds the merged Login-first shell; RTL also renders the separate Listings component.
 
-Observed on 25/10/2026 after syncing `main@028c355`: backend **491 passed / 58
-skipped**, including **201** Listings tests (**65** real-Auth/double-persistence
-consumer tests); frontend **27 passed**, TypeScript and Vite build
-passed. The 58 skipped tests are upstream PostgreSQL checks without a configured
+Observed on 25/10/2026 after syncing `main@6434ee3`: backend **537 passed / 132
+skipped**, including **238** Listings tests (**65** real-Auth/double-persistence
+consumer tests and **37** ASGI correlation/body tests); frontend **102 passed**,
+including **9** real-session Listings consumer cases. TypeScript and Vite build
+passed. The 132 skipped tests are upstream PostgreSQL checks without a configured
 disposable cluster, not successful DB tests. Python 3.12.14 and Node 24.19.0 were
 used with existing lockfiles. Real-Auth cases cover valid JWTs, missing/tampered/
 expired credentials, signed missing/ill-typed claims, fresh account/role changes,
@@ -177,10 +203,10 @@ submit/allocation/FIFO races; persistent DB audit integration where applicable;
 browser-to-real-API E2E and the benchmark. Keep Phase 1D out of `IMPLEMENTED`.
 
 [TV4 environment inventory](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/22#issuecomment-6387611172):
-Docker/WSL engine stopped, no reachable local project DB verified. Old volumes,
-historical/remote DB use and actual Alembic revision remain NOT_VERIFIED; no
-migration/recovery action was performed. A stopped engine does not prove that
-no persistent DB exists.
+Docker engine still stopped; no test-cluster configuration or local DB testing.
+TV4 explicitly confirmed never using DB/Alembic for this project: D1 recovery is
+not required based on that reported history. No physical old-volume inspection,
+live revision query or migration/recovery action was performed.
 
 ## When GPU-002/GPU-003 are ready
 

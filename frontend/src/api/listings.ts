@@ -1,4 +1,5 @@
 import { config } from "../config";
+import type { SessionStore } from "./session";
 
 export type UserRole = "CLIENT" | "WORKER" | "ADMIN";
 export type ListingStatus = "ACTIVE" | "PAUSED";
@@ -160,4 +161,17 @@ export function createListingsApi(
     async pause(id, signal) { return listing(await request(`${resource(id)}/pause`, "POST", undefined, signal)); },
     async resume(id, signal) { return listing(await request(`${resource(id)}/resume`, "POST", undefined, signal)); },
   };
+}
+
+/** Bridge agreed with GPU-003-D; the shell and Listings must share this store. */
+export function createSessionListingsApi(session: SessionStore, fetcher: typeof fetch = fetch): ListingsApi {
+  return createListingsApi(
+    () => session.getAccessToken(),
+    () => {
+      // Runs synchronously after createListingsApi's sent-token/current-token guard.
+      const current = session.getAccessToken();
+      if (current !== null) session.handleUnauthorized(current);
+    },
+    fetcher,
+  );
 }

@@ -19,6 +19,11 @@ from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
 from gpu_marketplace.identity.dependencies import create_principal_dependency
+from gpu_marketplace.identity.request_body import (
+    InvalidBody,
+    UnexpectedBody,
+    require_empty_body,
+)
 from gpu_marketplace.identity.service import AuthService
 
 from .errors import ListingDependencyUnavailable, ListingError, invalid_fields
@@ -40,6 +45,19 @@ def _canonical_uuid_text(value: Any) -> str:
 ListingId = Annotated[UUID4, BeforeValidator(_canonical_uuid_text)]
 
 
+def _request_id(request: Request) -> str:
+    trusted = getattr(request.state, "request_id", None)
+    if isinstance(trusted, str):
+        try:
+            if str(UUID(trusted)) == trusted and UUID(trusted).version == 4:
+                return trusted
+        except ValueError:
+            pass
+    # Only server middleware state is trusted, never the incoming header.
+    request.state.request_id = str(uuid4())
+    return request.state.request_id
+
+
 def _error(request_id: str, status: int, code: str, message: str) -> JSONResponse:
     logger.info("listing_request_rejected", extra={"request_id": request_id})
     headers = {"X-Request-ID": request_id, "Cache-Control": "no-store"}
@@ -57,8 +75,7 @@ class ListingRoute(APIRoute):
         original = super().get_route_handler()
 
         async def handler(request: Request) -> Response:
-            # Never trust an incoming request ID as an actor or trusted correlation ID.
-            request_id = str(uuid4())
+            request_id = _request_id(request)
             try:
                 response = await original(request)
             except ListingError as exc:
@@ -126,7 +143,7 @@ async def _body(
             object_pairs_hook=_unique_object,
             parse_constant=_invalid_constant,
         )
-    except (ValueError, UnicodeError) as exc:
+    except (ValueError, UnicodeError, RecursionError) as exc:
         raise ListingError(400, "INVALID_JSON", "Invalid JSON request.") from exc
     if not isinstance(data, dict):
         raise invalid_fields()
@@ -213,10 +230,14 @@ def create_listing_router(
         listing_id: UUID4, request: Request, principal: TrustedPrincipal, target: str
     ) -> ListingDTO:
         require_worker(principal)
-        if await request.body():
+        try:
+            # The approved command body is empty. Reject declared content or the
+            # first nonempty chunk without buffering/consuming the rest.
+            await require_empty_body(request)
+        except (InvalidBody, UnexpectedBody) as exc:
             raise ListingError(
                 400, "INVALID_JSON", "This command does not accept a body."
-            )
+            ) from exc
         record = await run_in_threadpool(
             service.set_status, principal, listing_id, target
         )
