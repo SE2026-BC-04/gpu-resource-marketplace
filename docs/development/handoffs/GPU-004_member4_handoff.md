@@ -7,7 +7,7 @@
 > **Baseline thiết kế ban đầu:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b`
 > **Rà soát đồng bộ ngày 23/10/2026:** `main@538802adebeaeb74dcccd0c025f3a7abc81336c0` và handoff tại `ffb17de39d32956087aca187d490bb03c32ee980`; chỉ rà soát tài liệu, không xác nhận dependency đã sẵn sàng hay test ứng dụng đã chạy.
 > **Đối chiếu upstream ngày 24/10/2026:** `main@21071549937888c997b250625607a16a97a20419`; Phase 1D §2.1/§3.2 đã ghi điều kiện nhận DB/Auth và dùng chung fixture. Schema matrix GPU-002-A revision 3 vẫn `PROPOSED`, D1–D12 và `XPH-GPU-002-01` chưa đóng; không coi bản cập nhật này là ACK hoặc dependency đã triển khai.
-> **Baseline coding hiện tại:** `main@6434ee362eca264e8b34a2622c42ea65d4fefde3` (25/10/2026): #27 D1 và #26 session UI đã merge. Listing UoW/D7, account adapter #25 và shared wiring còn chờ; evidence mới ở Phase 1D §3.7. Không duyệt thay các quyết định còn mở.
+> **Baseline coding hiện tại:** `main@7fa6afc23542f508c9bc8f32b38f43ffbc35e909` (25/10/2026): code dependency từ `6434ee3` (#27 D1/#26 session UI); merge #19 mới hơn chỉ thêm docs GPU-005. Listing UoW/D7, account adapter #25 và shared wiring còn chờ; evidence ở Phase 1D §3.7. Không duyệt thay quyết định còn mở.
 > **Tài liệu:** [Phase 1D — GPU Listings Management](../../architecture/phases/phase1d_gpu_listings.md) — nguồn thiết kế chi tiết đã duyệt; trạng thái code/test được ghi riêng.
 > **Nguồn bắt buộc:** API Contract v0.9 §7; Database Design v0.4 §§9,11; Module Design; Test Design; Team Contribution Rules; Inter-Phase Change Control.
 

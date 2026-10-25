@@ -2,7 +2,8 @@
 
 Status: **core/router/UI on `feat/gpu-004-listings`; real Auth dependency connected;
 PostgreSQL/shared-app integration BLOCKED**.
-Baseline: `main@6434ee3` (25/10/2026, PR #27 D1 and PR #26 session UI merged).
+Baseline: `main@7fa6afc` (25/10/2026). Application dependencies come from
+`6434ee3` (PR #27 D1 / #26 session UI); the later #19 merge adds GPU-005 docs only.
 The user explicitly authorized GPU-004 coding.
 This does not claim that the complete Phase 1D acceptance gates have passed.
 GPU-002-B now supplies ORM mappings and migration `0001_phase1b_baseline`, but
