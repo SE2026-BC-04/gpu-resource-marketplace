@@ -43,8 +43,8 @@ delivered adapter or PostgreSQL Listing test PASS. TV3 also
 
 | Owner | Required implementation / evidence |
 |---|---|
-| GPU-002 / TV2 | Use the existing migration/ORM; still need PostgreSQL-backed UoW, Worker lookup, Listing repository and Job constraint reader, with runtime-role evidence |
-| GPU-003 / TV3 + TV2 | Canonical principal dependency is available and consumed; still need the reviewed PostgreSQL account adapter/provisioning and shared volatile session integration |
+| GPU-002 / TV2 owner, TV4 delegated R1 | Use the existing migration/ORM; TV4 implements PostgreSQL Listing UoW/readers in separate [PR #31](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31) under the [owner delegation](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6396462023). TV2 must validate exact-HEAD SQL/role/lock/rollback evidence; D7 is awaiting its separate design decision |
+| GPU-003 / TV3 + TV2 | Canonical principal dependency is consumed; PostgreSQL AccountReader #25 is merged/available. Provisioning, production AuthService wiring and shared-shell session integration are still pending |
 | Leader | Shared AuthService/engine/session/JWT-secret configuration, router registration in `api/app.py`, frontend shell mounting, cursor-key injection, request correlation and audit integration |
 | TV2/TV3/leader | Resolution of the documented Auth sync/provisioning gates and applicable D1–D12 decisions/ACKs |
 
