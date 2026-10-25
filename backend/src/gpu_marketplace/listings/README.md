@@ -2,14 +2,16 @@
 
 Status: **core/router/UI on `feat/gpu-004-listings`; real Auth dependency connected;
 PostgreSQL/shared-app integration BLOCKED**.
-Baseline: `main@7fa6afc` (25/10/2026). Application dependencies come from
-`6434ee3` (PR #27 D1 / #26 session UI); the later #19 merge adds GPU-005 docs only.
+Baseline: `main@ce99293` (25/10/2026), merged normally via `213455f` to receive
+PR #25's PostgreSQL AccountReader, following PR #27 D1 / #26 session UI.
 The user explicitly authorized GPU-004 coding.
 This does not claim that the complete Phase 1D acceptance gates have passed.
 GPU-002-B now supplies ORM mappings and migration `0001_phase1b_baseline`, but
 Listing repositories/UoW are not handed off. GPU-003 core and Auth routes are on
 this baseline, including the volatile session store. The PostgreSQL account
-reader in PR #25 is still Draft/unmerged at this review; Listing UoW/D7 are not delivered.
+reader from merged PR #25 is available as
+`gpu_marketplace.repositories.accounts.PostgresAccountReader(sessionmaker)`.
+It still needs integrator-owned AuthService/app wiring; Listing UoW/D7 are not delivered.
 
 ## Implemented scope
 
@@ -228,6 +230,14 @@ single/multiple chunks (including rejection before copying a 4 MiB chunk), depth
 8/9, bracket/quote escapes, invalid UTF-8/strict JSON/parser exhaustion, zero UoW,
 safe errors and 401/403 precedence. This HTTP evidence still uses persistence
 doubles and does not satisfy PostgreSQL or mounted-application acceptance.
+
+After receiving #25 at `213455f`, the full local command above was rerun:
+**608 passed / 143 PostgreSQL skipped**, including the unchanged **308 Listings**
+tests and the AccountReader's sanitized unavailable-store case. One existing
+Starlette/httpx warning remains. These skips are NOT_RUN; the adapter's real DB
+tests and Listing DB/E2E paths were not run locally. Frontend source is unchanged;
+the earlier local frontend evidence above is historical, with new-head CI recorded
+separately in PR #17. The owner-requested Draft/HOLD state is retained.
 
 ## When GPU-002/GPU-003 are ready
 
