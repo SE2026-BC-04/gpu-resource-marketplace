@@ -7,9 +7,9 @@
 > **Baseline thiết kế ban đầu:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b`
 > **Rà soát đồng bộ ngày 23/10/2026:** `main@538802adebeaeb74dcccd0c025f3a7abc81336c0` và handoff tại `ffb17de39d32956087aca187d490bb03c32ee980`; chỉ rà soát tài liệu, không xác nhận dependency đã sẵn sàng hay test ứng dụng đã chạy.
 > **Đối chiếu upstream ngày 24/10/2026:** `main@21071549937888c997b250625607a16a97a20419`; Phase 1D §2.1/§3.2 đã ghi điều kiện nhận DB/Auth và dùng chung fixture. Schema matrix GPU-002-A revision 3 vẫn `PROPOSED`, D1–D12 và `XPH-GPU-002-01` chưa đóng; không coi bản cập nhật này là ACK hoặc dependency đã triển khai.
-> **Baseline coding hiện tại:** `main@7fa6afc23542f508c9bc8f32b38f43ffbc35e909` (25/10/2026): code dependency từ `6434ee3` (#27 D1/#26 session UI); merge #19 mới hơn chỉ thêm docs GPU-005. Listing UoW/D7, account adapter #25 và shared wiring còn chờ; evidence ở Phase 1D §3.7. Không duyệt thay quyết định còn mở.
+> **Baseline coding hiện tại:** `main@7fa6afc23542f508c9bc8f32b38f43ffbc35e909` (25/10/2026), branch thêm CR body bounds đã được duyệt (API v0.10). Listing UoW/D7, account adapter #25/shared wiring còn chờ; evidence ở Phase 1D §3.8, lịch sử trước đó ở §3.7. Không duyệt thay quyết định khác.
 > **Tài liệu:** [Phase 1D — GPU Listings Management](../../architecture/phases/phase1d_gpu_listings.md) — nguồn thiết kế chi tiết đã duyệt; trạng thái code/test được ghi riêng.
-> **Nguồn bắt buộc:** API Contract v0.9 §7; Database Design v0.4 §§9,11; Module Design; Test Design; Team Contribution Rules; Inter-Phase Change Control.
+> **Nguồn bắt buộc:** API Contract v0.10 §§7/14.6; Database Design v0.4 §§9,11; Module Design; Test Design; Team Contribution Rules; Inter-Phase Change Control.
 
 ## 0. Mandatory Reading & Working Rules — BẮT BUỘC
 
@@ -143,7 +143,9 @@ Với **thay đổi thật**, ghi old→new SHA/contract, ảnh hưởng thực 
 
 **Bàn giao tiếp sau #26/#27 merge (25/10/2026):** đã đồng bộ main, thêm `createSessionListingsApi`/`SessionListingsPage` dùng chung session thật theo handoff TV3 §9, chưa mount shared shell. TV2 [ACK ports/service](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6388130749), TV3 [xác nhận backend Auth](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6389075737), TV5 [ACK_WITH_ACTIONS/HOLD](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6389243659) trên `f7d3c0d`; cần xử lý actions/re-review diff mới, không coi ACK là human approval.
 
-Request-ID trusted-state correlation, early reject body pause/resume và parser RecursionError đã sửa. POST/PATCH vẫn chờ nhóm trưởng duyệt raw body/depth bounds, không tự áp 16 KiB/depth 8 của Auth. R1 chờ TV2 Listing UoW/D7; #25 vẫn Draft. Actual tests: **537 backend passed / 132 PostgreSQL skipped**, gồm **238 Listings** (37 HTTP cases mới); frontend **102 pass**, gồm 9 real-session consumer cases; TypeScript/build/Ruff PASS. PG/race/browser E2E/audit vẫn BLOCKED/NOT_RUN; không mở rộng quyền DB hoặc sửa phần người khác để đi vòng blocker. Chi tiết/lệnh ở Phase 1D §3.7/README.
+**CR-GPU-004-BODY-01: APPROVED_FOR_IMPLEMENTATION** theo [owner decision](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6395344255), path A atomic L2 trong #17. Đã cập nhật API v0.10 + code/oracles: POST/PATCH tối đa 16,384 bytes inclusive / depth 8, Auth→WORKER→body→UoW; declared/actual bytes được kiểm tra trước đọc/copy, 413/400 an toàn. Dùng lại helpers đã review, không sửa Auth/Jobs/schema/shared app. Listing client xử lý 413 không logout/retry.
+
+Actual tests: **607 backend passed / 132 PostgreSQL skipped**, gồm **308 Listings**, 70 body-bound cases mới (trước sửa 32 fail/38 pass); frontend **104 pass**, TypeScript/build/Ruff PASS. R1 còn chờ TV2 UoW/D7/#25; PG/race/browser E2E/audit BLOCKED/NOT_RUN. P1 remediation cần owner re-review; không tự đóng finding/ACK/actions. Thay đổi L2 cần hai independent human reviews trên final diff. Lệnh/giới hạn ở Phase 1D §3.8/README.
 
 Lịch sử DB TV4 đã được người dùng xác nhận: chưa từng dùng DB/Alembic cho dự án, D1 recovery không cần theo lịch sử báo cáo. Docker local vẫn stopped; không khởi động/apply migration trong lượt này. Giữ HOLD, chưa yêu cầu merge.
 

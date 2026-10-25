@@ -13,7 +13,17 @@ CLIENT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 MIDDLEWARE_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
 
-def invoke(app, method, path, *, body=b"", length=None, more_body=False, state=None):
+def invoke(
+    app,
+    method,
+    path,
+    *,
+    body=b"",
+    length=None,
+    more_body=False,
+    state=None,
+    chunks=None,
+):
     scope = {
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.4"},
@@ -36,13 +46,18 @@ def invoke(app, method, path, *, body=b"", length=None, more_body=False, state=N
         scope["headers"].append((b"content-length", length.encode()))
     messages = []
     reads = 0
+    parts = [body] if chunks is None else chunks
 
     async def receive():
         nonlocal reads
         reads += 1
-        if reads > 1:
+        if reads > len(parts):
             raise RuntimeError("The command must not consume the remaining body")
-        return {"type": "http.request", "body": body, "more_body": more_body}
+        return {
+            "type": "http.request",
+            "body": parts[reads - 1],
+            "more_body": reads < len(parts) or more_body,
+        }
 
     async def send(message):
         messages.append(message)
@@ -118,11 +133,9 @@ def test_deep_json_is_rejected_without_500_or_uow(env, monkeypatch, method):
     forbid_uow(env, monkeypatch)
     path = BASE if method == "POST" else f"{BASE}/{env.store.l1.id}"
     result = invoke(env.app, method, path, body=b"[" * 2000 + b"]" * 2000)
-    # Parser recursion limits vary; a parsed array is a typed-field error, while
-    # parser exhaustion is invalid JSON. Neither path may become a server error.
-    assert result.status in {400, 422}
-    expected = "INVALID_JSON" if result.status == 400 else "VALIDATION_ERROR"
-    assert result.body["error"]["code"] == expected
+    # CR-GPU-004-BODY-01 now rejects depth > 8 before invoking the parser.
+    assert result.status == 400
+    assert result.body["error"]["code"] == "INVALID_JSON"
 
 
 @pytest.mark.parametrize("method", ["POST", "PATCH"])
@@ -135,7 +148,7 @@ def test_parser_recursion_exception_is_a_controlled_400(env, monkeypatch, method
             raise RecursionError("test-only-parser-detail")
         return original(value, *args, **kwargs)
 
-    monkeypatch.setattr("gpu_marketplace.listings.router.json.loads", exhausted)
+    monkeypatch.setattr("gpu_marketplace.identity.request_body.json.loads", exhausted)
     path = BASE if method == "POST" else f"{BASE}/{env.store.l1.id}"
     result = invoke(env.app, method, path, body=b"[[[]]]")
     assert result.status == 400

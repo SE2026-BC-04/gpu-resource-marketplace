@@ -56,7 +56,8 @@ a substitute for the missing runtime adapters.
 ### Auth decision tracking
 
 The owner confirmed `DEC-P1-03` in [PR #13](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/13#issuecomment-6372245355).
-API Contract **v0.9** on the current baseline records the approved profile; PR #18
+API Contract **v0.9** on the upstream baseline records the approved Auth profile;
+this branch adds the approved Listings body change at **v0.10**. PR #18
 (core) and PR #23 (Auth endpoints/dependency) have merged. The earlier
 [PR #13 ACK](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/13#issuecomment-6372588314)
 is historical. TV4 also posted
@@ -141,17 +142,27 @@ GPU-003 handoff §9. No token is persisted; current 401 clears the store, old 40
 does not clear a newer token, and 403 keeps the session. This leaf component is
 ready for integrator review, **not mounted into the shared shell by this change**.
 
-### Remaining HTTP security decision
+### Approved Listings body bounds — CR-GPU-004-BODY-01
 
 Pause/resume reuse GPU-003's `require_empty_body`: nonzero declared length or the
 first nonempty chunk is rejected without buffering the rest. Parser
 `RecursionError` maps to safe 400 INVALID_JSON. These preserve existing contracts.
 
-**POST/PATCH byte/depth bounds remain an open P1 integration blocker.** API
-Contract §14.5 approves 16 KiB/depth 8 for Auth only, not Listings. GPU-004 does
-not silently apply those values to Listings or claim bounded create/PATCH
-reading is complete. The lead must approve the endpoint limits/error/order and
-the design-update path before that normative behavior is implemented.
+[The owner decision](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6395344255)
+marks **APPROVED_FOR_IMPLEMENTATION**, change path A: atomic L2 design + code in
+PR #17. API Contract v0.10 §§3.3/7/14.6 and this branch now enforce **16,384 raw
+bytes inclusive / 8 JSON levels counting root** on POST/PATCH. Auth then WORKER
+role precede body checks; invalid input enters no Listing UoW. Declared length is
+checked before reading and each actual chunk before copying, even with missing
+or misleading length. Oversize -> 413 PAYLOAD_TOO_LARGE; malformed framing/UTF-8/
+strict JSON, excess depth or parser exhaustion -> safe 400 INVALID_JSON. Typed
+and unknown-field behavior is preserved. The existing reviewed reader/parser
+is reused without modifying Auth policy or adding a parallel parser; the Listing
+byte constant is independent of Login. Frontend handles 413 without logout/retry.
+
+This is **P1 remediation ready for re-review**, not a self-closed finding or merge
+approval. Required two independent human reviews and R1–R4 integration gates
+remain open; no shared app/config, DB/schema/grant or Jobs change is authorized.
 
 ## Verification and limits
 
@@ -180,9 +191,10 @@ Auth HTTP/fetch/clock; other React tests inject a test API. These are not
 PostgreSQL, production-shell or cross-process E2E evidence. The normal build
 builds the merged Login-first shell; RTL also renders the separate Listings component.
 
-Observed on 25/10/2026 after syncing `main@6434ee3`: backend **537 passed / 132
-skipped**, including **238** Listings tests (**65** real-Auth/double-persistence
-consumer tests and **37** ASGI correlation/body tests); frontend **102 passed**,
+Observed on 25/10/2026 after implementing the approved change on the
+`main@7fa6afc` baseline: backend **607 passed / 132 skipped**, including **308**
+Listings tests (**65** real-Auth/double-persistence, **37** ASGI correlation/body,
+and **70** body-bound cases); frontend **104 passed**,
 including **9** real-session Listings consumer cases. TypeScript and Vite build
 passed. The 132 skipped tests are upstream PostgreSQL checks without a configured
 disposable cluster, not successful DB tests. Python 3.12.14 and Node 24.19.0 were
@@ -208,6 +220,14 @@ Docker engine still stopped; no test-cluster configuration or local DB testing.
 TV4 explicitly confirmed never using DB/Alembic for this project: D1 recovery is
 not required based on that reported history. No physical old-volume inspection,
 live revision query or migration/recovery action was performed.
+
+The 70 body-bound cases reproduced **32 failures / 38 passes** on `1800379`
+before the fix, then passed with the reviewed helper integration. Coverage
+includes exact 16,384/16,385 bytes, no/false/malformed/extreme/leading-zero length,
+single/multiple chunks (including rejection before copying a 4 MiB chunk), depth
+8/9, bracket/quote escapes, invalid UTF-8/strict JSON/parser exhaustion, zero UoW,
+safe errors and 401/403 precedence. This HTTP evidence still uses persistence
+doubles and does not satisfy PostgreSQL or mounted-application acceptance.
 
 ## When GPU-002/GPU-003 are ready
 

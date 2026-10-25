@@ -58,6 +58,7 @@ const messages: Record<string, string> = {
   LISTING_CAPACITY_BELOW_ALLOCATED: "Tổng GPU không được nhỏ hơn số GPU đang được cấp phát.",
   LISTING_CAPACITY_BELOW_QUEUED_MAX: "Tổng GPU không đủ cho yêu cầu lớn nhất đang chờ.",
   VALIDATION_ERROR: "Dữ liệu chưa hợp lệ. Kiểm tra lại các trường nhập.",
+  PAYLOAD_TOO_LARGE: "Dữ liệu gửi quá lớn. Vui lòng rút gọn nội dung và thử lại.",
   INVALID_CURSOR: "Trang dữ liệu đã không còn hợp lệ. Hãy tải lại danh sách.",
   INVALID_FILTER: "Bộ lọc không hợp lệ.",
   DEPENDENCY_UNAVAILABLE: "Dịch vụ tạm thời chưa sẵn sàng. Hãy kiểm tra lại sau.",

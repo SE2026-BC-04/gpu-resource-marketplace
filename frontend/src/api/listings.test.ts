@@ -74,6 +74,17 @@ describe("Listings authenticated API boundary", () => {
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
 
+  it.each(["create", "patch"] as const)("shows a safe body-size error for %s without logout or retry", async method => {
+    const unauthorized = vi.fn();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json({ error: { code: "PAYLOAD_TOO_LARGE", message: "private-body-secret" } }, 413));
+    const api = createListingsApi(() => "test-token", unauthorized, fetcher);
+    const input = { gpu_model: "A100", vram_gb: 80, total_gpu_count: 8 };
+    const action = method === "create" ? api.create(input) : api.patch(LISTING_ID, input);
+    await expect(action).rejects.toMatchObject({ code: "PAYLOAD_TOO_LARGE", status: 413, message: "Dữ liệu gửi quá lớn. Vui lòng rút gọn nội dung và thử lại." });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(unauthorized).not.toHaveBeenCalled();
+  });
+
   it("does not automatically retry a failed create", async () => {
     const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("connection lost"));
     const api = createListingsApi(() => "test-token", vi.fn(), fetcher);

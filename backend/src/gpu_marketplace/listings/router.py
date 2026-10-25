@@ -5,7 +5,6 @@ is installed. The integration owner includes this router only with real adapters
 """
 
 from collections.abc import Callable
-import json
 import logging
 from typing import Annotated, Any
 from uuid import UUID, uuid4
@@ -17,11 +16,15 @@ from fastapi.routing import APIRoute
 from pydantic import UUID4, BeforeValidator, ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
+from starlette.requests import ClientDisconnect
 
 from gpu_marketplace.identity.dependencies import create_principal_dependency
 from gpu_marketplace.identity.request_body import (
+    BodyTooLarge,
     InvalidBody,
     UnexpectedBody,
+    parse_json,
+    read_bounded_body,
     require_empty_body,
 )
 from gpu_marketplace.identity.service import AuthService
@@ -33,6 +36,8 @@ from .schemas import ListingCreate, ListingDTO, ListingPageDTO, ListingPatch
 from .service import ListingService, require_principal, require_worker
 
 logger = logging.getLogger(__name__)
+# CR-GPU-004-BODY-01: Listings has its own byte limit, independent of Login.
+MAX_LISTING_BODY_BYTES = 16_384
 
 
 def _canonical_uuid_text(value: Any) -> str:
@@ -116,19 +121,6 @@ class ListingRoute(APIRoute):
         return handler
 
 
-def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate JSON key")
-        result[key] = value
-    return result
-
-
-def _invalid_constant(_: str) -> None:
-    raise ValueError("non-JSON numeric constant")
-
-
 async def _body(
     request: Request, schema: type[ListingCreate] | type[ListingPatch]
 ) -> ListingPatch:
@@ -137,13 +129,13 @@ async def _body(
             request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
             != "application/json"
         ):
-            raise ValueError("JSON media type required")
-        data = json.loads(
-            (await request.body()).decode("utf-8"),
-            object_pairs_hook=_unique_object,
-            parse_constant=_invalid_constant,
-        )
-    except (ValueError, UnicodeError, RecursionError) as exc:
+            raise InvalidBody()
+        data = parse_json(await read_bounded_body(request, MAX_LISTING_BODY_BYTES))
+    except BodyTooLarge as exc:
+        raise ListingError(
+            413, "PAYLOAD_TOO_LARGE", "Request body exceeds the allowed size."
+        ) from exc
+    except (InvalidBody, ClientDisconnect) as exc:
         raise ListingError(400, "INVALID_JSON", "Invalid JSON request.") from exc
     if not isinstance(data, dict):
         raise invalid_fields()

@@ -9,9 +9,9 @@
 > **Baseline thiết kế ban đầu:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b` — GPU-001 đã merge; GPU-002 và GPU-003 mới được chủ dự án duyệt **thiết kế**, chưa merge code trên `main` tại mốc này.<br>
 > **Rà soát đồng bộ ngày 23/10/2026:** `main@538802adebeaeb74dcccd0c025f3a7abc81336c0` và handoff tại `ffb17de39d32956087aca187d490bb03c32ee980`; chỉ rà soát tài liệu, không xác nhận dependency đã sẵn sàng hay test ứng dụng đã chạy.<br>
 > **Đối chiếu các Phase trước ngày 24/10/2026:** `main@21071549937888c997b250625607a16a97a20419` (PR #7, #9, #10 đã merge); đã đọc Foundation, Phase 1B, schema matrix GPU-002-A revision 3 và Phase 1C cập nhật. Matrix vẫn `PROPOSED / FOR LEAD REVIEW`; không coi tài liệu đã merge là quyết định duyệt D1–D12 hoặc evidence triển khai.<br>
-> **Baseline coding hiện tại:** `main@7fa6afc23542f508c9bc8f32b38f43ffbc35e909` (25/10/2026); code dependency từ `6434ee3` (#27 D1/#26 session UI), merge #19 sau đó chỉ thêm tài liệu GPU-005. Listing UoW/D7, account adapter #25 và shared wiring còn thiếu. Evidence cũ ở §3.5–3.6, mới ở §3.7.<br>
+> **Baseline coding hiện tại:** `main@7fa6afc23542f508c9bc8f32b38f43ffbc35e909` (25/10/2026); code dependency từ `6434ee3` (#27 D1/#26 session UI). Branch bổ sung body bounds theo CR đã duyệt, API v0.10; Listing UoW/D7, account adapter #25/shared wiring còn thiếu. Evidence mới ở §3.8, mốc trước ở §3.5–3.7.<br>
 > **Handoff thực hiện:** [GPU-004 — Thành viên 4](../../development/handoffs/GPU-004_member4_handoff.md) — nhiệm vụ, ownership và checklist PR.<br>
-> **Nguồn chuẩn:** [API Contract v0.9](../../design/api-contract.md) §7, [Database Design v0.4](../../design/database-design.md) §§9, 11, [Module Design](../../design/module-design.md) §§2–5, [Test Design](../../design/test-design.md), [Functional Requirements](../../functional-requirements.md) `FR-WR-01..04`, ADR-001/002/008 và [Team Contribution Rules](../../development/team-contribution-rules.md). Quy trình phối hợp: [Inter-Phase Change Control](../../development/interphase-change-control.md).
+> **Nguồn chuẩn:** [API Contract v0.10](../../design/api-contract.md) §§7/14.6 (CR-GPU-004-BODY-01), [Database Design v0.4](../../design/database-design.md) §§9, 11, [Module Design](../../design/module-design.md) §§2–5, [Test Design](../../design/test-design.md), [Functional Requirements](../../functional-requirements.md) `FR-WR-01..04`, ADR-001/002/008 và [Team Contribution Rules](../../development/team-contribution-rules.md). Quy trình phối hợp: [Inter-Phase Change Control](../../development/interphase-change-control.md).
 
 ## 1. MỤC TIÊU
 
@@ -41,7 +41,7 @@ Không triển khai Worker public signup/onboarding/key provisioning, Job submis
 | GPU-001 — Foundation (`IMPLEMENTED`) | FastAPI app/health, frontend skeleton, PostgreSQL service, shared backend, CI/Compose; 5 services | Tích hợp router/UI vào app hiện hữu; không thay đổi runtime topology |
 | GPU-002 — Database (`PARTIAL`: GPU-002-B đã merge) | ORM và migration `0001_phase1b_baseline` đã có qua PR #12; `repositories/` còn placeholder, UoW/readers chưa bàn giao. Matrix GPU-002-A vẫn ghi các đề xuất D1–D12, không suy diễn merge ORM là duyệt mọi đề xuất | Kế thừa schema hiện có; chờ repository/UoW và runtime-role evidence. Chỉ đọc Job để kiểm tra guard, không tự tạo schema hoặc triển khai nghiệp vụ Job |
 | GPU-003 — Authentication (`PARTIAL`: core + endpoints + session UI đã merge) | PR #18/#23/#26 cung cấp principal/dependency và SessionStore thật; account adapter #25 vẫn Draft/unmerged | Dùng dependency/store thật, không sao chép JWT/session logic; account/Listing persistence còn doubles, chưa nghiệm thu PostgreSQL/shared UI |
-| GPU-004 (`IN_PROGRESS / INTEGRATION_BLOCKED`) | `main@6434ee3` chưa có nghiệp vụ Listing; branch có core/router/UI và cầu nối backend Auth/frontend session thật | Chờ adapter PostgreSQL, body-limit decision, shared wiring và review; xem §3.7 |
+| GPU-004 (`IN_PROGRESS / INTEGRATION_BLOCKED`) | Branch có core/router/UI, Auth/session bridges và body-bound remediation đúng CR được duyệt | Chờ adapter PostgreSQL/shared wiring và L2 human re-review; xem §3.8 |
 
 ```mermaid
 flowchart LR
@@ -278,7 +278,7 @@ Nhánh đã merge `main@028c355` theo lịch sử thường, không rewrite comm
 
 Theo [owner review PR #17](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6380470641), **R1–R4 vẫn mở**: R2/R3 có thêm real-Auth consumer evidence; R4 đã sync main/test lại. R1 PostgreSQL UoW/grants/timestamps; R2 shared mount/config/correlation/audit; R3 PostgreSQL/race/browser E2E; R4 ACK/actions và independent human re-review trên HEAD mới vẫn thiếu. Giữ **HOLD / NOT APPROVED FOR MERGE**, không ghi toàn Phase `PASS/IMPLEMENTED`.
 
-### 3.7. Nhận bàn giao #26/#27 — 25/10/2026
+### 3.7. Mốc nhận #26/#27 trước quyết định body bounds — 25/10/2026
 
 Đã merge `main@6434ee3` vào nhánh Listings. D1 (#27) và session UI (#26) đã merge, nhưng account adapter #25 vẫn Draft, Listing UoW/D7 chưa có. [TV2 ACK ports/service tại `f7d3c0d`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6388130749) yêu cầu TV2 triển khai adapter và DB-managed `updated_at`, **TV4 không cần sửa persistence ports/service**. [TV3 xác nhận Auth wiring](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6389075737); [TV5 ACK_WITH_ACTIONS](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6389243659) vẫn HOLD và có HTTP findings.
 
@@ -299,3 +299,20 @@ Trong lượt kiểm tra, main nhận thêm #19 tại `7fa6afc`: đã đồng b�
 | PostgreSQL Listing/role/race/E2E/audit | **BLOCKED/NOT_RUN**; Docker engine vẫn stopped, test cluster chưa cấu hình; không cài/chạy DB hoặc apply migration |
 
 TV4 đã xác nhận chưa từng dùng DB/Alembic cho dự án; [kiểm kê #22 đã cập nhật](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/22#issuecomment-6387611172), không cần D1 recovery theo lịch sử do TV4 báo cáo, không phải live DB/volume inspection. R1–R4 không tự đóng: cần UoW/D7/account adapter, quyết định body bounds, shared mounting/config/audit, DB/E2E evidence và human re-review/ACK actions trên HEAD cuối.
+
+### 3.8. CR-GPU-004-BODY-01 — APPROVED_FOR_IMPLEMENTATION, atomic L2
+
+[Quyết định nhóm trưởng ngày 25/10/2026](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6395344255) duyệt chính xác 16,384 raw bytes inclusive, depth 8 tính root, thứ tự Auth → WORKER role → body → Listing UoW/SQL/mutation; chọn A: cập nhật design + code trong #17. API Contract v0.10 §§3.3/7/14.6 đã ghi hợp đồng, lỗi/oracles `API-LIST-07/11` và `API-COM-01`, không thêm API test ID.
+
+`listings/router.py` dùng lại reviewed `read_bounded_body`/`parse_json`, không sửa `identity/`: kiểm tra declared length trước đọc, actual chunk trước copy; oversize 413 PAYLOAD_TOO_LARGE; malformed framing/UTF-8/strict JSON, depth >8 hoặc parser exhaustion 400 INVALID_JSON. Giữ typed/unknown-field errors và 401/403 trước body. Bỏ parser trùng riêng Listings; byte constant riêng không phụ thuộc Login. Listing client hiển thị 413 an toàn, không logout/retry.
+
+| Evidence thực tế | Kết quả / giới hạn |
+|---|---|
+| Body-bound regression trên baseline `1800379`, trước sửa | **32 failed / 38 passed** trong 70 ca mới; tái hiện oversize/malformed length/depth guard còn thiếu |
+| Body-bound suite sau sửa | **70 passed**, exact 16,384/16,385, missing/false/malformed/extreme/leading-zero length, oversized single/multiple chunks, depth 8/9/escaped strings, UTF-8/strict JSON, zero UoW và auth/role precedence |
+| Full backend: `backend/.venv/Scripts/python.exe -m pytest backend/tests tests -q -p no:cacheprovider -rN` | **607 passed / 132 PostgreSQL skipped**, một warning Starlette/httpx có sẵn; gồm **308** Listings tests. Skipped không phải DB PASS |
+| Frontend TypeScript / Vitest / Vite | **PASS / 104 passed (8 files) / PASS**; thêm hai ca create/PATCH 413 không logout/retry hoặc hiển thị raw server text |
+| Ruff 0.14.0 format + check `--select F,E9` | **PASS** cho source/test Listings |
+| PostgreSQL, shared middleware/audit/browser E2E, race phụ thuộc Jobs/Manager | **BLOCKED/NOT_RUN**, không cài/chạy DB, apply migration hoặc mount doubles |
+
+Thay đổi là **CONFIRMED_IMPACT (L2)** cho Listing body-bound/error contract đã được owner duyệt: thông báo TV2/TV3/TV5/leader trên cùng PR, xin đối chiếu helpers/error/order trên HEAD mới. Không đổi persistence ports/service, Auth/Jobs policy, schema/grants hoặc shared app/config. Remediation P1 sẵn sàng re-review, **không tự đóng finding/R1–R4 hay gate cross-phase**. Cần hai independent human reviews trên meaningful diff cuối và các dependency/integration evidence khác trước merge; giữ Draft/HOLD.
