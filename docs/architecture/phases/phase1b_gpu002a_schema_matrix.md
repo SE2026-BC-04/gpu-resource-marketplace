@@ -8,6 +8,7 @@
 > **Trạng thái:** `PROPOSED / FOR LEAD REVIEW` — **không phải migration**, không có SQL đã chạy; mọi test `NOT_RUN`<br>
 > **Revision 2 (24/10/2026):** sửa theo technical review GPU-002-A (`CHANGES REQUESTED`: 2×P1, 2×P2) — xem mục 14. D1–D10 (và D11 mới) vẫn `PROPOSED` tới khi nhóm trưởng quyết định<br>
 > **Revision 3 (24/10/2026):** sửa P1 "PostgreSQL Test Cluster Isolation" — test có bootstrap role chỉ chạy trên cluster PostgreSQL riêng, dùng xong bỏ; bootstrap không bao giờ tự đổi mật khẩu/quyền role đã tồn tại; thêm test kiểm chứng cô lập (mục 9.3, D12, R5 ở mục 14)<br>
+> **Revision 4 (25/10/2026):** chỉ ghi nhận các quyết định nhóm trưởng đã đưa ra cho D1, D2, D3, D8 (mục 11.1). Không đổi matrix, grant hay trigger đã đề xuất; các quyết định khác vẫn `PENDING LEAD DECISION`<br>
 > **Nguồn chuẩn:** [Database Design v0.4 §9, §11](../../design/database-design.md), [Phase 1B](phase1b_database_persistence.md), [GPU-002 handoff](../../development/handoffs/GPU-002_member2_handoff.md), [Module Design §5](../../design/module-design.md), [ADR-002](../decisions/ADR-002-postgresql-access-boundaries.md), [Phase 1C](phase1c_authentication_rbac.md), [Phase 1D](phase1d_gpu_listings.md), [Phase 1E](phase1e_job_submission_queue.md)
 
 ## 0. Mục đích, phạm vi và cách đọc
@@ -533,6 +534,19 @@ Ghi chú bằng chứng: `ISO-03..06` tự tạo tình huống "giống cluster 
 | D10 | Mã lỗi trigger: SQLSTATE 23000 + `CONSTRAINT` name? | **Có** | L1 |
 | D11 | Chính sách bảo vệ DB test trước `DROP`/`CREATE`/`TRUNCATE`? | Hàng rào G1–G9: opt-in tường minh, tên khớp toàn bộ mẫu, chỉ loopback, khác DSN dev/migration, marker comment do test tạo, kiểm connection khác, abort session khi vi phạm (mục 9.2) | L1 (an toàn dữ liệu; nhóm trưởng xác nhận) |
 | D12 | Cluster PostgreSQL riêng cho test có bootstrap role/DDL? | **Bắt buộc**: CI dùng `services: postgres` mới mỗi job; local dùng container tạm (`tmpfs`, `--rm`, cổng khác, ngoài Compose project sản phẩm) do script helper khởi động và đặt marker token; hàng rào C1–C5; bootstrap create-only, đổi mật khẩu chỉ qua cờ tường minh; test cô lập `ISO-01..07` (mục 9.3) | L1 (an toàn dữ liệu + shared CI; nhóm trưởng xác nhận) |
+
+### 11.1. Quyết định đã ghi nhận (cập nhật 25/10/2026)
+
+Bảng này chỉ ghi lại quyết định nhóm trưởng đã đưa ra và nơi lưu bản ghi; nội dung kỹ thuật của từng mục vẫn là phần đề xuất ở trên. Mục không có trong bảng vẫn `PENDING LEAD DECISION`. D2 và D3 được TV2 đăng lại thay nhóm trưởng (nhóm trưởng gửi qua kênh khác vì PR #24 đã merge); khi nhóm trưởng xác nhận trên PR #27, link xác nhận sẽ thay ghi chú "chờ xác nhận".
+
+| ID | Quyết định | Ngày | Bản ghi | Hiện thực |
+|---|---|---|---|---|
+| D1 | **APPROVED** — thiết kế role bootstrap + grant; re-land qua PR mới sau khi PR #14 bị revert vì quy trình | 24/10/2026 | [PR #22, 06:36Z](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/22#issuecomment-6380984025); [PR #22, 13:26Z](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/22#issuecomment-6384777132) | PR #27 (đang review); wiring `compose.yaml`/`.env.example` là PR riêng |
+| D2 | **APPROVED** — `trg_jobs_guard_update` theo mục 7 | 25/10/2026 | [PR #27 (TV2 chuyển tiếp từ nhóm trưởng)](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/27#issuecomment-6387687194); **chờ nhóm trưởng xác nhận bản chuyển tiếp trên GitHub** | PR #28 (draft, xếp trên #27) |
+| D3 | **APPROVED cho Phase 1B** — `trg_jobs_guard_delete` theo mục 8; phần Dispute `OPEN` của `DBP-09` là `BLOCKED` tới Phase 3; không bật cleanup production tới khi có bằng chứng giữ Dispute chưa giải quyết và test tích hợp | 25/10/2026 | [PR #27 (TV2 chuyển tiếp từ nhóm trưởng)](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/27#issuecomment-6387687194); **chờ nhóm trưởng xác nhận bản chuyển tiếp trên GitHub** | PR #29 (draft, xếp trên #28) |
+| D8 | **APPROVED** — PostgreSQL 16.15 service dùng một lần trong CI, mật khẩu sinh trong job, marker an toàn của cluster; không đổi runtime production hay topology Compose | 24/10/2026 | [PR #24](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/24#issuecomment-6386249190) | PR #24 (đã merge) |
+
+Ghi chú: D6 (`clock_timestamp()`), D10 (SQLSTATE 23000 + tên trigger), D11 và D12 (hàng rào DB test, cluster dùng một lần) đang được code của D2/D3/D8 và test dùng tới nhưng chưa có quyết định riêng; nhờ nhóm trưởng xác nhận.
 
 ## 12. Mâu thuẫn và điểm mơ hồ phát hiện khi đối chiếu
 
