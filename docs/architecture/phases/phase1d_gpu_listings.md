@@ -316,3 +316,20 @@ TV4 đã xác nhận chưa từng dùng DB/Alembic cho dự án; [kiểm kê #22
 | PostgreSQL, shared middleware/audit/browser E2E, race phụ thuộc Jobs/Manager | **BLOCKED/NOT_RUN**, không cài/chạy DB, apply migration hoặc mount doubles |
 
 Thay đổi là **CONFIRMED_IMPACT (L2)** cho Listing body-bound/error contract đã được owner duyệt: thông báo TV2/TV3/TV5/leader trên cùng PR, xin đối chiếu helpers/error/order trên HEAD mới. Không đổi persistence ports/service, Auth/Jobs policy, schema/grants hoặc shared app/config. Remediation P1 sẵn sàng re-review, **không tự đóng finding/R1–R4 hay gate cross-phase**. Cần hai independent human reviews trên meaningful diff cuối và các dependency/integration evidence khác trước merge; giữ Draft/HOLD.
+
+### 3.9. Kết quả re-review và điều phối bàn giao — 25/10/2026
+
+[Owner re-review tại `d693ab9`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#pullrequestreview-5642309220) xác nhận P1 body bounds **RESOLVED ở mức source/HTTP tests**. [Owner follow-up](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6395792082) và [TV2 ACK tại cùng HEAD](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6396202629) xác nhận phần đã review; đây **chưa phải bàn giao adapter hoặc phê duyệt merge**. TV2 ghi `ACK_WITH_ACTIONS`, không thấy P0/P1/P2 và không yêu cầu sửa persistence ports/service.
+
+Đã fetch lại `origin/main@7fa6afc23542f508c9bc8f32b38f43ffbc35e909`: `git rev-list --left-right --count HEAD...origin/main` tại `d693ab9` trả **8 / 0**, `git merge-base --is-ancestor origin/main HEAD` trả **0**. Nhánh đã chứa toàn bộ main; 8 commit là phần riêng của Listings, không phải commit main bị thiếu. Không cần tạo thêm merge commit. PR #25 hiện **OPEN / ready for review, chưa merge**, HEAD `812e9fea647992eaa11ae2db6977e3dc0e55ed4d`; chưa coi là dependency production đã bàn giao.
+
+| Gate / owner | Tình trạng và bước tiếp theo |
+|---|---|
+| R1 / TV2 | Listing PostgreSQL UoW/readers chưa có revision bàn giao; D7 DB-managed `updated_at` chưa được duyệt. TV2 trình adapter/D7, bàn giao PR/HEAD/migration và restricted-role/row-lock/rollback evidence. TV4 tiếp nhận đúng revision sau khi đủ điều kiện |
+| R2 / nhóm trưởng | Sau khi adapters đủ điều kiện, tích hợp engine/session, Auth/JWT, cursor key riêng, trusted request ID/audit và mount backend/frontend trong PR riêng do nhóm trưởng điều phối |
+| R3 / TV4 và owners phụ thuộc | PostgreSQL-backed CRUD/roles/ownership/capacity/hardware/rollback/concurrent PATCH và browser-to-real-API còn **BLOCKED/NOT_RUN**. Race phụ thuộc Jobs/Manager tiếp tục chờ đường chạy thật |
+| R4 / affected owners và reviewers | TV2 đã ACK_WITH_ACTIONS trên `d693ab9`; TV3/TV5 cần re-ACK consumer/error/order khi có integration. Hai independent human reviews L2 trên final diff và các actions vẫn chưa đủ; giữ **DRAFT / HOLD** |
+
+TV2 nêu hai ghi chú **P3, không chặn** về charset của `application/json` và precedence khi sai media type đồng thời quá cỡ. Giữ nguyên hành vi và API v0.10 đã duyệt; không tự áp dụng quy tắc charset của Auth hoặc mở rộng contract. ETA bàn giao chưa được owner xác nhận. Cập nhật §3.9 chỉ ghi evidence/điều phối (**NO_IMPACT** với runtime/contracts), không đóng R1–R4.
+
+Kiểm tra lại trên cây code `d693ab9` với cập nhật hai tài liệu này: `backend/.venv/Scripts/python.exe -m pytest backend/tests/listings -q -p no:cacheprovider -rN` → **308 passed**, một Starlette/httpx deprecation warning có sẵn. Kiểm tra tài liệu → **PASS** (29 relative links, Markdown fences, sáu routes, DTO/capacity và các invariant/dependency); `git diff --check` → **PASS**. Không thay runtime nên không chạy lại toàn bộ backend/frontend; kết quả §3.8 là evidence lịch sử. PostgreSQL Listings/E2E vẫn **BLOCKED/NOT_RUN**.
