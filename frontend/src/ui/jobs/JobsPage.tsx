@@ -77,25 +77,54 @@ export function JobsList({
   );
 }
 
-export function CancelJobAction({ job, api, onCancelled }: {
+export function CancelJobAction({ job, api, onCancelled, onReconciled, onConflict }: {
   job: JobResponse;
   api: JobsApi;
   onCancelled: (job: JobResponse) => void;
+  onReconciled: (job: JobResponse) => void;
+  onConflict: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [needsReconciliation, setNeedsReconciliation] = useState(false);
   const inFlight = useRef(false);
-  if (job.status !== "QUEUED") return null;
 
-  async function cancel() {
+  async function reconcile() {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
-      onCancelled(await api.cancelJob(job.id));
+      onReconciled(await api.getJob(job.id));
+      setNeedsReconciliation(false);
     } catch (caught) {
+      setNeedsReconciliation(true);
       setError(caught);
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  if (job.status !== "QUEUED") return null;
+
+  async function cancel() {
+    if (inFlight.current || needsReconciliation) return;
+    inFlight.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      onCancelled(await api.cancelJob(job.id));
+      setError(null);
+    } catch (caught) {
+      if (caught instanceof JobsApiError && ((caught.status === 409 && caught.code === "JOB_NOT_CANCELLABLE") || caught.status === 0 || caught.status >= 500)) {
+        setNeedsReconciliation(true);
+        onConflict();
+        inFlight.current = false;
+        await reconcile();
+      } else {
+        setError(caught);
+      }
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -104,19 +133,21 @@ export function CancelJobAction({ job, api, onCancelled }: {
 
   return (
     <div className="jobs-action">
-      {error !== null && <ErrorNotice error={error} retry={cancel} />}
-      <button type="button" className="jobs-danger" disabled={busy} onClick={cancel}>
+      {error !== null && <ErrorNotice error={error} retry={needsReconciliation ? reconcile : undefined} retryLabel="Tải lại trạng thái" />}
+      <button type="button" className="jobs-danger" disabled={busy || needsReconciliation} onClick={cancel}>
         {busy ? "Đang hủy…" : "Hủy công việc"}
       </button>
     </div>
   );
 }
 
-export function JobDetail({ job, role, api, onCancelled }: {
+export function JobDetail({ job, role, api, onCancelled, onReconciled, onConflict }: {
   job: JobResponse;
   role: AuthUser["role"];
   api: JobsApi;
   onCancelled: (job: JobResponse) => void;
+  onReconciled: (job: JobResponse) => void;
+  onConflict: () => void;
 }) {
   return (
     <section className="job-detail" aria-label="Chi tiết công việc">
@@ -132,7 +163,7 @@ export function JobDetail({ job, role, api, onCancelled }: {
         {job.terminal_at && <><dt>Kết thúc</dt><dd>{job.terminal_at}</dd></>}
         {job.status === "FAILED" && job.failure_reason && <><dt>Lý do</dt><dd>{failureLabels[job.failure_reason]}</dd></>}
       </dl>
-      {role === "CLIENT" && <CancelJobAction job={job} api={api} onCancelled={onCancelled} />}
+      {role === "CLIENT" && <CancelJobAction job={job} api={api} onCancelled={onCancelled} onReconciled={onReconciled} onConflict={onConflict} />}
     </section>
   );
 }
@@ -252,6 +283,8 @@ export function JobsPage({ api, user }: { api: JobsApi; user: AuthUser }) {
   const [detailReloadVersion, setDetailReloadVersion] = useState(0);
   const listRequestKey = JSON.stringify([user.id, user.role, statusFilter, cursor ?? null, reloadVersion]);
   const detailRequestKey = JSON.stringify([user.id, user.role, selectedId, detailReloadVersion]);
+  const detailRequestKeyRef = useRef(detailRequestKey);
+  detailRequestKeyRef.current = detailRequestKey;
   const collection = listResult?.key === listRequestKey ? listResult.collection : emptyCollection;
   const listError = listResult?.key === listRequestKey ? listResult.error : null;
   const listLoading = listResult?.key !== listRequestKey;
@@ -270,9 +303,10 @@ export function JobsPage({ api, user }: { api: JobsApi; user: AuthUser }) {
   useEffect(() => {
     if (!selectedId) return;
     const controller = new AbortController();
+    const requestKey = detailRequestKey;
     api.getJob(selectedId, controller.signal)
-      .then((job) => { if (!controller.signal.aborted) setDetailResult({ key: detailRequestKey, job, error: null }); })
-      .catch((error: unknown) => { if (!controller.signal.aborted) setDetailResult({ key: detailRequestKey, job: null, error }); });
+      .then((job) => { if (!controller.signal.aborted && detailRequestKeyRef.current === requestKey) setDetailResult({ key: requestKey, job, error: null }); })
+      .catch((error: unknown) => { if (!controller.signal.aborted && detailRequestKeyRef.current === requestKey) setDetailResult({ key: requestKey, job: null, error }); });
     return () => controller.abort();
   }, [api, user.id, user.role, selectedId, detailReloadVersion]);
 
@@ -294,9 +328,27 @@ export function JobsPage({ api, user }: { api: JobsApi; user: AuthUser }) {
     setPreviousCursors((previous) => previous.slice(0, -1));
   }
 
-  function changed(job: JobResponse) {
+  function submitSucceeded(job: JobResponse) {
+    const nextKey = JSON.stringify([user.id, user.role, job.id, detailReloadVersion]);
+    detailRequestKeyRef.current = nextKey;
+    setSelectedId(job.id);
+    setDetailResult({ key: nextKey, job, error: null });
+    setDetailReloadVersion((version) => version + 1);
+    setReloadVersion((version) => version + 1);
+  }
+
+  function cancelled(job: JobResponse) {
     setDetailResult({ key: detailRequestKey, job, error: null });
     setReloadVersion((version) => version + 1);
+  }
+
+  function reconciled(job: JobResponse) {
+    setDetailResult({ key: detailRequestKey, job, error: null });
+  }
+
+  function selectJob(id: string) {
+    detailRequestKeyRef.current = JSON.stringify([user.id, user.role, id, detailReloadVersion]);
+    setSelectedId(id);
   }
 
   return (
@@ -305,7 +357,7 @@ export function JobsPage({ api, user }: { api: JobsApi; user: AuthUser }) {
         <div><p className="jobs-eyebrow">GPU Resource Marketplace</p><h1>{user.role === "CLIENT" ? "My Jobs" : user.role === "WORKER" ? "Assigned Jobs" : "All Jobs"}</h1></div>
         <span className="jobs-role">{user.role}</span>
       </header>
-      {user.role === "CLIENT" && <SubmitJobForm key={user.id} onSubmit={(attempt) => api.submitJob(attempt)} onSubmitted={changed} />}
+      {user.role === "CLIENT" && <SubmitJobForm key={user.id} onSubmit={(attempt) => api.submitJob(attempt)} onSubmitted={submitSucceeded} />}
       <section className="jobs-browser" aria-labelledby="jobs-list-title">
         <div className="jobs-section-heading"><h2 id="jobs-list-title">Công việc</h2>
           <label>Lọc trạng thái
@@ -326,7 +378,7 @@ export function JobsPage({ api, user }: { api: JobsApi; user: AuthUser }) {
           }}
           retryLabel={listError instanceof JobsApiError && listError.code === "INVALID_CURSOR" ? "Tải lại từ đầu" : undefined}
         />}
-        <JobsList jobs={collection.items} loading={listLoading} selectedId={selectedId} onSelect={setSelectedId} />
+        <JobsList jobs={collection.items} loading={listLoading} selectedId={selectedId} onSelect={selectJob} />
         <nav className="jobs-pagination" aria-label="Phân trang công việc">
           <button type="button" onClick={previousPage} disabled={listLoading || previousCursors.length === 0}>Trang trước</button>
           <button type="button" onClick={nextPage} disabled={listLoading || !collection.next_cursor}>Trang tiếp</button>
@@ -335,7 +387,7 @@ export function JobsPage({ api, user }: { api: JobsApi; user: AuthUser }) {
       <section className="jobs-detail-panel" aria-live="polite">
         {detailLoading && <p role="status">Đang tải chi tiết…</p>}
         {detailError !== null && <ErrorNotice error={detailError} retry={() => setDetailReloadVersion((version) => version + 1)} />}
-        {detail && <JobDetail job={detail} role={user.role} api={api} onCancelled={changed} />}
+        {detail && <JobDetail job={detail} role={user.role} api={api} onCancelled={cancelled} onReconciled={reconciled} onConflict={() => setReloadVersion((version) => version + 1)} />}
       </section>
     </main>
   );

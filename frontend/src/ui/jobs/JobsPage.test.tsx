@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AuthUser, UserRole } from "../../api/auth";
@@ -7,12 +7,14 @@ import type { JobCollectionResponse, JobResponse, JobsApi } from "../../api/jobs
 import { JobsPage } from "./JobsPage";
 
 const JOB_ID = "33333333-3333-4333-8333-333333333333";
+const JOB_A = "33333333-3333-4333-8333-333333333331";
+const JOB_B = "33333333-3333-4333-8333-333333333332";
 const LISTING_ID = "22222222-2222-4222-8222-222222222222";
 const WORKER_ID = "11111111-1111-4111-8111-111111111111";
 
-function job(status: JobResponse["status"] = "QUEUED"): JobResponse {
+function job(status: JobResponse["status"] = "QUEUED", id = JOB_ID): JobResponse {
   return {
-    id: JOB_ID,
+    id,
     listing_id: LISTING_ID,
     worker_id: WORKER_ID,
     gpu_count: 2,
@@ -147,12 +149,138 @@ describe("GPU-005 Jobs frontend foundation", () => {
     expect(screen.queryByRole("button", { name: "Hủy công việc" })).not.toBeInTheDocument();
   });
 
-  it("cancels a QUEUED Job and updates the displayed state", async () => {
-    const api = setup("CLIENT");
+  it("P2-02C preserves successful cancellation behavior and refreshes the list", async () => {
+    const listJobs = vi.fn().mockResolvedValue({ items: [job()], next_cursor: null });
+    const api = setup("CLIENT", { listJobs });
     fireEvent.click(await screen.findByRole("button", { name: new RegExp(JOB_ID) }));
     fireEvent.click(await screen.findByRole("button", { name: "Hủy công việc" }));
     await waitFor(() => expect(api.cancelJob).toHaveBeenCalledWith(JOB_ID));
     await waitFor(() => expect(screen.getAllByText("Đã hủy").length).toBeGreaterThan(0));
+    expect(screen.queryByRole("button", { name: "Hủy công việc" })).not.toBeInTheDocument();
+    await waitFor(() => expect(listJobs).toHaveBeenCalledTimes(2));
+    expect(api.cancelJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("P2-01A selects and shows the submitted Job instead of leaving the previous selection", async () => {
+    const api = setup("CLIENT", {
+      listJobs: vi.fn()
+        .mockResolvedValueOnce({ items: [job("QUEUED", JOB_A)], next_cursor: null })
+        .mockResolvedValueOnce({ items: [job("QUEUED", JOB_A), job("QUEUED", JOB_B)], next_cursor: null }),
+      getJob: vi.fn().mockImplementation((id: string) => Promise.resolve(job("QUEUED", id))),
+      submitJob: vi.fn().mockResolvedValue(job("QUEUED", JOB_B)),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(JOB_A) }));
+    const detailRegion = await screen.findByRole("region", { name: "Chi tiết công việc" });
+    expect(await within(detailRegion).findByText(JOB_A)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Listing ID (UUIDv4)"), { target: { value: LISTING_ID } });
+    fireEvent.click(screen.getByRole("button", { name: "Gửi công việc" }));
+
+    const selectedB = await screen.findByRole("button", { name: new RegExp(JOB_B) });
+    await waitFor(() => expect(selectedB).toHaveAttribute("aria-current", "true"));
+    expect(screen.getByRole("button", { name: new RegExp(JOB_A) })).not.toHaveAttribute("aria-current", "true");
+    await waitFor(() => expect(screen.getByRole("region", { name: "Chi tiết công việc" })).toHaveTextContent(JOB_B));
+    expect(api.listJobs).toHaveBeenCalledTimes(2);
+  });
+
+  it("P2-01B ignores a stale detail response that completes after a successful new submission", async () => {
+    let finishA!: (value: JobResponse) => void;
+    const api = setup("CLIENT", {
+      listJobs: vi.fn()
+        .mockResolvedValueOnce({ items: [job("QUEUED", JOB_A)], next_cursor: null })
+        .mockResolvedValueOnce({ items: [job("QUEUED", JOB_A), job("QUEUED", JOB_B)], next_cursor: null }),
+      getJob: vi.fn().mockImplementation((id: string) => id === JOB_A
+        ? new Promise<JobResponse>((resolve) => { finishA = resolve; })
+        : Promise.resolve(job("QUEUED", JOB_B))),
+      submitJob: vi.fn().mockResolvedValue(job("QUEUED", JOB_B)),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(JOB_A) }));
+    await waitFor(() => expect(api.getJob).toHaveBeenCalledWith(JOB_A, expect.any(AbortSignal)));
+    fireEvent.change(screen.getByLabelText("Listing ID (UUIDv4)"), { target: { value: LISTING_ID } });
+    fireEvent.click(screen.getByRole("button", { name: "Gửi công việc" }));
+    expect(await within(await screen.findByRole("region", { name: "Chi tiết công việc" })).findByText(JOB_B)).toBeInTheDocument();
+    finishA(job("QUEUED", JOB_A));
+    const detailRegion = screen.getByRole("region", { name: "Chi tiết công việc" });
+    await waitFor(() => expect(within(detailRegion).getByText(JOB_B)).toBeInTheDocument());
+    expect(within(detailRegion).queryByText(JOB_A)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: new RegExp(JOB_B) })).toHaveAttribute("aria-current", "true");
+  });
+
+  it("P2-01C keeps the same Job selected after cancel and refreshes its list state", async () => {
+    const listJobs = vi.fn()
+      .mockResolvedValueOnce({ items: [job("QUEUED", JOB_A)], next_cursor: null })
+      .mockResolvedValueOnce({ items: [job("CANCELLED", JOB_A)], next_cursor: null });
+    const api = setup("CLIENT", {
+      listJobs,
+      getJob: vi.fn().mockResolvedValue(job("QUEUED", JOB_A)),
+      cancelJob: vi.fn().mockResolvedValue(job("CANCELLED", JOB_A)),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(JOB_A) }));
+    fireEvent.click(await screen.findByRole("button", { name: "Hủy công việc" }));
+    await waitFor(() => expect(api.cancelJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(listJobs).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: new RegExp(JOB_A) })).toHaveAttribute("aria-current", "true");
+    expect(await within(screen.getByRole("region", { name: "Chi tiết công việc" })).findByText("Đã hủy")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Hủy công việc" })).not.toBeInTheDocument();
+  });
+
+  it("P2-02A reconciles a Cancel 409 against the server and removes the stale Cancel action", async () => {
+    const listJobs = vi.fn()
+      .mockResolvedValueOnce({ items: [job("QUEUED", JOB_A)], next_cursor: null })
+      .mockResolvedValueOnce({ items: [job("RUNNING", JOB_A)], next_cursor: null });
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED", JOB_A))
+      .mockResolvedValueOnce(job("RUNNING", JOB_A));
+    const cancelJob = vi.fn().mockRejectedValue(new JobsApiError("JOB_NOT_CANCELLABLE", 409));
+    setup("CLIENT", { listJobs, getJob, cancelJob });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(JOB_A) }));
+    fireEvent.click(await screen.findByRole("button", { name: "Hủy công việc" }));
+
+    expect(await within(screen.getByRole("region", { name: "Chi tiết công việc" })).findByText("Đang chạy")).toBeInTheDocument();
+    expect(getJob).toHaveBeenCalledTimes(2);
+    expect(listJobs).toHaveBeenCalledTimes(2);
+    expect(cancelJob).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Hủy công việc" })).not.toBeInTheDocument();
+  });
+
+  it("P2-02B locks Cancel when conflict reconciliation fails and allows an explicit status reload", async () => {
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED", JOB_A))
+      .mockRejectedValueOnce(new JobsApiError("DEPENDENCY_UNAVAILABLE", 503))
+      .mockResolvedValueOnce(job("RUNNING", JOB_A));
+    const api = setup("CLIENT", {
+      listJobs: vi.fn().mockResolvedValue({ items: [job("QUEUED", JOB_A)], next_cursor: null }),
+      getJob,
+      cancelJob: vi.fn().mockRejectedValue(new JobsApiError("JOB_NOT_CANCELLABLE", 409)),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(JOB_A) }));
+    fireEvent.click(await screen.findByRole("button", { name: "Hủy công việc" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Dịch vụ tạm thời chưa sẵn sàng");
+    expect(screen.getByRole("button", { name: "Tải lại trạng thái" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hủy công việc" })).toBeDisabled();
+    expect(within(screen.getByRole("region", { name: "Chi tiết công việc" })).queryByText("Đã hủy")).not.toBeInTheDocument();
+    expect(api.cancelJob).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Tải lại trạng thái" }));
+    expect(await within(screen.getByRole("region", { name: "Chi tiết công việc" })).findByText("Đang chạy")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Hủy công việc" })).not.toBeInTheDocument();
+  });
+
+  it("P2-02D reconciles an uncertain Cancel without automatically posting Cancel again", async () => {
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED", JOB_A))
+      .mockResolvedValueOnce(job("RUNNING", JOB_A));
+    const cancelJob = vi.fn().mockRejectedValue(new JobsApiError("NETWORK_ERROR", 0));
+    const api = setup("CLIENT", {
+      listJobs: vi.fn().mockResolvedValue({ items: [job("QUEUED", JOB_A)], next_cursor: null }),
+      getJob,
+      cancelJob,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(JOB_A) }));
+    fireEvent.click(await screen.findByRole("button", { name: "Hủy công việc" }));
+    expect(await within(screen.getByRole("region", { name: "Chi tiết công việc" })).findByText("Đang chạy")).toBeInTheDocument();
+    expect(api.getJob).toHaveBeenCalledTimes(2);
+    expect(cancelJob).toHaveBeenCalledTimes(1);
+    expect(within(screen.getByRole("region", { name: "Chi tiết công việc" })).queryByText("Đã hủy")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Hủy công việc" })).not.toBeInTheDocument();
   });
 
