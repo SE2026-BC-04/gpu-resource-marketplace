@@ -2,8 +2,9 @@
 
 Record/error constructors are supplied by the consumer: this module does not
 import the unmerged Listings application or define alternate production DTOs.
-D7 is not approved yet: effective metadata/status writes fail closed. Read,
-create, row-lock and constraint-reader paths use the existing schema/grants.
+Effective metadata/status writes require the approved D7 trigger. The same
+UPDATE statement checks the catalog while holding its target-table write lock,
+so a missing/disabled trigger fails closed without mutating a Listing.
 """
 
 import logging
@@ -13,7 +14,7 @@ from types import TracebackType
 from typing import Any, Generic, TypeVar
 from uuid import UUID
 
-from sqlalchemy import func, insert, select, text, tuple_
+from sqlalchemy import func, insert, select, text, tuple_, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -27,6 +28,25 @@ logger = logging.getLogger(__name__)
 METADATA_FIELDS = frozenset(
     {"gpu_model", "vram_gb", "total_gpu_count", "mock_price_per_hour"}
 )
+# Keep the gate in the UPDATE itself: target-table RowExclusiveLock is acquired
+# before execution, preventing concurrent trigger DDL between check and write.
+D7_READY = text("""
+    EXISTS (
+        SELECT 1 FROM pg_catalog.pg_trigger AS t
+        JOIN pg_catalog.pg_proc AS p ON p.oid = t.tgfoid
+        JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace
+        WHERE t.tgrelid = 'public.gpu_listings'::pg_catalog.regclass
+          AND t.tgname = 'trg_gpu_listings_guard_update'
+          AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
+          AND t.tgtype = 19 AND t.tgqual IS NULL
+          AND t.tgattr = ''::pg_catalog.int2vector
+          AND n.nspname = 'public' AND p.proname = 'fn_gpu_listings_guard_update'
+          AND p.pronargs = 0 AND NOT p.prosecdef
+          AND p.prorettype = 'pg_catalog.trigger'::pg_catalog.regtype
+          AND 'search_path=pg_catalog' = ANY(p.proconfig)
+          AND pg_catalog.current_setting('session_replication_role') = 'origin'
+    )
+""")
 
 
 class PostgresListingUnitOfWork(Generic[W, L]):
@@ -266,23 +286,44 @@ class PostgresListingRepository(Generic[W, L]):
         self._uow._require_lock(listing_id)
         if set(changes) - METADATA_FIELDS:
             raise ValueError("Invalid internal update fields")
-        if not changes:
-            record = self.get(listing_id)
-            if record is None:
-                self._uow._fail()
+        record = self.get(listing_id)
+        if record is None:
+            self._uow._fail()
+        effective = {
+            key: value
+            for key, value in changes.items()
+            if value != getattr(record, key)
+        }
+        if not effective:
             return record
-        # No timestamp write/owner connection or unapproved trigger workaround.
-        # Implement effective UPDATE only after the separate D7 decision.
-        self._uow._fail()
+        return self._write(listing_id, effective)
 
     def set_status(self, listing_id: UUID, status: str) -> L:
         self._uow._require_lock(listing_id)
         if status not in {"ACTIVE", "PAUSED"}:
             raise ValueError("Invalid internal status")
         record = self.get(listing_id)
-        if record is not None and record.status == status:
+        if record is None:
+            self._uow._fail()
+        if record.status == status:
             return record
-        self._uow._fail()
+        return self._write(listing_id, {"status": status})
+
+    def _write(self, listing_id: UUID, changes: Mapping[str, Any]) -> L:
+        # Column allowlists are validated by update/set_status. Never send the
+        # complete ORM row, allocation/owner or a caller-computed timestamp.
+        changed_id = self._uow._execute(
+            update(GpuListing.__table__)
+            .where(GpuListing.id == listing_id, D7_READY)
+            .values(**changes)
+            .returning(GpuListing.id)
+        ).scalar_one_or_none()
+        if changed_id is None:
+            self._uow._fail()
+        record = self.get(changed_id)
+        if record is None:
+            self._uow._fail()
+        return record
 
 
 class PostgresJobConstraintReader(Generic[W, L]):

@@ -1,8 +1,8 @@
-"""Delegated R1: existing schema only; D7/HTTP/Jobs/Manager acceptance is separate.
+"""Delegated R1 repository tests; HTTP/Jobs/Manager acceptance is separate.
 
 Setup uses the vetted disposable owner fixture. Every adapter statement executes
 as gpm_api_rw, with a new Session/connection and real PostgreSQL transactions.
-SQL UPDATEs used as lock stimuli/grant probes are not D7 or API write acceptance.
+SQL UPDATEs used as lock stimuli/grant probes are not HTTP/Manager acceptance.
 """
 
 import logging
@@ -19,6 +19,8 @@ from sqlalchemy import event, insert, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+
+from db_safety import verify_cluster
 
 from gpu_marketplace.domain.identity import (
     User,
@@ -363,23 +365,41 @@ def test_actual_api_role_cannot_update_managed_columns(sessions, data, field, va
 
 
 @pytest.mark.parametrize("operation", ["patch", "pause", "resume"])
-def test_effective_writes_fail_closed_pending_d7(sessions, data, operation):
+def test_effective_writes_fail_closed_when_d7_disabled(
+    baseline_database, test_database, sessions, data, operation
+):
     listing_id = data.paused if operation == "resume" else data.listing
-    with make_uow(sessions) as uow:
-        before = uow.listings.get(listing_id)
-    with pytest.raises(StoreUnavailable):
+    with baseline_database.begin() as owner:
+        verify_cluster(owner, test_database)
+        owner.execute(
+            text(
+                "ALTER TABLE public.gpu_listings DISABLE TRIGGER trg_gpu_listings_guard_update"
+            )
+        )
+    try:
         with make_uow(sessions) as uow:
-            extra = uow.listings.create(data.worker, VALUES)
-            uow.listings.get_for_update(listing_id)
-            if operation == "patch":
-                uow.listings.update(listing_id, {"total_gpu_count": 9})
-            else:
-                uow.listings.set_status(
-                    listing_id, "PAUSED" if operation == "pause" else "ACTIVE"
+            before = uow.listings.get(listing_id)
+        with pytest.raises(StoreUnavailable):
+            with make_uow(sessions) as uow:
+                extra = uow.listings.create(data.worker, VALUES)
+                uow.listings.get_for_update(listing_id)
+                if operation == "patch":
+                    uow.listings.update(listing_id, {"total_gpu_count": 9})
+                else:
+                    uow.listings.set_status(
+                        listing_id, "PAUSED" if operation == "pause" else "ACTIVE"
+                    )
+        with make_uow(sessions) as uow:
+            assert uow.listings.get(listing_id) == before
+            assert uow.listings.get(extra.id) is None
+    finally:
+        with baseline_database.begin() as owner:
+            verify_cluster(owner, test_database)
+            owner.execute(
+                text(
+                    "ALTER TABLE public.gpu_listings ENABLE TRIGGER trg_gpu_listings_guard_update"
                 )
-    with make_uow(sessions) as uow:
-        assert uow.listings.get(listing_id) == before
-        assert uow.listings.get(extra.id) is None
+            )
 
 
 def test_noop_does_not_write_or_require_d7(sessions, data):
@@ -417,8 +437,10 @@ def test_two_sessions_wait_then_read_fresh_listing_and_job_guard(
             ).scalar_one()
             ready.set()
             record = second.listings.get_for_update(data.listing)
-            return record.total_gpu_count, second.jobs.max_queued_gpu_count(
-                data.listing
+            return (
+                record.total_gpu_count,
+                second.jobs.max_queued_gpu_count(data.listing),
+                record.updated_at,
             )
 
     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -439,12 +461,8 @@ def test_two_sessions_wait_then_read_fresh_listing_and_job_guard(
                     break
                 Event().wait(0.02)
             assert blocked, "No real PostgreSQL lock wait was observed"
-            # Restricted-role raw SQL as concurrency stimulus, not adapter/D7 acceptance.
-            first._execute(
-                update(GpuListing)
-                .where(GpuListing.id == data.listing)
-                .values(total_gpu_count=12)
-            )
+            changed = first.listings.update(data.listing, {"total_gpu_count": 12})
+            # Raw Job insert is a protocol stimulus, not implemented TX-SUBMIT.
             first._execute(
                 insert(Job).values(
                     client_id=data.client,
@@ -457,7 +475,7 @@ def test_two_sessions_wait_then_read_fresh_listing_and_job_guard(
                 )
             )
             first.commit()
-        assert pending.result(timeout=5) == (12, 10)
+        assert pending.result(timeout=5) == (12, 10, changed.updated_at)
 
 
 def test_unreachable_db_is_sanitized_without_sql_or_dsn(caplog):
