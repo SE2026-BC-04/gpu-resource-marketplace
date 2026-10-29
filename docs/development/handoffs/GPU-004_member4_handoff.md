@@ -2,13 +2,14 @@
 
 > **Phase:** 1D / GPU-004
 > **Ngày phê duyệt thiết kế:** 21/10/2026
-> **Trạng thái:** `APPROVED DESIGN / IMPLEMENTATION NOT STARTED`
+> **Trạng thái:** `APPROVED DESIGN / IN_PROGRESS / INTEGRATION_BLOCKED` — core/router/UI và helper nối Auth thật có trên branch; chưa nghiệm thu PostgreSQL/shared app/E2E
 > **Phụ trách:** Thành viên 4 (Listings), nhóm trưởng (shared integration)
 > **Baseline thiết kế ban đầu:** `main@c90f540b385c8d11789f994748e4f5441bcb7e1b`
 > **Rà soát đồng bộ ngày 23/10/2026:** `main@538802adebeaeb74dcccd0c025f3a7abc81336c0` và handoff tại `ffb17de39d32956087aca187d490bb03c32ee980`; chỉ rà soát tài liệu, không xác nhận dependency đã sẵn sàng hay test ứng dụng đã chạy.
 > **Đối chiếu upstream ngày 24/10/2026:** `main@21071549937888c997b250625607a16a97a20419`; Phase 1D §2.1/§3.2 đã ghi điều kiện nhận DB/Auth và dùng chung fixture. Schema matrix GPU-002-A revision 3 vẫn `PROPOSED`, D1–D12 và `XPH-GPU-002-01` chưa đóng; không coi bản cập nhật này là ACK hoặc dependency đã triển khai.
+> **Baseline coding hiện tại:** `main@ce99293f99982041b40ba4e5c323353525baf44d` (25/10/2026), đã nhận PostgreSQL AccountReader #25 bằng merge thường `213455f`; branch thêm CR body bounds đã duyệt (API v0.10). Account adapter đã có, còn chờ nối production app; Listing UoW/D7/shared wiring chưa bàn giao. Evidence mới ở Phase 1D §3.10; các mốc cũ giữ làm lịch sử. Không duyệt thay quyết định khác.
 > **Tài liệu:** [Phase 1D — GPU Listings Management](../../architecture/phases/phase1d_gpu_listings.md) — nguồn thiết kế chi tiết đã duyệt; trạng thái code/test được ghi riêng.
-> **Nguồn bắt buộc:** API Contract v0.6 §7; Database Design v0.4 §§9,11; Module Design; Test Design; Team Contribution Rules; Inter-Phase Change Control.
+> **Nguồn bắt buộc:** API Contract v0.10 §§7/14.6; Database Design v0.4 §§9,11; Module Design; Test Design; Team Contribution Rules; Inter-Phase Change Control.
 
 ## 0. Mandatory Reading & Working Rules — BẮT BUỘC
 
@@ -23,6 +24,7 @@
 **B. Kiến trúc & mẫu xác nhận:**
 
 - [Kiến trúc GPU-004 đã phê duyệt](../../architecture/phases/phase1d_gpu_listings.md) — phạm vi, invariants, status, acceptance gates của Phase này.
+- [Implementation README](../../../backend/src/gpu_marketplace/listings/README.md) — code slice, consumption ports, cách nối dependency thật và giới hạn của test doubles; cần TV2/TV3/nhóm trưởng review trước tích hợp.
 - [Inter-Phase Review Template](../../architecture/phases/_interphase_review_template.md) — mẫu bắt buộc dùng khi có thay đổi thực chất ảnh hưởng Phase khác.
 
 **C. Thiết kế / dependency phải đối chiếu theo nhiệm vụ:**
@@ -127,9 +129,31 @@ Với **thay đổi thật**, ghi old→new SHA/contract, ảnh hưởng thực 
 - Trước khi triển khai cần explicit assignment/authorization, dependency GPU-002/003 có evidence thật, và technical review shared changes.
 - `IMPLEMENTED` chỉ được ghi khi tất cả test áp dụng được đã chạy đúng phạm vi, PR review/merge hoàn tất và cross-phase gate không còn blocker.
 
-**Tình trạng khi giao file:** `APPROVED DESIGN / NOT IMPLEMENTED`. Chưa có ACK thực tế đối với diff code/contract vì chưa phát sinh.
+**Cập nhật coding slice 24/10/2026:** `IN_PROGRESS / INTEGRATION_BLOCKED`, branch `feat/gpu-004-listings` trên `main@f9124f7`, bàn giao bằng Draft PR. Backend/core/router và frontend component/client đã được viết; 154 backend tests đạt (102 Listings với doubles), 58 upstream PostgreSQL tests skipped do thiếu cluster test, 27 frontend tests và TypeScript/build đạt trong phạm vi Phase 1D §3.5. Consumption interfaces chưa có ACK TV2/TV3/nhóm trưởng cho diff implementation (`XPH-GPU-004-01`, `POTENTIAL_IMPACT / AWAITING_CROSS_PHASE_ACK`); adapter DB/Auth và shared wiring chưa có. Không gọi đây là full Phase 1D PASS hoặc `IMPLEMENTED`.
+
+**Cập nhật 25/10/2026:** nhánh đã sync `main@028c355`; helper `create_authenticated_listing_router` dùng dependency GPU-003 thật. Có **491 backend tests pass / 58 PostgreSQL tests skipped**, gồm **201** Listings tests (**65** real-Auth/persistence-double cases và **32** UUID-path regression cases); frontend **27 pass**, TypeScript/build **PASS**. Đã sửa P2 để 4 routes từ chối UUID không canonical bằng 422 trước Listing UoW. Terminal Job guard dùng đúng `COMPLETED/FAILED/CANCELLED` của schema; chưa phải DB fixture đầy đủ. Lệnh và giới hạn chi tiết ở Phase 1D §3.6/README.
+
+**Auth coordination:** PR #18/#23/#26 đã merge, API Contract ghi profile `DEC-P1-03`; [ACK #13](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/13#issuecomment-6372588314) là lịch sử, [ACK `XPH-GPU-003-05`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/23#issuecomment-6382291607) và [ACK session #26](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/26#issuecomment-6387480528) còn actions. Đã tiêu thụ dependency/SessionStore thật; PostgreSQL AccountReader #25 đã merge tại `ce99293`, chưa nối production Auth/app. Consumer tests không thay PostgreSQL Listing UoW hoặc mounted-app evidence.
+
+**DB coordination:** [TV4 ACK_WITH_ACTIONS cho D1 #27 tại `ab32545`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/27#issuecomment-6387610827); #27 đã merge tại baseline mới. [Kiểm kê TV4 #22](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/22#issuecomment-6387611172) đã nhận xác nhận người dùng chưa từng dùng DB/Alembic cho dự án, không cần D1 recovery theo lịch sử báo cáo. Docker engine stopped, local DB tests `BLOCKED`; chưa live query revision/kiểm kê volume hay bootstrap/migrate/downgrade.
+
+**Gate giữ nguyên:** [owner review R1–R4 của #17](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6380470641) chưa đóng. Chờ PostgreSQL adapters/grants/timestamps, shared router/UI/config/correlation/audit, DB/race/E2E tests, ACK/actions và independent human re-review trên HEAD cuối. Không coi consumer ACK là human approval hoặc full Phase 1D `PASS`.
 
 ## Pre-PR Checklist — GPU-004 (chưa xác nhận)
+
+**Bàn giao tiếp sau #26/#27 merge (25/10/2026):** đã đồng bộ main, thêm `createSessionListingsApi`/`SessionListingsPage` dùng chung session thật theo handoff TV3 §9, chưa mount shared shell. TV2 [ACK ports/service](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6388130749), TV3 [xác nhận backend Auth](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6389075737), TV5 [ACK_WITH_ACTIONS/HOLD](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6389243659) trên `f7d3c0d`; cần xử lý actions/re-review diff mới, không coi ACK là human approval.
+
+**CR-GPU-004-BODY-01: APPROVED_FOR_IMPLEMENTATION** theo [owner decision](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6395344255), path A atomic L2 trong #17. Đã cập nhật API v0.10 + code/oracles: POST/PATCH tối đa 16,384 bytes inclusive / depth 8, Auth→WORKER→body→UoW; declared/actual bytes được kiểm tra trước đọc/copy, 413/400 an toàn. Dùng lại helpers đã review, không sửa Auth/Jobs/schema/shared app. Listing client xử lý 413 không logout/retry.
+
+Actual tests tại `d693ab9`: **607 backend passed / 132 PostgreSQL skipped**, gồm **308 Listings**, 70 body-bound cases mới (trước sửa 32 fail/38 pass); frontend **104 pass**, TypeScript/build/Ruff PASS. [Owner re-review](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#pullrequestreview-5642309220) đã xác nhận P1 remediation **RESOLVED ở mức source/HTTP tests**. R1 còn chờ TV2 UoW/D7/#25; PG/race/browser E2E/audit BLOCKED/NOT_RUN. Không tự đóng R1–R4/ACK actions; thay đổi L2 cần hai independent human reviews trên final diff. Lệnh/giới hạn ở Phase 1D §3.8/README.
+
+**Mốc trước #25 merge — 25/10/2026:** [TV2 ACK_WITH_ACTIONS tại `d693ab9`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6396202629) không phát hiện P0/P1/P2, persistence ports/service không cần đổi. [Nhóm trưởng điều phối](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6395792082): TV2 hoàn tất #25, trình Listing PostgreSQL adapter/UoW và D7; nhóm trưởng điều phối shared integration trong PR riêng; TV4 tiếp nhận revision và chạy DB-backed/E2E khi đủ điều kiện. Tại mốc ghi nhận này, #25 còn OPEN; sau đó đã merge vào baseline hiện tại. Listing adapter/D7 vẫn chưa bàn giao hoặc được duyệt; chưa có ETA xác nhận. Hai ghi chú P3 về media type là tùy chọn; giữ nguyên hành vi/API đã duyệt.
+
+**Kiểm tra sync tại baseline cũ:** với `origin/main@7fa6afc` và `d693ab9`, `git rev-list --left-right --count HEAD...origin/main` = **8 / 0**, kiểm tra main là ancestor trả **0**. Đây là evidence lịch sử ở Phase 1D §3.9, không áp dụng cho main sau #25 merge.
+
+**Xử lý review `05960f2`:** [owner review](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#pullrequestreview-5642680832) yêu cầu đồng bộ baseline/Draft/metadata. Đã đưa PR về Draft và merge `main@ce99293` qua `213455f`, không xung đột/force-push; AccountReader `PostgresAccountReader(sessionmaker)` đã có nhưng chưa nối production app. Sau merge, branch **ahead 10 / behind 0**. Full backend tại `213455f`: **608 passed / 143 PostgreSQL skipped**, gồm **308 Listings**, một warning có sẵn. PostgreSQL Listings/race/E2E/audit vẫn BLOCKED/NOT_RUN. R1–R4 và hai independent human reviews L2 giữ nguyên; evidence hiện tại ở Phase 1D §3.10. Không thay Listing contracts hoặc áp dụng hai góp ý P3 thành hành vi mới.
+
+Lịch sử DB TV4 đã được người dùng xác nhận: chưa từng dùng DB/Alembic cho dự án, D1 recovery không cần theo lịch sử báo cáo. Docker local vẫn stopped; không khởi động/apply migration trong lượt này. Giữ HOLD, chưa yêu cầu merge.
 
 > Checklist phải được chính thành viên phụ trách hoàn thành **trước khi yêu cầu merge** và gắn vào PR. Các ô bên dưới mặc định chưa đánh dấu; tài liệu được duyệt không đồng nghĩa đã hoàn thành các bước.
 

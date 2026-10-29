@@ -1,11 +1,13 @@
 # GPU Resource Marketplace - API Contract Design
 
-**Document version:** v0.9 — Auth request-body bounds and the `D-C1`/`D-C2` decisions from the PR #23 review (§14.5) added on top of v0.8 (`CR-GPU-003-UNICODE-01`); Markdown only<br>
-**Date:** 2026-10-24<br>
+**Document version:** v0.10 — owner-approved Listings request-body bounds (`CR-GPU-004-BODY-01`, §14.6), added on top of v0.9 Auth bounds; Markdown design record<br>
+**Date:** 2026-10-25<br>
 **Status:** **APPROVED_DESIGN** for the described API routes/DTOs, the 100 API contract-test IDs, and the owner-approved scope of `API-OPEN-01`, `API-OPEN-02`, and `API-OPEN-06` (2026-10-18). The additional JWT claim/header profile, fractional NumericDate representation and login-normalization repertoire were **owner-approved as `DEC-P1-03` on 2026-10-21** (recorded in [Phase 1 §6](../architecture/phases/phase1_project_foundation.md)) and are synchronized in §§4.5 and 14.3. The L2 change `CR-GPU-003-UNICODE-01` (rejection of U+0000 and surrogate code points in `login_name`, safe Unicode password handling) was **owner-approved on 2026-10-24** ([#16](https://github.com/SE2026-BC-04/gpu-resource-marketplace/issues/16)) and is recorded in §§4.2, 4.5, 6 and 14.4. The Auth request-body bounds and the `D-C1`/`D-C2` error decisions directed by the team lead in the PR #23 review (2026-10-24) are recorded in §§3.3, 4.2–4.4, 6 and 14.5; they become approved with the L2 review of PR #23. ADR-008 Option B is **ACCEPTED** (2026-10-18). All implementation/API/database tests remain `NOT_RUN`; this document makes no claim that application code or migrations exist.
 **Target repository path:** `docs/design/api-contract.md`  
 **Output scope:** Markdown documentation only; no source code, SQL migration, OpenAPI generator, Docker file, or CI workflow.  
 **Product scope:** Real GPU Marketplace simulation-only MVP. NOT the separate AD-090 assignment variant.
+
+**v0.10 scoped approval:** [OWNER DECISION — CR-GPU-004-BODY-01, 2026-10-25](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6395344255) marks the Listings body-bound design **APPROVED_FOR_IMPLEMENTATION**, allowing atomic L2 design + implementation in PR #17. This is not approval to merge/deploy or full Listing/database acceptance; two independent human reviews and the other PR gates remain required. Actual scoped test evidence belongs in PR #17/Phase 1D, not an inferred PASS for this design catalogue. Auth/Jobs policy is unchanged.
 
 ## 1. Goal, workflow, and source of truth
 
@@ -99,7 +101,7 @@ All controlled public HTTP errors return this **candidate** structure (fields no
 | `403` | Validly authenticated account but wrong role/permission | No mutation, log redacted denial |
 | `404` | Resource absent, or private resource owned by another account when existence should be concealed | No cross-owner data disclosure; do not rely on client-side filtering |
 | `409` | Legal request shape but conflicting immutable or current state (future cancel/pause/duplicate dispute, etc.) | Do not commit a partial business effect |
-| `413` | Request body larger than the endpoint's limit (Login: 16 KiB, §14.5), detected while the body is received | Rejected before parsing and before any account read; body never echoed |
+| `413` | Request body larger than the endpoint's limit: Login 16 KiB (§14.5); Listings POST/PATCH 16 KiB (§14.6), checked while received | Login: before account reads. Listings: after Auth/WORKER role, before JSON parsing and Listing UoW/SQL/mutation. Body never echoed |
 | `422` | Well-formed JSON, but typed/field validation failed | Stable field validation details may be added in next group; no internal schema dump |
 | `429` | Only if a rate-limit control is later explicitly adopted | Do not claim a rate limiter already exists |
 | `500` / `503` | Internal failure / temporary dependency unavailable | Generic public message and request ID; no stack trace or secret |
@@ -416,6 +418,8 @@ The API resolves the `WORKER` profile from the authenticated account, persists `
 
 **Allowed PATCH fields:** `gpu_model`, `vram_gb`, `total_gpu_count`, `mock_price_per_hour` only; at least one must be present. Omitted fields remain unchanged. An explicit `mock_price_per_hour: null` clears the optional price. `status` is **not** PATCH-writable; use Pause/Resume endpoints. Empty objects and invalid value/types -> `422`; unknown or server-owned keys -> `400 UNKNOWN_FIELD`.
 
+**POST/PATCH body boundary — APPROVED (`CR-GPU-004-BODY-01`):** both create (§7.6) and update (§7.7) accept at most **16,384 raw bytes, inclusive**, and at most **8 object/array levels counting the root**, ignoring brackets inside strings. Validate the authenticated WORKER first; check declared `Content-Length` before reading and count actual streamed bytes **before copying**, even with no length, an understated length or one oversized chunk. A numeric length above the bound, including excessive significant digits, or actual size above it -> **413 PAYLOAD_TOO_LARGE**; leading zeros do not change the value. Malformed length/framing, UTF-8/JSON, duplicate keys, NaN/Infinity, excessive depth or parser exhaustion -> **400 INVALID_JSON**. These checks finish **before any Listing UoW/SQL/mutation**. Existing application/json handling, typed/unknown-field semantics and pause/resume contracts remain unchanged. Exact size/depth does not bypass field validation; an array-valued metadata field at depth 8 is still `422`. Full decision and order are in §14.6.
+
 **Example request:**
 
 ```json
@@ -457,10 +461,11 @@ All errors use the Section 3.3 shape `{ "error": { "code", "message", "request_i
 | `403` | `FORBIDDEN` | Wrong user role for `create/edit/pause/resume` or forbidden `mine/all` list scope; no mutation |
 | `404` | `LISTING_NOT_FOUND` | Nonexistent or non-owned Listing on Worker mutation; hide owner resource existence |
 | `409` | `WORKER_PROFILE_MISSING`, `LISTING_HARDWARE_LOCKED`, `LISTING_CAPACITY_BELOW_ALLOCATED`, `LISTING_CAPACITY_BELOW_QUEUED_MAX` | Business invariant rejects entire mutation; no partial state change |
+| `413` | `PAYLOAD_TOO_LARGE` | POST/PATCH declared or actual raw body exceeds 16,384 bytes (§14.6); rejected before Listing UoW/SQL/mutation |
 | `422` | `VALIDATION_ERROR` | Wrong/missing typed field, malformed UUID path, empty PATCH or out-of-range values; no mutation |
 | `500`/`503` | `INTERNAL_ERROR`/`DEPENDENCY_UNAVAILABLE` | Unexpected failure or DB unavailable; no false success claim |
 
-`400 INVALID_JSON` is used for malformed JSON before field validation, as already proposed in Section 3.3. A pause/submit or edit/allocate race is not resolved by UI checks; it must be resolved by the DB lock and the rechecked state under a single authorized transaction.
+`400 INVALID_JSON` includes malformed framing/UTF-8/JSON, duplicate keys, nonstandard constants, excessive nesting and parser exhaustion before field validation (§14.6). For create/PATCH, precedence is **Auth → WORKER role → body validation → Listing UoW/SQL/mutation**: absent/invalid credential remains 401 and CLIENT/ADMIN remains 403 even with an oversized/malformed body. Never echo raw body or exception detail. A pause/submit or edit/allocate race is not resolved by UI checks; it must be resolved by the DB lock and the rechecked state under a single authorized transaction.
 
 ### 7.10. Reproducible Listing API contract tests (reviewed design; all `NOT_RUN`)
 
@@ -474,11 +479,11 @@ All errors use the Section 3.3 shape `{ "error": { "code", "message", "request_i
 | `API-LIST-04-SCOPE-RBAC` | C1 requests `scope=mine/all`; W1 requests `scope=all` | Every forbidden scope returns `403`, 0 private worker-management rows leaked |
 | `API-LIST-05-DETAIL` | As C1, `GET` detail of paused L2 and nonexistent UUID | L2 `200 status=PAUSED accepting_jobs=false`; missing ID `404`; no oracle/key/user secrets |
 | `API-LIST-06-CREATE` | W1 POST valid body with 8 GPUs and price `"12.50"` | `201`, Location includes new UUIDv4, `worker_id=W1` via owner join, `status=ACTIVE`, allocated=0, exactly one persisted row |
-| `API-LIST-07-CREATE-INVALID` | Create with `vram_gb=0`, `total_gpu_count=0`, `price="-1.00"`, `price="1.001"`, injected `worker_id`, missing model | Invalid numbers/missing model `422`; injected `worker_id` `400`; 0 Listing inserts across cases |
+| `API-LIST-07-CREATE-INVALID` | Create with `vram_gb=0`, `total_gpu_count=0`, `price="-1.00"`, `price="1.001"`, injected `worker_id`, missing model; additionally POST size 16,384/16,385, absent/false/extreme/malformed length, oversized single/multiple chunks, depth 8/9, brackets/escapes in strings, invalid UTF-8/JSON/duplicates/constants/parser exhaustion (§14.6) | Invalid numbers/missing model 422; injected `worker_id` 400 UNKNOWN_FIELD. Valid exact-size body can create, over-size 413; malformed/deep/parser failure 400; depth 8 reaches typed validation. All body rejections have safe envelopes, zero Listing UoW/SQL/mutation and 401/403 precedence; 0 inserts for rejected cases |
 | `API-LIST-08-CREATE-RBAC` | C1 and A1 POST valid Listing body | `403` each, 0 Listing inserts |
 | `API-LIST-09-PATCH-METADATA` | W1 PATCH L1 price from `"12.50"` to `"10.00"` | `200`, price updated, model/VRAM/capacity/status/allocated unchanged; no Job mutation |
 | `API-LIST-10-HARDWARE-BLOCK` | W1 PATCH model or VRAM of L1 while J_RUN and/or J_Q nonterminal | `409 LISTING_HARDWARE_LOCKED`, zero field changes; same-value no-op accepted |
-| `API-LIST-11-ALLOCATED-BOUND` | W1 PATCH L1 total capacity to 2 while 3 GPUs allocated | `409 LISTING_CAPACITY_BELOW_ALLOCATED`; total remains 8 |
+| `API-LIST-11-ALLOCATED-BOUND` | Original W1 PATCH total to 2 with 3 allocated; additionally run §14.6 byte/depth/framing/strict-JSON boundary cases on PATCH | Valid parsed capacity violation remains `409 LISTING_CAPACITY_BELOW_ALLOCATED`, total 8. Valid exact-size metadata PATCH can succeed; oversized 413, malformed/deep/parser failure 400 before UoW/SQL/guard/mutation. Preserve field errors and 401/403 precedence |
 | `API-LIST-12-QUEUED-BOUND` | W1 PATCH L1 capacity to 5 while 3 allocated and largest QUEUED request=6 | `409 LISTING_CAPACITY_BELOW_QUEUED_MAX`; total remains 8 |
 | `API-LIST-13-PAUSE-RACE` | Barrier: pause L1 commits before competing C1 submit/Manager allocate get Listing lock | Listing PAUSED; new submit rejected (`409 LISTING_PAUSED` by future Job contract), 0 new allocation; J_RUN remains runnable to terminal |
 | `API-LIST-14-RESUME-FIFO` | Pause L1 with J_Q waiting, then resume and run Manager | L1 ACTIVE; subsequent allocation follows `enqueue_seq` FIFO, 0 over-capacity, no automatic Job terminalization by API resume |
@@ -904,6 +909,21 @@ The team lead's review of GPU-003-C ([PR #23](https://github.com/SE2026-BC-04/gp
 
 A reverse-proxy or server-wide request-size limit is useful as an additional defense but does not replace B2, which is tested in the application. No database schema change. Route-level tests with test doubles exist in PR #23; database-backed and mounted-application evidence remains `NOT_RUN`.
 
+### 14.6. Listings request-body bounds — `CR-GPU-004-BODY-01` (2026-10-25)
+
+**APPROVED_FOR_IMPLEMENTATION (L2 design scope only):** [team-lead decision](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6395344255) on [TV4's proposal](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6395120213), reviewed baseline `18003795558cf022cc1b3a20a7f41d7af3946ceb`. Change path **A: atomic design + implementation in PR #17**; not approval for merge/deployment, not a replacement for two independent human reviews.
+
+| Rule | Approved Listings behavior | Existing oracle |
+|---|---|---|
+| Scope | POST create and PATCH update only; no Auth/Jobs/schema/grant/shared-App policy changes | `API-LIST-07`, `API-LIST-11` |
+| Byte bound | At most 16,384 raw bytes inclusive; declared length checked before stream reads and actual chunks checked before copying. Missing/understated length never disables the actual-byte check; one huge chunk cannot force an oversized accumulation buffer. Leading zeros allowed; an excessive numeric length counts as oversize | `API-LIST-07`, `API-LIST-11` |
+| Parse bound | Strict UTF-8 JSON, no duplicate keys or NaN/Infinity, at most 8 arrays/objects counting root; ignore brackets/escapes inside strings. Check nesting before invoking the JSON parser | `API-LIST-07`, `API-LIST-11` |
+| Rejection | Above byte limit -> 413 PAYLOAD_TOO_LARGE. Malformed framing/UTF-8/JSON, duplicate keys, constants, above depth limit or parser exhaustion -> 400 INVALID_JSON, never 500 or input/exception echo | `API-LIST-07`, `API-LIST-11`, `API-COM-01` |
+| Precedence | Auth -> WORKER role -> body checks -> Listing UoW/SQL/mutation. Rejected body enters zero Listing UoW and performs zero Listing mutation; Auth can still read the account to establish the principal | `API-LIST-07`, `API-LIST-08`, `API-LIST-11` |
+| Unchanged contracts | Typed/unknown-field errors, ownership, capacity/state, UUIDs, DTOs and cursor remain as §7. Pause/resume remain bodyless with early rejection; Auth body-before-account/Logout ordering is not copied to Listings | `API-LIST-01..18` |
+
+Reuse reviewed bounded-reader/strict-parser helpers where appropriate; the Listings byte limit is independently specified even though it matches Login today. No new API test ID is introduced: extend the existing POST/PATCH/common oracles above. Actual tests must identify their code HEAD and distinguish HTTP/persistence doubles from real PostgreSQL, audit, races and browser E2E. R1–R4 and the final human review gate remain open until their own evidence/actions are accepted.
+
 ## 15. Traceability: API contract → requirements → storage/transactions → test evidence
 
 | Requirements / policy | API section(s) | Owning database/transaction | Proposed validation |
@@ -920,7 +940,7 @@ A reverse-proxy or server-wide request-size limit is useful as an additional def
 
 ## 16. Review record and handoff — documentation only
 
-| Item | Status at v0.9 (2026-10-24) |
+| Item | Design status at v0.10 (2026-10-25); scoped runtime evidence is separate |
 |---|---|
 | Logical/physical/transaction Database Design (18 tables) | **APPROVED_DESIGN**; no SQL migration run |
 | Stateless HS256 JWT / 900-second lifetime / volatile-memory storage / no refresh and no server-side Logout revocation | **APPROVED_DESIGN** at the owner-approved policy scope |
@@ -930,6 +950,7 @@ A reverse-proxy or server-wide request-size limit is useful as an additional def
 | Additional Authentication profile details | **APPROVED as `DEC-P1-03` (2026-10-21)**; synchronized in §§4.5 and 14.3 at v0.7 |
 | Login/password Unicode validation | **APPROVED as `CR-GPU-003-UNICODE-01` (2026-10-24)**; recorded in §§4.2, 4.5, 6 and 14.4 at v0.8; route-level tests `NOT_RUN` |
 | Auth request-body bounds; `D-C1`, `D-C2` | **Owner-directed in the PR #23 review (2026-10-24)**; recorded in §§3.3, 4.2–4.4, 6 and 14.5 at v0.9; approved with the L2 review of PR #23; route tests with test doubles only |
+| Listings request-body bounds | **APPROVED_FOR_IMPLEMENTATION**, `CR-GPU-004-BODY-01` (§14.6), 16,384 bytes / depth 8, Auth/WORKER-before-body; atomic L2 design+implementation in #17, required final human reviews/integration gates unchanged |
 | ADR-008 technology stack | **ACCEPTED (2026-10-18)** in its own ADR; no implementation/test evidence |
 | Actual API code, DB migrations, test runners, benchmarks | **NOT_STARTED / NOT_RUN**; this document records design only |
 
