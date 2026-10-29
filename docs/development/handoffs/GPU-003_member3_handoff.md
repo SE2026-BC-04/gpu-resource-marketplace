@@ -128,6 +128,37 @@ backend/src/gpu_marketplace/repositories/     # Thuộc GPU-002; không viết O
 - Nếu TV3 cần TV2 sửa schema/repository, phải làm ngược lại: cảnh báo, owner DB + owner Auth xác thực trước merge. Thiếu xác nhận → `BLOCKED_INTERPHASE`.
 - PR GitHub vẫn tuân thủ ≥1 reviewer độc lập cho L0/L1, ≥2 cho L2/L3 và change control; không thay thế reviewer bằng 2 người tự ký checklist.
 
+## 9. GPU-003-D: frontend session contract cho GPU-004/005 (`XPH-GPU-003-D`)
+
+> Ghi nhận theo action của [owner re-review](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/26#pullrequestreview-5638977208) và hai consumer ACK trên PR #26. Đây là interface frontend đã được consumer chấp nhận, **không** đổi API Contract và **không** chứng minh integration đã chạy.
+
+**Nguồn:** PR #26 (`frontend/src/api/session.ts`, `frontend/src/api/authorizedFetch.ts`). Các ACK được đưa ra trên HEAD `d877384`; commit `e97cb77` sửa P2 của TV5 (`cache: "no-store"` không bị caller ghi đè).
+
+**Session store (`createSessionStore`, một instance cho mỗi lần tải trang, tạo ở `main.tsx`):**
+
+| Thành phần | Ngữ nghĩa |
+|---|---|
+| `getAccessToken(): string \| null` | Đọc token lúc gửi request. Trả `null` khi chưa đăng nhập hoặc đã tới deadline bảo thủ (`thời điểm trước khi gửi Login + 900 s`); khi đó store tự về `signed-out` với lý do `expired` |
+| `handleUnauthorized(sentToken: string)` | Chỉ xoá phiên khi `sentToken` trùng token hiện tại; 401 của token cũ không xoá phiên mới |
+| `getState()` / `subscribe()` | `{ status: "signed-in", user: { id, loginName, role } }` (đã xác nhận qua `/auth/me`) hoặc `{ status: "signed-out", reason? }` |
+| `signOut()` | Xoá token local trước, rồi gọi Logout best-effort; JWT không bị thu hồi ở server (API Contract section 4.4) |
+
+**`createAuthorizedFetch(session)` → `(path, init?) => Promise<Response>`:** `path` tương đối với API base. Hàm tự đặt `Authorization: Bearer`; `credentials: "omit"` và `cache: "no-store"` được đặt sau `init`, nên caller không ghi đè được. Chưa đăng nhập thì không gửi request; 401 → `handleUnauthorized(tokenĐãGửi)`; 403 giữ phiên.
+
+**Quy tắc cho consumer:** không lưu, log hay đưa token vào URL, Web Storage hay cookie; không coi role ở frontend là kiểm tra quyền (server luôn kiểm tra lại); dùng **cùng một** session instance với shell.
+
+| Consumer | Phương án | ACK |
+|---|---|---|
+| TV4 / GPU-004 Listings (PR #17 `8ed7814`) | Giữ `createListingsApi(getAccessToken, onUnauthorized)`, kèm guard `getAccessToken() === token` ở `listings.ts:131`. Bridge: `onUnauthorized = () => { const t = session.getAccessToken(); if (t !== null) session.handleUnauthorized(t); }`. `ListingsPage.session = signed-in ? { userId: user.id, role: user.role } : null` | [`ACK_WITH_ACTIONS` 2026-10-25](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/26#issuecomment-6387480528) |
+| TV5 / GPU-005 Jobs (PR #15 `aa56d94`) | (a) `createAuthorizedFetch(session)`; giữ nguyên `Idempotency-Key` khi retry một submission | [`ACK_WITH_ACTIONS` 2026-10-24](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/26#issuecomment-6386845588) |
+| Nhóm trưởng (shell `App.tsx` / `main.tsx`) | Shell Login-first `App({ session })` | [`ACK_WITH_ACTIONS` 2026-10-24](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/26#pullrequestreview-5638977208) |
+
+**Actions còn mở (không đóng bằng mục này):**
+- **TV3:** sửa P2 cache của TV5 (`e97cb77`), xin xác nhận lại trên HEAD mới.
+- **Nhóm trưởng + TV4/TV5 khi mount:** cùng một session cho shell và các protected client; giữ API instance ổn định và view Listings/Jobs; `session=null` khi signed-out.
+- **Nhóm trưởng:** CORS cho `Authorization`, expose `X-Request-ID`; mount router Auth với `AccountReader` thật (PR #25).
+- **Tất cả:** browser + API + PostgreSQL E2E (P1C-AC-07, GPU-003-E) vẫn `NOT_RUN`.
+
 ## Pre-PR Checklist — GPU-003 (chưa xác nhận)
 
 > Checklist phải được chính thành viên phụ trách hoàn thành **trước khi yêu cầu merge** và gắn vào PR. Các ô bên dưới mặc định chưa đánh dấu; tài liệu được duyệt không đồng nghĩa đã hoàn thành các bước.
