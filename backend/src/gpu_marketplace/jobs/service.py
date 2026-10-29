@@ -71,10 +71,9 @@ class JobsReadService:
         )
         next_cursor = None
         if page.next_position is not None:
-            try:
-                next_cursor = self._cursor_codec.encode(page.next_position, context=context)
-            except (ValueError, TypeError, KeyError) as exc:
-                raise InvalidCursor() from exc
+            # Encoding consumes a server/repository position. A malformed internal
+            # position is a server failure, never a client INVALID_CURSOR response.
+            next_cursor = self._cursor_codec.encode(page.next_position, context=context)
         items: list[PublicJobResponse] = [
             project_job(record, principal=principal) for record in page.items
         ]

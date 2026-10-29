@@ -348,7 +348,11 @@ class FakeReader:
 
     def get_visible(self, **kwargs: object) -> JobRecord | None:
         self.get_calls.append(kwargs)
-        if self.record is None or not self._visible(self.record, kwargs["principal"]):
+        if (
+            self.record is None
+            or self.record.id != kwargs["job_id"]
+            or not self._visible(self.record, kwargs["principal"])
+        ):
             return None
         return self.record
 
@@ -491,6 +495,25 @@ def test_router_detail_asgi_serializes_client_worker_id(
     payload = response.json()
     assert payload["worker_id"] == str(WORKER_PROFILE_ID)
     assert not {"client_id", "seed_value", "expected_digest"}.intersection(payload)
+
+
+def test_router_detail_returns_404_when_visible_record_id_differs_from_requested_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = make_test_app(record=make_record())
+    requested_id = UUID("33333333-3333-4333-8333-333333333334")
+
+    response = http_get(
+        app,
+        f"/api/v1/jobs/{requested_id}",
+        monkeypatch=monkeypatch,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "JOB_NOT_FOUND"
+    assert UUID(response.headers["X-Request-ID"]).version == 4
+    assert response.headers["Cache-Control"] == "no-store"
+    assert app.state.test_reader.get_calls[-1]["job_id"] == requested_id
 
 
 @pytest.mark.parametrize(
@@ -799,6 +822,24 @@ def test_pagination_uses_role_default_and_context_binds_cursor() -> None:
             status="FAILED",
             cursor=first.next_cursor,
         )
+
+
+def test_server_cursor_encoding_failure_is_not_mapped_to_client_invalid_cursor() -> None:
+    class FailingEncoder:
+        def decode(self, token: str, *, context: CursorContext) -> CursorPosition:
+            raise AssertionError("first-page request must not decode a client cursor")
+
+        def encode(self, position: CursorPosition, *, context: CursorContext) -> str:
+            raise ValueError("private server cursor serialization detail")
+
+    position = CursorPosition(submitted_at=NOW, job_id=JOB_ID)
+    service = JobsReadService(
+        reader=FakeReader(page=JobPage(items=(), next_position=position)),
+        cursor_codec=FailingEncoder(),
+    )
+
+    with pytest.raises(ValueError, match="private server cursor serialization detail"):
+        service.list_jobs(principal=Principal(CLIENT_ID, "CLIENT"), cursor=None)
 
 
 def test_hmac_cursor_codec_round_trip_tamper_and_context_binding() -> None:
