@@ -11,7 +11,8 @@ Listing repositories/UoW are not handed off. GPU-003 core and Auth routes are on
 this baseline, including the volatile session store. The PostgreSQL account
 reader from merged PR #25 is available as
 `gpu_marketplace.repositories.accounts.PostgresAccountReader(sessionmaker)`.
-It still needs integrator-owned AuthService/app wiring; Listing UoW/D7 are not delivered.
+It still needs integrator-owned AuthService/app wiring. Listing UoW/D7 code is
+reviewed separately in PR #31; accepted handoff/integration remains pending.
 
 ## Implemented scope
 
@@ -43,7 +44,7 @@ delivered adapter or PostgreSQL Listing test PASS. TV3 also
 
 | Owner | Required implementation / evidence |
 |---|---|
-| GPU-002 / TV2 owner, TV4 delegated R1 | Use the existing migration/ORM; TV4 implements PostgreSQL Listing UoW/readers in separate [PR #31](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31) under the [owner delegation](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6396462023). TV2 must validate exact-HEAD SQL/role/lock/rollback evidence; D7 is awaiting its separate design decision |
+| GPU-002 / TV2 owner, TV4 delegated R1 | TV4 supplies Listing UoW/readers, metadata/status writes and D7 in separate [PR #31](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31). [D7 is approved with conditions](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#issuecomment-6396753378); code at `99aa023` has separate PostgreSQL/real-login CI evidence. TV2 technical validation, affected-owner ACKs, independent human reviews and accepted migration/handoff remain pending; this branch does not contain that DB code |
 | GPU-003 / TV3 + TV2 | Canonical principal dependency is consumed; PostgreSQL AccountReader #25 is merged/available. Provisioning, production AuthService wiring and shared-shell session integration are still pending |
 | Leader | Shared AuthService/engine/session/JWT-secret configuration, router registration in `api/app.py`, frontend shell mounting, cursor-key injection, request correlation and audit integration |
 | TV2/TV3/leader | Resolution of the documented Auth sync/provisioning gates and applicable D1–D12 decisions/ACKs |
@@ -212,7 +213,7 @@ canonical/hex/uppercase/braced/URN/wrong-version/wrong-variant/malformed IDs;
 invalid forms return safe 422 without entering the Listing UoW. Before the fix,
 16 of these cases failed by accepting alternate spellings with 200.
 
-Remaining **BLOCKED / NOT_RUN**: PostgreSQL Listing/account adapters and router/shell wiring;
+Remaining **BLOCKED / NOT_RUN**: accepted PostgreSQL Listing handoff and production account/router/shell wiring;
 PostgreSQL multi-session lock/rollback/role tests; full API-LIST-13/14/15
 submit/allocation/FIFO races; persistent DB audit integration where applicable;
 browser-to-real-API E2E and the benchmark. Keep Phase 1D out of `IMPLEMENTED`.
