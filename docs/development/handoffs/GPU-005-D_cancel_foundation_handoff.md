@@ -15,9 +15,9 @@
 
 This slice defines the application use case and narrow persistence ports for a Client cancelling an owned `QUEUED` Job. It reuses the existing `JobRecord`, `JobPrincipal`, typed error taxonomy, and role-safe `project_job` response projection.
 
-The command validates CLIENT role before storage access, performs an unlocked minimal `job_id → listing_id` locator read, begins the unit of work only after a locator is found, then requests Listing lock before Job lock. It rechecks Job ID, Listing ID, Client ownership, and `QUEUED` status against the locked row. The guarded persistence operation must return the DB-timestamped `CANCELLED` row. The service validates terminal fields, builds the existing safe projection, commits once, and rolls back on exceptions.
+The command validates CLIENT role before storage access and performs an unlocked minimal `job_id → listing_id` locator read. If found, it enters one single-use context-managed transaction, requests Listing lock before Job lock, and rechecks Job ID, Listing ID, Client ownership, and `QUEUED` status against the locked row. It validates the guarded-update result and safe response projection before calling `commit()` once. Context exit rolls back an uncommitted known-active transaction and releases its Session/connection on every path. A `CommitOutcomeUnknown` is surfaced without retry; cleanup does not claim that an uncertain commit was rolled back.
 
-The persistence port contract requires the eventual GPU-002 adapter to use trusted PostgreSQL `clock_timestamp()` after locks, set `terminal_at`, keep `failure_reason` and `started_at` NULL, and leave allocations, Listing counters, results, reputation, and simulation references untouched. Listing PAUSED is not an admission condition for cancellation.
+The persistence port contract requires the eventual GPU-002 adapter to use trusted PostgreSQL `clock_timestamp()` after locks, set `terminal_at`, keep `failure_reason` and `started_at` NULL, and leave allocations, Listing counters, results, reputation, and simulation references untouched. A conditional UPDATE returning zero rows must raise `CancelGuardRejected(MISSING | NOT_OWNER | NOT_QUEUED)`, mapped respectively to uniform 404, uniform 404, or 409. Known DB unavailability uses the existing `DependencyUnavailable` 503; unexpected programming errors and unknown commit outcomes are not disguised as 4xx and are never automatically retried. Listing PAUSED is not an admission condition for cancellation.
 
 No HTTP route is registered and no production repository/UoW, SQL, migration, Auth implementation, Listing implementation, Manager, or Simulator code is included.
 
@@ -33,18 +33,19 @@ No HTTP route is registered and no production repository/UoW, SQL, migration, Au
 
 | Check | Command | Status | Evidence / limitation |
 |---|---|---|---|
-| Cancellation foundation unit tests | `uv run --project backend --locked --group dev pytest backend/tests/test_jobs_cancel_foundation.py -q` | PASS | 14 passed; fake ports only |
+| Cancellation foundation unit tests | `uv run --project backend --locked --group dev pytest backend/tests/test_jobs_cancel_foundation.py -q` | PASS | 29 passed; staged/durable fake only |
 | Existing Jobs foundation regression | `uv run --project backend --locked --group dev pytest backend/tests/test_jobs_foundation.py -q` | PASS | 88 passed |
+| Jobs/Auth integration regression | `timeout 45s uv run --project backend --locked --group dev pytest backend/tests/test_jobs_auth_integration.py -q` | BLOCKED | No output or final summary before bounded timeout; TestClient/Auth dependency integration remains unverified in this run. |
 | Python compilation | `python3 -m compileall -q backend/src/gpu_marketplace/jobs backend/tests/test_jobs_cancel_foundation.py` | PASS | No compile errors |
 | Whitespace | `git diff --check` | PASS | No whitespace errors at check time |
-| Full backend suite | `timeout 180s uv run --project backend --locked --group dev pytest backend/tests -q` | BLOCKED | After initial skipped tests and one reported test, execution produced no further output for about a minute; the process was interrupted. No final summary/count was produced. The new focused tests and Jobs regression completed separately. |
+| Full backend suite | `timeout 180s uv run --project backend --locked --group dev pytest backend/tests -q` | BLOCKED | Previous bounded attempt emitted initial skips/one test then no progress and was interrupted without final summary. Not rerun for this remediation because the focused cancellation, Jobs, and Auth regression commands were run separately. |
 | PostgreSQL TX-CANCEL | — | NOT_RUN | No production adapter or DB transaction is part of this slice |
 | HTTP cancellation integration | — | NOT_RUN | No route is registered; no real Auth integration tested |
 | Concurrent cancel-vs-allocation race | — | NOT_RUN | Requires real PostgreSQL multi-session barrier test; fake tests do not prove atomicity |
 
 ## Test intent and limits
 
-Fake-based tests assert role gating, uniform missing/foreign behavior, state-transition rejection, paused Listing behavior, trusted timestamp field source at the port boundary, safe response fields, one-commit success, rollback on exceptions, and the interaction order `lookup → begin → lock_listing → lock_job → recheck → update → commit`.
+Fake-based tests assert role gating, uniform missing/foreign behavior, state-transition rejection, paused Listing behavior, trusted timestamp field source at the port boundary, safe response fields, one-commit success, cleanup on begin/transaction/commit failures, typed zero-row guard mapping, unknown-commit no-retry behavior, and the interaction order `lookup → begin → lock_listing → lock_job → recheck → update → commit → exit → cleanup`. The fake exposes `durable_record` separately from `pending_record`; only commit publishes staged data and rollback discards it.
 
 These tests establish application policy and adapter interaction expectations only. They do not establish PostgreSQL locking, transaction isolation, allocation race correctness, HTTP behavior, or end-to-end integration.
 

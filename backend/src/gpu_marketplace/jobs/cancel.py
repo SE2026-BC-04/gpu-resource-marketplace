@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from gpu_marketplace.jobs.cancel_ports import JobCancelUnitOfWork, JobLocatorReader
+from gpu_marketplace.jobs.cancel_ports import (
+    CancelGuardReason,
+    CancelGuardRejected,
+    JobCancelUnitOfWork,
+    JobLocatorReader,
+)
 from gpu_marketplace.jobs.errors import (
     Forbidden,
     JobNotCancellable,
@@ -37,36 +42,39 @@ class JobCancelService:
         if locator is None:
             raise JobNotFound()
 
-        tx = self._uow.begin(principal=principal)
         try:
-            tx.lock_listing(listing_id=locator.listing_id)
-            locked = tx.lock_job(job_id=job_id)
-            if locked is None:
-                raise JobNotFound()
-            self._recheck_locked_job(
-                locked,
-                job_id=job_id,
-                listing_id=locator.listing_id,
-                client_id=principal.user_id,
-            )
+            with self._uow.transaction(principal=principal) as tx:
+                tx.lock_listing(listing_id=locator.listing_id)
+                locked = tx.lock_job(job_id=job_id)
+                if locked is None:
+                    raise JobNotFound()
+                self._recheck_locked_job(
+                    locked,
+                    job_id=job_id,
+                    listing_id=locator.listing_id,
+                    client_id=principal.user_id,
+                )
 
-            updated = tx.cancel_queued(
-                job_id=job_id,
-                listing_id=locator.listing_id,
-                client_id=principal.user_id,
-            )
-            self._validate_cancelled_row(
-                updated,
-                job_id=job_id,
-                listing_id=locator.listing_id,
-                client_id=principal.user_id,
-            )
-            response = project_job(updated, principal=principal)
-            tx.commit()
-            return response
-        except Exception:
-            tx.rollback()
-            raise
+                updated = tx.cancel_queued(
+                    job_id=job_id,
+                    listing_id=locator.listing_id,
+                    client_id=principal.user_id,
+                )
+                self._validate_cancelled_row(
+                    updated,
+                    job_id=job_id,
+                    listing_id=locator.listing_id,
+                    client_id=principal.user_id,
+                )
+                response = project_job(updated, principal=principal)
+                tx.commit()
+                return response
+        except CancelGuardRejected as exc:
+            if exc.reason in {CancelGuardReason.MISSING, CancelGuardReason.NOT_OWNER}:
+                raise JobNotFound() from exc
+            if exc.reason is CancelGuardReason.NOT_QUEUED:
+                raise JobNotCancellable() from exc
+            raise RuntimeError("TX-CANCEL adapter returned an unsupported guard reason") from exc
 
     def _recheck_locked_job(
         self, record: JobRecord, *, job_id: UUID, listing_id: UUID, client_id: UUID
