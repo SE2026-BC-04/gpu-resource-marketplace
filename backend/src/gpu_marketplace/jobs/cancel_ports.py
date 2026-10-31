@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from types import TracebackType
-from typing import Protocol, Self
+from typing import Literal, Protocol, Self
 from uuid import UUID
 
 from gpu_marketplace.jobs.ports import JobPrincipal, JobRecord
@@ -72,7 +72,13 @@ class JobCancelTransaction(Protocol):
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
         traceback: TracebackType | None,
-    ) -> bool | None: ...
+    ) -> Literal[False] | None:
+        """Clean up without suppressing any transaction/body exception.
+
+        Production adapters MUST NOT return a truthy value. Cleanup failures
+        must not replace an exception already being propagated from the body.
+        """
+        ...
 
     def lock_listing(self, *, listing_id: UUID) -> None:
         """Acquire the Listing row lock before any Job row lock."""
