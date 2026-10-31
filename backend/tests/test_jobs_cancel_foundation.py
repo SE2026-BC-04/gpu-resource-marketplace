@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from types import TracebackType
+from typing import Literal
 from uuid import UUID
 
 import pytest
@@ -119,6 +121,7 @@ class FakeTransaction:
         self.fail_close = fail_close
         self.resource_open = False
         self.entered = False
+        self.exit_result: Literal[False] | None = None
         self.closed = 0
         self.commits = 0
         self.commit_confirmed = False
@@ -135,31 +138,48 @@ class FakeTransaction:
         if self.fail_begin:
             try:
                 raise DependencyUnavailable()
-            except Exception:
+            except BaseException:
                 self._close_preserving_active_exception()
                 raise
         return self
 
-    def __exit__(self, exc_type: object, exc: object, traceback: object) -> bool:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> Literal[False]:
         self.events.append("exit")
         has_original_error = exc is not None
+        rollback_error: BaseException | None = None
+        close_error: BaseException | None = None
         if not self.commit_confirmed and not self.commit_outcome_unknown:
             try:
                 self.rollback()
-            except Exception:
-                if not has_original_error:
-                    raise
+            except BaseException as error:
+                rollback_error = error
         try:
             self.close()
-        except Exception:
-            if not has_original_error:
-                raise
+        except BaseException as error:
+            close_error = error
+        if has_original_error:
+            # Returning False preserves the body exception and makes cleanup
+            # failures secondary, while close has already been attempted.
+            self.exit_result = False
+            return False
+        if rollback_error is not None:
+            # Prefer rollback as the primary transaction-finalization failure;
+            # close was attempted in all cases above.
+            raise rollback_error
+        if close_error is not None:
+            raise close_error
+        self.exit_result = False
         return False
 
     def _close_preserving_active_exception(self) -> None:
         try:
             self.close()
-        except Exception:
+        except BaseException:
             # Keep the begin failure as the exception visible to the caller.
             pass
 
@@ -308,7 +328,24 @@ def test_success_commits_once_cleans_once_and_publishes_safe_cancelled_record() 
         "lookup", "begin", "lock_listing", "lock_job", "recheck", "update", "commit", "exit", "cleanup"
     ]
     assert tx.commits == 1 and tx.rollbacks == 0 and tx.closed == 1
+    assert tx.exit_result is False
     assert all(value == 0 for value in tx.effects.values())
+
+
+def test_context_manager_returns_false_on_normal_uncommitted_exit() -> None:
+    tx = FakeTransaction(job_record(), [])
+    assert tx.__enter__() is tx
+    assert tx.__exit__(None, None, None) is False
+    assert tx.rollbacks == 1 and tx.closed == 1
+
+
+def test_context_manager_does_not_suppress_body_exception() -> None:
+    tx = FakeTransaction(job_record(), [])
+    with pytest.raises(RuntimeError, match="body failure"):
+        with tx:
+            raise RuntimeError("body failure")
+    assert tx.exit_result is False
+    assert tx.rollbacks == 1 and tx.closed == 1
 
 
 @pytest.mark.parametrize("role", [JobRole.WORKER, JobRole.ADMIN])
@@ -542,6 +579,44 @@ def test_cleanup_errors_do_not_mask_original_transaction_exception() -> None:
         invoke(service)
     assert tx.rollbacks == 1 and tx.closed == 1
     assert tx.durable_record.status is JobStatus.QUEUED
+
+
+def test_rollback_failure_without_body_exception_still_closes_then_raises_rollback() -> None:
+    tx = FakeTransaction(job_record(), [], fail_rollback=True)
+    tx.__enter__()
+    tx.pending_record = replace(
+        tx.durable_record,
+        status=JobStatus.CANCELLED,
+        terminal_at=DB_TERMINAL_AT,
+    )
+    with pytest.raises(RuntimeError, match="rollback cleanup failure"):
+        tx.__exit__(None, None, None)
+    assert tx.rollbacks == 1 and tx.closed == 1
+    assert tx.events[-2:] == ["rollback", "cleanup"]
+    assert tx.durable_record.status is JobStatus.QUEUED and tx.pending_record is None
+
+
+def test_close_failure_does_not_mask_original_body_exception() -> None:
+    tx = FakeTransaction(job_record(), [], fail_close=True)
+    with pytest.raises(RuntimeError, match="body failure"):
+        with tx:
+            raise RuntimeError("body failure")
+    assert tx.rollbacks == 1 and tx.closed == 1
+
+
+def test_rollback_and_close_fail_without_body_error_prefers_rollback_after_close() -> None:
+    tx = FakeTransaction(job_record(), [], fail_rollback=True, fail_close=True)
+    tx.__enter__()
+    tx.pending_record = replace(
+        tx.durable_record,
+        status=JobStatus.CANCELLED,
+        terminal_at=DB_TERMINAL_AT,
+    )
+    with pytest.raises(RuntimeError, match="rollback cleanup failure"):
+        tx.__exit__(None, None, None)
+    assert tx.rollbacks == 1 and tx.closed == 1
+    assert tx.events[-2:] == ["rollback", "cleanup"]
+    assert tx.durable_record.status is JobStatus.QUEUED and tx.pending_record is None
 
 
 def test_repeated_cancel_first_commits_and_second_gets_409() -> None:

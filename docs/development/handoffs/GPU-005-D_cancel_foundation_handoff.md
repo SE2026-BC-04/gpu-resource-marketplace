@@ -13,9 +13,9 @@
 
 ## Scope delivered
 
-This slice defines the application use case and narrow persistence ports for a Client cancelling an owned `QUEUED` Job. It reuses the existing `JobRecord`, `JobPrincipal`, typed error taxonomy, and role-safe `project_job` response projection.
+This slice defines the application use case and narrow persistence ports for a Client cancelling an owned `QUEUED` Job. It reuses the existing `JobRecord`, `JobPrincipal`, typed error taxonomy, and role-safe `project_job` response projection. The context-manager `__exit__` type is `Literal[False] | None`; an adapter must never suppress transaction exceptions.
 
-The command validates CLIENT role before storage access and performs an unlocked minimal `job_id → listing_id` locator read. If found, it enters one single-use context-managed transaction, requests Listing lock before Job lock, and rechecks Job ID, Listing ID, Client ownership, and `QUEUED` status against the locked row. It validates the guarded-update result and safe response projection before calling `commit()` once. Context exit rolls back an uncommitted known-active transaction and releases its Session/connection on every path. A `CommitOutcomeUnknown` is surfaced without retry; cleanup does not claim that an uncertain commit was rolled back.
+The command validates CLIENT role before storage access and performs an unlocked minimal `job_id → listing_id` locator read. If found, it enters one single-use context-managed transaction, requests Listing lock before Job lock, and rechecks Job ID, Listing ID, Client ownership, and `QUEUED` status against the locked row. It validates the guarded-update result and safe response projection before calling `commit()` once. Context exit rolls back an uncommitted known-active transaction and releases its Session/connection on every path. The fake asserts that `close()` is attempted even when rollback fails, an original body exception keeps priority over rollback/close errors, and a rollback error propagates after cleanup when no body exception exists. A `CommitOutcomeUnknown` is surfaced without retry; cleanup does not claim that an uncertain commit was rolled back.
 
 The persistence port contract requires the eventual GPU-002 adapter to use trusted PostgreSQL `clock_timestamp()` after locks, set `terminal_at`, keep `failure_reason` and `started_at` NULL, and leave allocations, Listing counters, results, reputation, and simulation references untouched. A conditional UPDATE returning zero rows must raise `CancelGuardRejected(MISSING | NOT_OWNER | NOT_QUEUED)`, mapped respectively to uniform 404, uniform 404, or 409. Known DB unavailability uses the existing `DependencyUnavailable` 503; unexpected programming errors and unknown commit outcomes are not disguised as 4xx and are never automatically retried. Listing PAUSED is not an admission condition for cancellation.
 
@@ -33,7 +33,7 @@ No HTTP route is registered and no production repository/UoW, SQL, migration, Au
 
 | Check | Command | Status | Evidence / limitation |
 |---|---|---|---|
-| Cancellation foundation unit tests | `uv run --project backend --locked --group dev pytest backend/tests/test_jobs_cancel_foundation.py -q` | PASS | 29 passed; staged/durable fake only |
+| Cancellation foundation unit tests | `uv run --project backend --locked --group dev pytest backend/tests/test_jobs_cancel_foundation.py -q` | PASS | 34 passed; staged/durable fake only, including suppression and cleanup-failure tests |
 | Existing Jobs foundation regression | `uv run --project backend --locked --group dev pytest backend/tests/test_jobs_foundation.py -q` | PASS | 88 passed |
 | Jobs/Auth integration regression | `timeout 45s uv run --project backend --locked --group dev pytest backend/tests/test_jobs_auth_integration.py -q` | BLOCKED | No output or final summary before bounded timeout; TestClient/Auth dependency integration remains unverified in this run. |
 | Python compilation | `python3 -m compileall -q backend/src/gpu_marketplace/jobs backend/tests/test_jobs_cancel_foundation.py` | PASS | No compile errors |
@@ -45,7 +45,7 @@ No HTTP route is registered and no production repository/UoW, SQL, migration, Au
 
 ## Test intent and limits
 
-Fake-based tests assert role gating, uniform missing/foreign behavior, state-transition rejection, paused Listing behavior, trusted timestamp field source at the port boundary, safe response fields, one-commit success, cleanup on begin/transaction/commit failures, typed zero-row guard mapping, unknown-commit no-retry behavior, and the interaction order `lookup → begin → lock_listing → lock_job → recheck → update → commit → exit → cleanup`. The fake exposes `durable_record` separately from `pending_record`; only commit publishes staged data and rollback discards it.
+Fake-based tests assert role gating, uniform missing/foreign behavior, state-transition rejection, paused Listing behavior, trusted timestamp field source at the port boundary, safe response fields, one-commit success, cleanup on begin/transaction/commit failures, typed zero-row guard mapping, unknown-commit no-retry behavior, non-suppressing `__exit__`, cleanup after rollback failure, exception priority, and the interaction order `lookup → begin → lock_listing → lock_job → recheck → update → commit → exit → cleanup`. The fake exposes `durable_record` separately from `pending_record`; only commit publishes staged data and rollback discards it.
 
 These tests establish application policy and adapter interaction expectations only. They do not establish PostgreSQL locking, transaction isolation, allocation race correctness, HTTP behavior, or end-to-end integration.
 
