@@ -412,7 +412,7 @@ Không đề xuất trigger cho `roles`/`users`/`user_roles`/`workers`: runtime 
 ```text
 IF OLD.status NOT IN ('COMPLETED','FAILED','CANCELLED')
    OR OLD.terminal_at IS NULL
-   OR clock_timestamp() < OLD.terminal_at + interval '23 days':
+   OR clock_timestamp() < OLD.terminal_at + interval '552 hours':   # 23 x 24 elapsed hours (NFR BL-02), not '23 days'
     REJECT 'job_delete_not_eligible'
 -- Phase 3 migration mở rộng: REJECT nếu tồn tại disputes(job_id, status='OPEN')
 RETURN OLD
