@@ -6,6 +6,7 @@ import pytest
 
 from jobs_cancel_pg_support import (
     PersistedJobSnapshot,
+    assert_non_job_side_effects_unchanged,
     assert_snapshot_unchanged,
     job_state_fields,
 )
@@ -59,3 +60,12 @@ def test_snapshot_assertion_detects_any_existing_schema_side_effect() -> None:
     after = PersistedJobSnapshot(("job", "CANCELLED"), 0, "reference-hash", None)
     with pytest.raises(AssertionError):
         assert_snapshot_unchanged(before, after)
+
+
+def test_side_effect_assertion_checks_listing_reference_and_reputation() -> None:
+    before = PersistedJobSnapshot(("job", "QUEUED"), 1, "reference-hash", (2, 1))
+    assert_non_job_side_effects_unchanged(before, before)
+
+    changed = PersistedJobSnapshot(("job", "CANCELLED"), 1, "reference-hash", (2, 2))
+    with pytest.raises(AssertionError):
+        assert_non_job_side_effects_unchanged(before, changed)

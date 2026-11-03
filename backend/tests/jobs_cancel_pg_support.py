@@ -12,10 +12,8 @@ from __future__ import annotations
 import hashlib
 import threading
 import time
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterator
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -110,52 +108,24 @@ def seed_committed_job(
     )
 
 
-def delete_committed_job_fixture(engine: Engine, fixture: CommittedJobFixture) -> None:
-    """Delete only this fixture, in FK-safe order, using a verified test Engine."""
+def seed_cancel_side_effect_rows(engine: Engine, fixture: CommittedJobFixture) -> None:
+    """Seed existing-schema protected rows used to verify a cancel changes no side effects."""
     with engine.begin() as connection:
         connection.execute(
-            text("DELETE FROM simulation_references WHERE job_id = :id"),
-            {"id": fixture.job_id},
-        )
-        connection.execute(text("DELETE FROM jobs WHERE id = :id"), {"id": fixture.job_id})
-        connection.execute(
-            text("DELETE FROM gpu_listings WHERE id = :id"),
-            {"id": fixture.listing_id},
-        )
-        connection.execute(
-            text("DELETE FROM worker_reputation_aggregates WHERE worker_id = :id"),
-            {"id": fixture.worker_id},
-        )
-        connection.execute(text("DELETE FROM workers WHERE id = :id"), {"id": fixture.worker_id})
-        connection.execute(
-            text("DELETE FROM user_roles WHERE user_id IN (:client, :worker)"),
-            {"client": fixture.client_user_id, "worker": fixture.worker_user_id},
+            text(
+                "INSERT INTO simulation_references "
+                "(job_id, seed_value, algorithm_version, expected_outcome, expected_digest) "
+                "VALUES (:job, 7, 'test-fixture-v1', 'SUCCESS', :digest)"
+            ),
+            {"job": fixture.job_id, "digest": "sha256:" + "0" * 64},
         )
         connection.execute(
-            text("DELETE FROM users WHERE id IN (:client, :worker)"),
-            {"client": fixture.client_user_id, "worker": fixture.worker_user_id},
+            text(
+                "INSERT INTO worker_reputation_aggregates "
+                "(worker_id, successful_jobs, worker_fault_jobs) VALUES (:worker, 2, 1)"
+            ),
+            {"worker": fixture.worker_id},
         )
-
-
-@contextmanager
-def committed_job_fixture(
-    engine: Engine,
-    *,
-    status: str = "QUEUED",
-    listing_status: str = "ACTIVE",
-    total_gpu_count: int = 4,
-) -> Iterator[CommittedJobFixture]:
-    """Commit setup rows for cross-connection tests and always clean them in finally."""
-    fixture = seed_committed_job(
-        engine,
-        status=status,
-        listing_status=listing_status,
-        total_gpu_count=total_gpu_count,
-    )
-    try:
-        yield fixture
-    finally:
-        delete_committed_job_fixture(engine, fixture)
 
 
 def _reference_fingerprint(values: tuple[object, ...] | None) -> str | None:
@@ -225,6 +195,16 @@ def assert_snapshot_unchanged(
 ) -> None:
     """Assert existing-schema state did not change; diagnostics contain no oracle values."""
     assert after == before
+
+
+def assert_non_job_side_effects_unchanged(
+    before: PersistedJobSnapshot,
+    after: PersistedJobSnapshot,
+) -> None:
+    """Assert cancellation SQL did not alter Listing capacity, reference, or reputation."""
+    assert after.listing_allocated_gpu_count == before.listing_allocated_gpu_count
+    assert after.simulation_reference_fingerprint == before.simulation_reference_fingerprint
+    assert after.worker_reputation == before.worker_reputation
 
 
 def read_database_clock(engine: Engine) -> datetime:
