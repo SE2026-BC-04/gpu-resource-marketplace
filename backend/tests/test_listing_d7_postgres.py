@@ -37,11 +37,11 @@ sessions = listing_sessions_fixture
 TRIGGER = "trg_gpu_listings_guard_update"
 FUNCTION = "public.fn_gpu_listings_guard_update()"
 IDENTITY_ERROR = "ck_gpu_listings_identity_immutable"
-D7_REVISION = "0004_listing_d7"
-D7_PARENT = "0003_phase1b_jobs_guard_update"
+D7_REVISION = "0005_listing_d7"
+D7_PARENT = "0004_phase1b_jobs_guard_delete"
 
 
-def test_migration_graph_has_one_head_and_d7_follows_accepted_d2():
+def test_migration_graph_has_one_head_and_d7_follows_accepted_d3():
     config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
     script = ScriptDirectory.from_config(config)
     assert script.get_heads() == [D7_REVISION]
@@ -49,13 +49,18 @@ def test_migration_graph_has_one_head_and_d7_follows_accepted_d2():
 
 
 def jobs_guard_snapshot(connection):
-    return connection.execute(
+    guards = connection.execute(
         text(
-            "SELECT pg_get_triggerdef(t.oid), pg_get_functiondef(t.tgfoid) "
-            "FROM pg_trigger t WHERE t.tgrelid='public.jobs'::regclass "
-            "AND t.tgname='trg_jobs_guard_update'"
+            "SELECT t.tgname, t.tgenabled, pg_get_triggerdef(t.oid), "
+            "pg_get_functiondef(t.tgfoid), p.proacl::text "
+            "FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid "
+            "WHERE t.tgrelid='public.jobs'::regclass "
+            "AND t.tgname IN ('trg_jobs_guard_update', 'trg_jobs_guard_delete') "
+            "ORDER BY t.tgname"
         )
-    ).one()
+    ).all()
+    assert len(guards) == 2
+    return guards
 
 
 def clock(uow):
