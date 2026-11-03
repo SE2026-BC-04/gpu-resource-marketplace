@@ -92,6 +92,32 @@ describe("Listings authenticated API boundary", () => {
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    { status: 503, code: "DEPENDENCY_UNAVAILABLE", header: LISTING_ID, requestId: LISTING_ID },
+    { status: 500, code: "INTERNAL_ERROR", header: "untrusted-server-text", requestId: undefined },
+  ])("guides reconciliation after create $status without retry or raw errors", async ({ status, code, header, requestId }) => {
+    const unauthorized = vi.fn();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      error: { code, message: "private-sql-password" },
+    }), { status, headers: { "X-Request-ID": header } }));
+    const api = createListingsApi(() => "test-token", unauthorized, fetcher);
+    await expect(api.create({ gpu_model: "A100", vram_gb: 80, total_gpu_count: 8 })).rejects.toMatchObject({
+      code, status, requestId,
+      message: expect.stringContaining("chọn Listings của tôi và Tải lại để kiểm tra trước khi tạo lại"),
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(unauthorized).not.toHaveBeenCalled();
+  });
+
+  it("also guides reconciliation for an unreadable successful create response", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("not JSON", { status: 201 }));
+    const api = createListingsApi(() => "test-token", vi.fn(), fetcher);
+    await expect(api.create({ gpu_model: "A100", vram_gb: 80, total_gpu_count: 8 })).rejects.toMatchObject({
+      code: "INVALID_RESPONSE", status: 201, message: expect.stringContaining("trước khi tạo lại"),
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
   it("preserves aborts and never saves tokens to browser storage", async () => {
     const storage = vi.spyOn(Storage.prototype, "setItem");
     const controller = new AbortController();

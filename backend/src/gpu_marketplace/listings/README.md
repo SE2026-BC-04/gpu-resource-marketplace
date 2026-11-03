@@ -2,12 +2,12 @@
 
 Status: **core/router/UI on `feat/gpu-004-listings`; real Auth dependency connected;
 PostgreSQL/shared-app integration BLOCKED**.
-Baseline: `main@ce99293` (25/10/2026), merged normally via `213455f` to receive
-PR #25's PostgreSQL AccountReader, following PR #27 D1 / #26 session UI.
+Baseline: `main@681c5fe` (04/11/2026), merged normally to retain accepted D2/D3,
+Jobs foundation and PostgreSQL Auth tests, including PR #25's AccountReader.
 The user explicitly authorized GPU-004 coding.
 This does not claim that the complete Phase 1D acceptance gates have passed.
-GPU-002-B now supplies ORM mappings and migration `0001_phase1b_baseline`, but
-Listing repositories/UoW are not handed off. GPU-003 core and Auth routes are on
+GPU-002 supplies ORM mappings and accepted migrations; delegated Listing R1 is
+in separate PR #31 awaiting acceptance. GPU-003 core and Auth routes are on
 this baseline, including the volatile session store. The PostgreSQL account
 reader from merged PR #25 is available as
 `gpu_marketplace.repositories.accounts.PostgresAccountReader(sessionmaker)`.
@@ -44,7 +44,7 @@ delivered adapter or PostgreSQL Listing test PASS. TV3 also
 
 | Owner | Required implementation / evidence |
 |---|---|
-| GPU-002 / TV2 owner, TV4 delegated R1 | TV4 supplies Listing UoW/readers, metadata/status writes and D7 in separate [PR #31](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31). [D7 is approved with conditions](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#issuecomment-6396753378); code at `99aa023` has separate PostgreSQL/real-login CI evidence. TV2 technical validation, affected-owner ACKs, independent human reviews and accepted migration/handoff remain pending; this branch does not contain that DB code |
+| GPU-002 / TV2 owner, TV4 delegated R1 | TV4 supplies Listing UoW/readers/writes/D7 in separate [PR #31](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31). [D7 is approved with conditions](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#issuecomment-6396753378); [TV2 validated `72d57f0`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#issuecomment-6610106183). D3 has since merged; current R1 is `6594c41`, with [versioned handoff](https://github.com/SE2026-BC-04/gpu-resource-marketplace/blob/6594c4188f40276dc2b81a52de631ed4b63ab427/docs/development/handoffs/GPU-004_R1_postgres_handoff.md) and [new CI](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41690653091). Exact-SHA revalidation, affected-owner actions and human L2 reviews remain open; this branch contains no R1 DB code |
 | GPU-003 / TV3 + TV2 | Canonical principal dependency is consumed; PostgreSQL AccountReader #25 is merged/available. Provisioning, production AuthService wiring and shared-shell session integration are still pending |
 | Leader | Shared AuthService/engine/session/JWT-secret configuration, router registration in `api/app.py`, frontend shell mounting, cursor-key injection, request correlation and audit integration |
 | TV2/TV3/leader | Resolution of the documented Auth sync/provisioning gates and applicable D1–D12 decisions/ACKs |
@@ -74,8 +74,10 @@ human review, or close shared-app/PostgreSQL/E2E gates.
 ### Persistence adapter requirements
 
 1. Each UoW owns one short SQLAlchemy synchronous Session / PostgreSQL
-   READ COMMITTED transaction. On exit without successful commit, roll back,
-   including when commit raises. Returned `ListingRecord` values must be fully
+   READ COMMITTED transaction. Roll back uncommitted work on exit. If COMMIT
+   raises, keep `COMMIT_OUTCOME_UNKNOWN`: cleanup cannot undo a durable commit
+   or prove abort. Do not retry non-idempotent creation automatically. Returned
+   `ListingRecord` values must be fully
    materialized, immutable public projections, not lazy ORM instances.
 2. `get_for_update` performs an actual Listing `SELECT ... FOR UPDATE` and
    returns fresh post-lock values. All submit/allocation callers must share the
@@ -86,8 +88,8 @@ human review, or close shared-app/PostgreSQL/E2E gates.
 4. `create` inserts only the supplied metadata plus the trusted resolved Worker
    ID. Omit managed columns; DB defaults produce ID, ACTIVE, allocated=0 and times.
    `update` writes only changed metadata; `set_status` writes status only.
-   Use the timestamp mechanism approved by GPU-002; if D7 is accepted, the DB
-   trigger supplies `updated_at` and the API does not explicitly UPDATE it.
+   Use the conditionally approved D7 DB-clock mechanism from the accepted R1
+   handoff; the trigger supplies `updated_at`, never a caller timestamp UPDATE.
 5. `has_nonterminal_jobs` checks QUEUED/RUNNING; `max_queued_gpu_count` returns
    MAX of **QUEUED** requests, not their sum, or 0. Both are read-only and called
    only after acquiring the Listing lock in that UoW.
@@ -144,6 +146,15 @@ available; `createSessionListingsApi(session)` implements the bridge agreed in
 GPU-003 handoff §9. No token is persisted; current 401 clears the store, old 401
 does not clear a newer token, and 403 keeps the session. This leaf component is
 ready for integrator review, **not mounted into the shared shell by this change**.
+
+Create network/5xx/unreadable-response failures show safe guidance to recover
+connectivity/session, select **Listings của tôi**, then **Tải lại** before deciding
+to create again. A 503 does not prove rollback. The client preserves existing
+public error codes and canonical request IDs, never displays raw server text,
+and does not retry POST or add idempotency keys. Matching metadata is not an
+exactly-once operation identifier. Component tests cover manual mine/refresh
+using the real session/client with mocked HTTP; mounted PostgreSQL/browser and
+request-ID/audit correlation still need integration evidence.
 
 ### Approved Listings body bounds — CR-GPU-004-BODY-01
 

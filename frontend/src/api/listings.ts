@@ -66,8 +66,10 @@ const messages: Record<string, string> = {
 };
 
 export class ListingsApiError extends Error {
-  constructor(public readonly code: string, public readonly status: number, public readonly requestId?: string) {
-    super(messages[code] ?? "Không thể xử lý yêu cầu lúc này.");
+  constructor(public readonly code: string, public readonly status: number, public readonly requestId?: string, creationUncertain = false) {
+    super(creationUncertain
+      ? "Chưa xác nhận được kết quả tạo Listing. Khi kết nối và phiên đăng nhập hoạt động trở lại, chọn Listings của tôi và Tải lại để kiểm tra trước khi tạo lại."
+      : messages[code] ?? "Không thể xử lý yêu cầu lúc này.");
     this.name = "ListingsApiError";
   }
 }
@@ -157,7 +159,18 @@ export function createListingsApi(
       return { items: payload.items.map(listing), next_cursor: payload.next_cursor };
     },
     async get(id, signal) { return listing(await request(resource(id), "GET", undefined, signal)); },
-    async create(input, signal) { return listing(await request("", "POST", input, signal)); },
+    async create(input, signal) {
+      try { return listing(await request("", "POST", input, signal)); }
+      catch (error) {
+        // A failed response can follow a durable create. Preserve the public
+        // code/request ID, give reconciliation guidance and never retry POST.
+        if (error instanceof ListingsApiError
+          && (error.status === 0 || error.status >= 500 || error.code === "INVALID_RESPONSE")) {
+          throw new ListingsApiError(error.code, error.status, error.requestId, true);
+        }
+        throw error;
+      }
+    },
     async patch(id, input, signal) { return listing(await request(resource(id), "PATCH", input, signal)); },
     async pause(id, signal) { return listing(await request(`${resource(id)}/pause`, "POST", undefined, signal)); },
     async resume(id, signal) { return listing(await request(`${resource(id)}/resume`, "POST", undefined, signal)); },

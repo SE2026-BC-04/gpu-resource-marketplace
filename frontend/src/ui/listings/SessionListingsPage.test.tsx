@@ -114,6 +114,33 @@ describe("Listings consumer of the merged GPU-003 session", () => {
     expect(session.getAccessToken()).toBe("test-only-first-token");
   });
 
+  it("guides the Worker to refresh mine after create 503 without replaying POST", async () => {
+    const { session } = setup();
+    await session.signIn("worker-one", "test-only-password");
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => init?.method === "POST"
+      ? Response.json({ error: { code: "DEPENDENCY_UNAVAILABLE", message: "private-sql-password" } }, { status: 503 })
+      : page());
+    vi.stubGlobal("fetch", fetcher);
+    render(<SessionListingsPage session={session} />);
+    await screen.findByText("A100 simulated");
+    fireEvent.click(screen.getByRole("button", { name: "Tạo Listing" }));
+    fireEvent.change(screen.getByLabelText("Model GPU"), { target: { value: "A100" } });
+    fireEvent.change(screen.getByLabelText("VRAM (GB)"), { target: { value: "80" } });
+    fireEvent.change(screen.getByLabelText("Tổng GPU"), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: "Lưu Listing" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("chọn Listings của tôi và Tải lại để kiểm tra trước khi tạo lại");
+    expect(alert).not.toHaveTextContent("private-sql-password");
+    expect(session.getState().status).toBe("signed-in");
+    fireEvent.change(screen.getByLabelText("Phạm vi"), { target: { value: "mine" } });
+    await screen.findByText("A100 simulated");
+    expect(screen.queryByLabelText("Model GPU")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Tải lại" }));
+    await waitFor(() => expect(fetcher.mock.calls.filter(call => call[1]?.method === "GET")).toHaveLength(3));
+    expect(fetcher.mock.calls.filter(call => call[1]?.method === "POST")).toHaveLength(1);
+    expect(String(fetcher.mock.calls.at(-1)?.[0])).toContain("scope=mine");
+  });
+
   it("at the 900 s deadline it clears the UI and sends nothing, even if the timer did not fire", async () => {
     const env = setup();
     await env.session.signIn("worker-one", "test-only-password");
