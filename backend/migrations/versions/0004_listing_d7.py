@@ -2,18 +2,19 @@
 
 Owner approved with conditions: PR #31, issuecomment-6396753378.
 Error profile was recorded before DDL at b1e1008 / issuecomment-6500093853.
-No table/column/role or D1 grant changes. Re-parent and retest if the accepted
-migration head changes before merge; pending D2/D3 are not dependencies.
+No table/column/role or D1 grant changes. Follows accepted D2 on main@ef9ddcb.
+D3 (#29) is pending: the later PR must re-parent/renumber and retest before merge.
+Only this unmerged D7 revision is renamed; accepted revisions stay unchanged.
 
-Revision ID: 0003_listing_d7
-Revises: 0002_phase1b_grants
+Revision ID: 0004_listing_d7
+Revises: 0003_phase1b_jobs_guard_update
 Create Date: 2026-10-29
 """
 
 from alembic import op
 
-revision = "0003_listing_d7"
-down_revision = "0002_phase1b_grants"
+revision = "0004_listing_d7"
+down_revision = "0003_phase1b_jobs_guard_update"
 branch_labels = None
 depends_on = None
 

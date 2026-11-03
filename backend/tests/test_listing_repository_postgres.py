@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import event, insert, text, update
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import sessionmaker
 
 from db_safety import verify_cluster
@@ -30,7 +30,10 @@ from gpu_marketplace.domain.identity import (
 )
 from gpu_marketplace.domain.jobs import Job
 from gpu_marketplace.domain.listings import GpuListing
-from gpu_marketplace.repositories.listings import PostgresListingUnitOfWork
+from gpu_marketplace.repositories.listings import (
+    PostgresListingUnitOfWork,
+    TransactionOutcome,
+)
 
 
 class StoreUnavailable(Exception):
@@ -233,6 +236,7 @@ def test_keyset_tie_breaker_filters_in_sql(sessions, data):
 
 def test_create_uses_db_defaults_and_commit(sessions, data):
     with make_uow(sessions) as uow:
+        assert uow.outcome is TransactionOutcome.NOT_COMMITTED
         record = uow.listings.create(
             data.worker, {**VALUES, "mock_price_per_hour": Decimal("1.20")}
         )
@@ -245,6 +249,7 @@ def test_create_uses_db_defaults_and_commit(sessions, data):
         assert record.created_at.utcoffset().total_seconds() == 0
         assert record.updated_at >= record.created_at
         uow.commit()
+    assert uow.outcome is TransactionOutcome.COMMITTED
     with make_uow(sessions) as uow:
         assert uow.listings.get(record.id) == record
 
@@ -262,6 +267,7 @@ def test_managed_create_fields_rejected_before_sql(sessions, data, field):
 def test_exit_without_commit_rolls_back(sessions, data):
     with make_uow(sessions) as uow:
         record = uow.listings.create(data.worker, VALUES)
+    assert uow.outcome is TransactionOutcome.ROLLED_BACK
     with make_uow(sessions) as uow:
         assert uow.listings.get(record.id) is None
 
@@ -271,11 +277,12 @@ def test_exception_rolls_back_all_prior_writes(sessions, data):
         with make_uow(sessions) as uow:
             record = uow.listings.create(data.worker, VALUES)
             uow.listings.create(data.worker, {**VALUES, "total_gpu_count": 0})
+    assert uow.outcome is TransactionOutcome.ROLLED_BACK
     with make_uow(sessions) as uow:
         assert uow.listings.get(record.id) is None
 
 
-def test_commit_failure_rolls_back_and_is_sanitized(
+def test_injected_failure_before_real_commit_leaves_no_row_but_outcome_unknown(
     sessions, data, monkeypatch, caplog
 ):
     with caplog.at_level(logging.ERROR), pytest.raises(StoreUnavailable) as error:
@@ -287,8 +294,14 @@ def test_commit_failure_rolls_back_and_is_sanitized(
 
             monkeypatch.setattr(uow._active(), "commit", fail)
             uow.commit()
+    # The test knows commit() was never forwarded. The adapter cannot know that
+    # from a generic OperationalError, so even successful cleanup stays unknown.
+    assert uow.outcome is TransactionOutcome.COMMIT_OUTCOME_UNKNOWN
     assert str(error.value) == "" and error.value.__suppress_context__
     assert "secret" not in caplog.text
+    assert caplog.records[-1].transaction_outcome == "COMMIT_OUTCOME_UNKNOWN"
+    with pytest.raises(RuntimeError):
+        uow.commit()
     with make_uow(sessions) as uow:
         assert uow.listings.get(record.id) is None
 
@@ -355,13 +368,18 @@ def test_outer_reputation_join_does_not_lock_nullable_side(sessions, data):
     ],
 )
 def test_actual_api_role_cannot_update_managed_columns(sessions, data, field, value):
+    statement = (
+        update(GpuListing).where(GpuListing.id == data.listing).values(**{field: value})
+    )
     with pytest.raises(StoreUnavailable):
         with make_uow(sessions) as uow:
-            uow._execute(
-                update(GpuListing)
-                .where(GpuListing.id == data.listing)
-                .values(**{field: value})
-            )
+            uow._execute(statement)
+    # Also prove the server rejected permissions, rather than another sanitized
+    # SQL failure. This direct probe is confined to the restricted test factory.
+    with pytest.raises(ProgrammingError) as denied:
+        with sessions.begin() as session:
+            session.execute(statement)
+    assert denied.value.orig.sqlstate == "42501"
 
 
 @pytest.mark.parametrize("operation", ["patch", "pause", "resume"])

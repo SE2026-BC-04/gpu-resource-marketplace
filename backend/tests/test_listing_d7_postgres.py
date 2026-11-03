@@ -6,18 +6,23 @@ one test additionally opens a real gpm_api_app TCP connection without SET ROLE.
 
 import secrets
 from datetime import timedelta
+from decimal import Decimal
+from pathlib import Path
 
 import psycopg
 import pytest
 from alembic import command
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from psycopg import sql
 from sqlalchemy import create_engine, event, text, update
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from db_safety import verify_cluster
 from gpu_marketplace.domain.listings import GpuListing
+from gpu_marketplace.repositories.listings import TransactionOutcome
 from test_listing_repository_postgres import (
     StoreUnavailable,
     VALUES,
@@ -32,6 +37,25 @@ sessions = listing_sessions_fixture
 TRIGGER = "trg_gpu_listings_guard_update"
 FUNCTION = "public.fn_gpu_listings_guard_update()"
 IDENTITY_ERROR = "ck_gpu_listings_identity_immutable"
+D7_REVISION = "0004_listing_d7"
+D7_PARENT = "0003_phase1b_jobs_guard_update"
+
+
+def test_migration_graph_has_one_head_and_d7_follows_accepted_d2():
+    config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+    script = ScriptDirectory.from_config(config)
+    assert script.get_heads() == [D7_REVISION]
+    assert script.get_revision(D7_REVISION).down_revision == D7_PARENT
+
+
+def jobs_guard_snapshot(connection):
+    return connection.execute(
+        text(
+            "SELECT pg_get_triggerdef(t.oid), pg_get_functiondef(t.tgfoid) "
+            "FROM pg_trigger t WHERE t.tgrelid='public.jobs'::regclass "
+            "AND t.tgname='trg_jobs_guard_update'"
+        )
+    ).one()
 
 
 def clock(uow):
@@ -156,13 +180,22 @@ def test_repository_noops_issue_no_update_and_preserve_timestamp(
     event.listen(baseline_database, "before_cursor_execute", capture)
     try:
         with make_uow(sessions) as uow:
-            before = uow.listings.get_for_update(data.listing)
-            assert uow.listings.update(data.listing, {}) == before
+            created = uow.listings.create(
+                data.worker, {**VALUES, "mock_price_per_hour": Decimal("1.20")}
+            )
+            before = uow.listings.get_for_update(created.id)
+            assert isinstance(before.mock_price_per_hour, Decimal)
+            assert uow.listings.update(created.id, {}) == before
             assert (
-                uow.listings.update(data.listing, {"gpu_model": before.gpu_model})
+                uow.listings.update(created.id, {"gpu_model": before.gpu_model})
                 == before
             )
-            assert uow.listings.set_status(data.listing, before.status) == before
+            for price in (Decimal("1.20"), Decimal("1.200")):
+                assert (
+                    uow.listings.update(created.id, {"mock_price_per_hour": price})
+                    == before
+                )
+            assert uow.listings.set_status(created.id, before.status) == before
             uow.commit()
     finally:
         event.remove(baseline_database, "before_cursor_execute", capture)
@@ -240,8 +273,6 @@ def test_owner_supplied_updated_at_is_overwritten_not_backdated(
 def test_failed_write_rolls_back_metadata_status_timestamp_and_prior_create(
     sessions, data, monkeypatch, failure
 ):
-    from sqlalchemy.exc import OperationalError
-
     with make_uow(sessions) as uow:
         before = uow.listings.get(data.listing)
     with pytest.raises((StoreUnavailable, ValueError)):
@@ -261,9 +292,70 @@ def test_failed_write_rolls_back_metadata_status_timestamp_and_prior_create(
 
                 monkeypatch.setattr(uow._active(), "commit", fail)
                 uow.commit()
+    assert uow.outcome is (
+        TransactionOutcome.COMMIT_OUTCOME_UNKNOWN
+        if failure == "commit_failure"
+        else TransactionOutcome.ROLLED_BACK
+    )
     with make_uow(sessions) as uow:
         assert uow.listings.get(data.listing) == before
         assert uow.listings.get(extra.id) is None
+
+
+@pytest.mark.parametrize("operation", ["create", "metadata", "pause", "resume"])
+def test_real_commit_then_lost_ack_is_unknown_and_persists_on_fresh_connection(
+    baseline_database, sessions, data, monkeypatch, caplog, operation
+):
+    listing_id = data.paused if operation == "resume" else data.listing
+    commits = []
+    with pytest.raises(StoreUnavailable) as error:
+        with make_uow(sessions) as uow:
+            if operation == "create":
+                changed = uow.listings.create(data.worker, VALUES)
+            else:
+                uow.listings.get_for_update(listing_id)
+                if operation == "metadata":
+                    changed = uow.listings.update(
+                        listing_id, {"gpu_model": "Durably committed GPU"}
+                    )
+                else:
+                    changed = uow.listings.set_status(
+                        listing_id, "ACTIVE" if operation == "resume" else "PAUSED"
+                    )
+            real_commit = uow._active().commit
+
+            def commit_then_lose_ack():
+                real_commit()
+                commits.append(True)
+                raise OperationalError("secret SQL", {}, Exception("secret DSN"))
+
+            monkeypatch.setattr(uow._active(), "commit", commit_then_lose_ack)
+            uow.commit()
+    assert commits == [True]  # no retry inside the adapter
+    assert uow.outcome is TransactionOutcome.COMMIT_OUTCOME_UNKNOWN
+    assert str(error.value) == "" and error.value.__suppress_context__
+    assert "secret" not in caplog.text
+    assert caplog.records[-1].transaction_outcome == "COMMIT_OUTCOME_UNKNOWN"
+    with pytest.raises(RuntimeError):
+        uow.commit()
+    # A distinct engine/physical connection avoids identity-map or same-session
+    # observations. This controlled read is not mounted API reconciliation.
+    observer = create_engine(baseline_database.url, hide_parameters=True)
+    try:
+        with observer.connect() as connection:
+            persisted = connection.execute(
+                text(
+                    "SELECT gpu_model, status, updated_at FROM public.gpu_listings WHERE id=:id"
+                ),
+                {"id": changed.id},
+            ).one()
+        assert tuple(persisted) == (
+            changed.gpu_model,
+            changed.status,
+            changed.updated_at,
+        )
+    finally:
+        observer.dispose()
 
 
 def test_migration_round_trip_preserves_rows_d1_acls_and_rejects_missing_d7(
@@ -273,11 +365,12 @@ def test_migration_round_trip_preserves_rows_d1_acls_and_rejects_missing_d7(
         before = uow.listings.get(data.listing)
     with baseline_database.connect() as owner:
         expected_acls = acl_snapshot(owner)
+        expected_jobs_guard = jobs_guard_snapshot(owner)
     migrate(
         alembic_config,
         baseline_database,
         test_database,
-        "0002_phase1b_grants",
+        D7_PARENT,
         downgrade=True,
     )
     try:
@@ -289,6 +382,13 @@ def test_migration_round_trip_preserves_rows_d1_acls_and_rejects_missing_d7(
                 is None
             )
             assert acl_snapshot(owner) == expected_acls
+            assert jobs_guard_snapshot(owner) == expected_jobs_guard
+            assert (
+                owner.execute(
+                    text("SELECT version_num FROM alembic_version")
+                ).scalar_one()
+                == D7_PARENT
+            )
         with pytest.raises(StoreUnavailable):
             with make_uow(sessions) as uow:
                 uow.listings.get_for_update(data.listing)
@@ -299,9 +399,10 @@ def test_migration_round_trip_preserves_rows_d1_acls_and_rejects_missing_d7(
         migrate(alembic_config, baseline_database, test_database, "head")
     with baseline_database.connect() as owner:
         assert acl_snapshot(owner) == expected_acls
+        assert jobs_guard_snapshot(owner) == expected_jobs_guard
         assert (
             owner.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            == "0003_listing_d7"
+            == D7_REVISION
         )
     with make_uow(sessions) as uow:
         assert uow.listings.get(data.listing) == before

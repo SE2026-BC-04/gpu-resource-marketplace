@@ -10,6 +10,7 @@ so a missing/disabled trigger fails closed without mutating a Listing.
 import logging
 import sys
 from collections.abc import Callable, Mapping, Sequence
+from enum import StrEnum
 from types import TracebackType
 from typing import Any, Generic, TypeVar
 from uuid import UUID
@@ -49,6 +50,15 @@ D7_READY = text("""
 """)
 
 
+class TransactionOutcome(StrEnum):
+    """Internal evidence only; never a public API error or a retry instruction."""
+
+    NOT_COMMITTED = "NOT_COMMITTED"
+    ROLLED_BACK = "ROLLED_BACK"
+    COMMITTED = "COMMITTED"
+    COMMIT_OUTCOME_UNKNOWN = "COMMIT_OUTCOME_UNKNOWN"
+
+
 class PostgresListingUnitOfWork(Generic[W, L]):
     """One fresh, restricted-role READ COMMITTED Session per single-use UoW.
 
@@ -72,11 +82,17 @@ class PostgresListingUnitOfWork(Generic[W, L]):
         self._session: Session | None = None
         self._entered = False
         self._committed = False
+        self._outcome = TransactionOutcome.NOT_COMMITTED
         self._failed = False
         self._locked: set[UUID] = set()
         self.workers = PostgresWorkerReader(self)
         self.listings = PostgresListingRepository(self)
         self.jobs = PostgresJobConstraintReader(self)
+
+    @property
+    def outcome(self) -> TransactionOutcome:
+        """Retained after exit; cleanup cannot resolve an indeterminate COMMIT."""
+        return self._outcome
 
     def __enter__(self) -> "PostgresListingUnitOfWork[W, L]":
         if self._entered:
@@ -115,7 +131,11 @@ class PostgresListingUnitOfWork(Generic[W, L]):
         self._failed = True
         if error is not None:
             logger.error(
-                "listing_store_unavailable", extra={"error_type": type(error).__name__}
+                "listing_store_unavailable",
+                extra={
+                    "error_type": type(error).__name__,
+                    "transaction_outcome": self.outcome.value,
+                },
             )
         raise self._unavailable_error() from None
 
@@ -134,11 +154,18 @@ class PostgresListingUnitOfWork(Generic[W, L]):
 
     def commit(self) -> None:
         session = self._active()
+        # An exception can follow a durable COMMIT with a lost acknowledgement.
+        # Even successful rollback/close afterward cannot establish non-commit.
+        self._outcome = TransactionOutcome.COMMIT_OUTCOME_UNKNOWN
         try:
             session.commit()
         except SQLAlchemyError as error:
             self._fail(error)
+        except BaseException:
+            self._failed = True
+            raise
         self._committed = True
+        self._outcome = TransactionOutcome.COMMITTED
 
     def __exit__(
         self,
@@ -153,6 +180,8 @@ class PostgresListingUnitOfWork(Generic[W, L]):
         try:
             if not self._committed:
                 session.rollback()
+                if self.outcome is TransactionOutcome.NOT_COMMITTED:
+                    self._outcome = TransactionOutcome.ROLLED_BACK
         except SQLAlchemyError:
             cleanup_failed = True
         finally:
