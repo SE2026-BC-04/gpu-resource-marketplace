@@ -25,6 +25,7 @@ INTEGRITY = "23000"
 API_GROUP = "gpm_api_rw"
 MANAGER_GROUP = "gpm_manager_rw"
 API_LOGIN = "gpm_api_app"
+MANAGER_LOGIN = "gpm_manager_app"
 BASELINE_WITH_GRANTS = "0002_phase1b_grants"
 TERMINAL = ("COMPLETED", "FAILED", "CANCELLED")
 
@@ -121,6 +122,7 @@ def test_a_terminal_job_cannot_be_updated_even_by_the_owner(conn: Connection, st
     [
         "id = gen_random_uuid()",
         "client_id = gen_random_uuid()",
+        "client_role = 'WORKER'",
         "listing_id = gen_random_uuid()",
         "worker_id = gen_random_uuid()",
         "requested_gpu_count = requested_gpu_count + 1",
@@ -304,7 +306,7 @@ def test_the_trigger_function_is_not_executable_by_public_or_runtime_roles(conn:
         text("SELECT coalesce(proacl::text[], ARRAY[]::text[]) FROM pg_proc WHERE proname = 'fn_jobs_guard_update'")
     ).scalar_one()
     assert not any(entry.startswith("=") for entry in acl), acl  # an empty grantee is PUBLIC
-    for role in (API_GROUP, MANAGER_GROUP, API_LOGIN):
+    for role in (API_GROUP, MANAGER_GROUP, API_LOGIN, MANAGER_LOGIN):
         held = conn.execute(
             text("SELECT has_function_privilege(:role, 'fn_jobs_guard_update()', 'EXECUTE')"), {"role": role}
         ).scalar_one()
