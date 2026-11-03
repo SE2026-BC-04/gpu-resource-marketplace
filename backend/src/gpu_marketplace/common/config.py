@@ -1,7 +1,7 @@
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
@@ -21,8 +21,16 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+psycopg://gpu_marketplace:local-dev-only-change-me@localhost:5432/gpu_marketplace"
     )
+    jwt_secret: SecretStr | None = None
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     log_level: LogLevel = "INFO"
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def validate_jwt_secret(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and len(value.get_secret_value().encode("utf-8")) < 32:
+            raise ValueError("JWT secret must contain at least 256 bits (32 UTF-8 bytes)")
+        return value
 
     @field_validator("database_url")
     @classmethod

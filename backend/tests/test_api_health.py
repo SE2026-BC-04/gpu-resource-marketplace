@@ -3,9 +3,15 @@ from fastapi.testclient import TestClient
 from gpu_marketplace.api.app import create_app
 from gpu_marketplace.common.config import Settings
 
+JWT_SECRET = "api-health-tests-only-secret-32-bytes-minimum"
+
+
+def settings() -> Settings:
+    return Settings(_env_file=None, jwt_secret=JWT_SECRET)
+
 
 def test_liveness_does_not_require_database() -> None:
-    app = create_app(Settings(_env_file=None), database_probe=lambda: False)
+    app = create_app(settings(), database_probe=lambda: False)
 
     with TestClient(app) as client:
         response = client.get("/health/live")
@@ -15,7 +21,7 @@ def test_liveness_does_not_require_database() -> None:
 
 
 def test_readiness_requires_database() -> None:
-    app = create_app(Settings(_env_file=None), database_probe=lambda: False)
+    app = create_app(settings(), database_probe=lambda: False)
 
     with TestClient(app) as client:
         response = client.get("/health/ready")
@@ -28,7 +34,7 @@ def test_readiness_requires_database() -> None:
 
 
 def test_readiness_reports_database_probe_success() -> None:
-    app = create_app(Settings(_env_file=None), database_probe=lambda: True)
+    app = create_app(settings(), database_probe=lambda: True)
 
     with TestClient(app) as client:
         response = client.get("/health/ready")
@@ -38,7 +44,7 @@ def test_readiness_reports_database_probe_success() -> None:
 
 
 def test_unexpected_errors_do_not_expose_exception_details(capsys) -> None:
-    app = create_app(Settings(_env_file=None), database_probe=lambda: True)
+    app = create_app(settings(), database_probe=lambda: True)
 
     @app.get("/test-failure")
     def fail():

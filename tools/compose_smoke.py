@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import socket
 import subprocess
 import sys
@@ -174,12 +175,16 @@ def check_postgres_from_host(port: int, env_file: Path) -> None:
 
 def main() -> int:
     smoke_env: Path | None = None
+    inspect_env: Path | None = None
     smoke_project_created = False
     local_resources_before: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None = None
     exit_code = 1
     try:
         # Inspect the normal local project first. It is never started, stopped, or cleaned here.
-        local = compose(ROOT / ".env.example", LOCAL_PROJECT, "ps", "--all", "--format", "json")
+        # Compose validates required interpolation even for `ps`; this one-use key only
+        # renders the existing project config and is never passed to a started service.
+        inspect_env = make_smoke_env_file({"GPU_MARKETPLACE_JWT_SECRET": secrets.token_hex(32)})
+        local = compose(inspect_env, LOCAL_PROJECT, "ps", "--all", "--format", "json")
         if local.returncode:
             raise RuntimeError(f"Could not inspect the existing local Compose stack: {local.stderr.strip()}")
         local_services = parse_services(local.stdout)
@@ -206,6 +211,7 @@ def main() -> int:
         smoke_env = make_smoke_env_file(
             {
                 **ports,
+                "GPU_MARKETPLACE_JWT_SECRET": secrets.token_hex(32),
                 "GPU_MARKETPLACE_CORS_ORIGINS": f'["http://localhost:{ports["FRONTEND_HOST_PORT"]}"]',
             }
         )
@@ -226,6 +232,17 @@ def main() -> int:
             raise RuntimeError(
                 f"API CORS origins {configured_origins!r} do not match isolated frontend origin {expected_origins!r}"
             )
+        smoke_values = read_env_values(smoke_env)
+        if (
+            rendered_config["services"]["api"]["environment"]["GPU_MARKETPLACE_DATABASE_URL"]
+            != smoke_values["GPU_MARKETPLACE_API_DATABASE_URL"]
+        ):
+            raise RuntimeError("API container did not receive its API-specific database URL")
+        if (
+            rendered_config["services"]["manager"]["environment"]["GPU_MARKETPLACE_DATABASE_URL"]
+            != smoke_values["GPU_MARKETPLACE_MANAGER_DATABASE_URL"]
+        ):
+            raise RuntimeError("Manager container did not receive its Manager-specific database URL")
         for service_name, target, host_port in (
             ("frontend", 5173, ports["FRONTEND_HOST_PORT"]),
             ("api", 8000, ports["API_HOST_PORT"]),
@@ -379,6 +396,11 @@ def main() -> int:
                 smoke_env.unlink(missing_ok=True)
             except OSError as exc:
                 print(f"Could not remove temporary smoke env file: {exc}", file=sys.stderr)
+        if inspect_env is not None:
+            try:
+                inspect_env.unlink(missing_ok=True)
+            except OSError as exc:
+                print(f"Could not remove temporary Compose inspection env file: {exc}", file=sys.stderr)
 
     return exit_code
 

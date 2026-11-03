@@ -6,11 +6,12 @@ from gpu_marketplace.common.config import Settings
 
 
 ALLOWED_ORIGIN = "http://localhost:5173"
+JWT_SECRET = "api-cors-tests-only-secret-32-bytes-minimum"
 
 
 def _client() -> TestClient:
     app = create_app(
-        Settings(_env_file=None, cors_origins=[ALLOWED_ORIGIN]),
+        Settings(_env_file=None, cors_origins=[ALLOWED_ORIGIN], jwt_secret=JWT_SECRET),
         database_probe=lambda: True,
     )
 

@@ -14,13 +14,25 @@ The containers use digest-pinned Python 3.12, Node 24, and PostgreSQL 16 images.
 ## Start the full stack
 
 ```powershell
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+$jwtSetting = Select-String -Path .env -Pattern '^GPU_MARKETPLACE_JWT_SECRET=.*$'
+if (-not $jwtSetting -or $jwtSetting.Line -eq 'GPU_MARKETPLACE_JWT_SECRET=') {
+    $jwtSecret = py -3.12 -c "import secrets; print(secrets.token_hex(32))"
+    if ($jwtSetting) {
+        (Get-Content .env) -replace '^GPU_MARKETPLACE_JWT_SECRET=.*$', "GPU_MARKETPLACE_JWT_SECRET=$jwtSecret" | Set-Content -Encoding Ascii .env
+    } else {
+        Add-Content -Encoding Ascii .env "GPU_MARKETPLACE_JWT_SECRET=$jwtSecret"
+    }
+    Remove-Variable jwtSecret
+}
 docker compose --env-file .env up --build
 ```
 
+When upgrading an existing `.env`, keep its current JWT secret and add the two database URL entries from `.env.example`; do not replace the key on each restart.
+
 The local UI is at `http://localhost:5173`, the operational API at `http://localhost:8000`, and PostgreSQL is bound to `127.0.0.1:5432`. The sample credentials are for local development only. Compose starts five services: `frontend`, `api`, `manager`, `simulator`, and `postgres`.
 
-The API exposes only `/health/live` and `/health/ready` at this stage. Readiness checks PostgreSQL with `SELECT 1`. The Manager checks its database connection and shuts down on SIGINT/SIGTERM. The Simulator is an independent runtime with health endpoints only. It has no database package, credentials, host port, or database-network attachment.
+The API exposes `/health/live`, `/health/ready`, and the approved `/api/v1/auth/login`, `/api/v1/auth/me`, and `/api/v1/auth/logout` routes. Readiness checks PostgreSQL with `SELECT 1`. The API requires a dedicated `GPU_MARKETPLACE_JWT_SECRET` of at least 32 UTF-8 bytes; generate it once for the local `.env` as shown above and keep it out of source control. Compose maps separate `GPU_MARKETPLACE_API_DATABASE_URL` and `GPU_MARKETPLACE_MANAGER_DATABASE_URL` values to the corresponding process configuration. The example uses the local bootstrap account only for local development; nonlocal deployments must use the D1 `gpm_api_app` and `gpm_manager_app` logins respectively and keep owner/migration credentials separate. The Manager checks its database connection and shuts down on SIGINT/SIGTERM. The Simulator is an independent runtime with health endpoints only. It has no database package, credentials, host port, or database-network attachment.
 
 Stop the stack with `docker compose --env-file .env down`. Add `--volumes` only when you intentionally want to delete the local PostgreSQL data.
 
@@ -48,7 +60,7 @@ npm run build
 Validate and exercise the Compose topology with:
 
 ```powershell
-docker compose --env-file .env.example config --quiet
+docker compose --env-file .env config --quiet
 uv run --project backend --locked python tools/compose_smoke.py
 ```
 

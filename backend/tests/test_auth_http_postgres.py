@@ -1,30 +1,26 @@
-"""GPU-003-E: Auth HTTP routes and the shared principal dependency against real PostgreSQL.
+"""Auth HTTP integration through the production app factory and PostgreSQL.
 
-The app below mounts only the Auth router and a probe route, wired to ``PostgresAccountReader``
-the way ``api/app.py`` is expected to (the real mount is the team lead's). Rows are inserted as
-the owner inside a rolled-back transaction; every request reads as ``gpm_api_rw``.
-Covers the DB-backed parts of P1C-AC-01, P1C-AC-05 and P1C-AC-06.
+Rows are inserted as the owner inside a rolled-back transaction; every request reads as
+``gpm_api_rw``. The test session factory is injected into ``create_app`` so this exercises its
+actual router/service/dependency composition without changing production DB configuration.
 """
 
 import json
 import logging
 from collections.abc import Iterator
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from gpu_marketplace.api.app import create_app
+from gpu_marketplace.common.config import Settings
 from gpu_marketplace.common.database import create_engine
-from gpu_marketplace.identity.dependencies import create_principal_dependency
 from gpu_marketplace.identity.principal import AuthenticatedPrincipal
-from gpu_marketplace.identity.router import create_auth_router
-from gpu_marketplace.identity.service import AuthService
-from gpu_marketplace.identity.tokens import AccessTokenCodec
-from gpu_marketplace.repositories.accounts import PostgresAccountReader
 from identity_fakes import HASHER, PASSWORD, SECRET
 
 CLIENT = UUID("0c6f2a1e-3b4d-4e5f-8a6b-7c8d9e0f1a21")
@@ -45,15 +41,21 @@ ACCOUNTS = [
 ]
 
 
-def build_app(sessions: sessionmaker[Session]) -> FastAPI:
-    service = AuthService(PostgresAccountReader(sessions), AccessTokenCodec(SECRET), HASHER)
-    app = FastAPI()
-    app.include_router(create_auth_router(service=service))
-    principal = create_principal_dependency(service)
+def build_app(sessions: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    # Keep this real-app wiring test fast while the independent password-hasher tests
+    # verify the production ScryptPasswordHasher profile and limits.
+    monkeypatch.setattr("gpu_marketplace.api.app.ScryptPasswordHasher", lambda: HASHER)
+    app = create_app(
+        Settings(_env_file=None, jwt_secret=SECRET.decode("ascii")),
+        database_probe=lambda: True,
+        account_sessions=sessions,
+    )
 
     # Stand-in for a GPU-004/GPU-005 route consuming the shared dependency.
     @app.get("/probe")
-    def probe(p: AuthenticatedPrincipal = Depends(principal)) -> dict[str, str]:
+    def probe(
+        p: AuthenticatedPrincipal = Depends(app.state.require_authenticated_principal),
+    ) -> dict[str, str]:
         return {"user_id": str(p.user_id), "role": p.role, "status": p.status}
 
     return app
@@ -65,7 +67,7 @@ def password_hash() -> str:
 
 
 @pytest.fixture
-def client(conn: Connection, password_hash: str) -> Iterator[TestClient]:
+def client(conn: Connection, password_hash: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     for user_id, login_name, status, role in ACCOUNTS:
         conn.execute(
             text("INSERT INTO users (id, login_name, password_hash, status) VALUES (:id, :name, :hash, :status)"),
@@ -77,7 +79,9 @@ def client(conn: Connection, password_hash: str) -> Iterator[TestClient]:
             )
     conn.execute(text("SET LOCAL ROLE gpm_api_rw"))
     # Sessions join the outer transaction through savepoints, so the fixture rollback undoes everything.
-    with TestClient(build_app(sessionmaker(bind=conn, join_transaction_mode="create_savepoint"))) as test_client:
+    with TestClient(
+        build_app(sessionmaker(bind=conn, join_transaction_mode="create_savepoint"), monkeypatch)
+    ) as test_client:
         yield test_client
 
 
@@ -199,6 +203,88 @@ def test_no_public_registration_route(client: TestClient) -> None:
         assert client.post(path, content=body, headers={"Content-Type": "application/json"}).status_code == 404
 
 
+def test_auth_request_id_ignores_client_supplied_value(client: TestClient) -> None:
+    supplied = "caller-controlled-request-id"
+    response = client.get("/api/v1/auth/me", headers={"X-Request-ID": supplied})
+
+    assert_error(response, 401, "UNAUTHORIZED")
+    assert response.headers["X-Request-ID"] != supplied
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_production_app_factory_uses_engine_sessionmaker_and_runtime_role(
+    baseline_database: Engine,
+    test_database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    login_name = f"int_app_{user_id.hex}"
+    password_hash = HASHER.hash_password(PASSWORD)
+    with baseline_database.begin() as connection:
+        connection.execute(
+            text("INSERT INTO users (id, login_name, password_hash, status) VALUES (:id, :name, :hash, 'ACTIVE')"),
+            {"id": user_id, "name": login_name, "hash": password_hash},
+        )
+        connection.execute(
+            text("INSERT INTO user_roles (user_id, role_code) VALUES (:id, 'CLIENT')"),
+            {"id": user_id},
+        )
+
+    app_engines: list[Engine] = []
+
+    def create_runtime_test_engine(database_url: str) -> Engine:
+        engine = create_engine(database_url)
+
+        def set_api_runtime_role(dbapi_connection, _connection_record) -> None:
+            autocommit = dbapi_connection.autocommit
+            dbapi_connection.autocommit = True
+            try:
+                with dbapi_connection.cursor() as cursor:
+                    cursor.execute("SET ROLE gpm_api_rw")
+            finally:
+                dbapi_connection.autocommit = autocommit
+
+        event.listen(engine, "connect", set_api_runtime_role)
+        app_engines.append(engine)
+        return engine
+
+    try:
+        monkeypatch.setattr("gpu_marketplace.api.app.create_engine", create_runtime_test_engine)
+        monkeypatch.setattr("gpu_marketplace.api.app.ScryptPasswordHasher", lambda: HASHER)
+        app = create_app(
+            Settings(_env_file=None, database_url=test_database.url, jwt_secret=SECRET.decode("ascii"))
+        )
+
+        @app.get("/test/principal")
+        def principal_probe(
+            p: AuthenticatedPrincipal = Depends(app.state.require_authenticated_principal),
+        ):
+            return {"user_id": str(p.user_id), "role": p.role}
+
+        with TestClient(app) as test_client:
+            assert test_client.get("/health/ready").status_code == 200
+            login_response = login(test_client, login_name)
+            assert login_response.status_code == 200
+            assert_private(login_response)
+            token = login_response.json()["access_token"]
+            me = test_client.get("/api/v1/auth/me", headers=bearer(token))
+            assert me.status_code == 200
+            assert me.json() == {"id": str(user_id), "login_name": login_name, "role": "CLIENT"}
+            assert_private(me)
+            assert test_client.get("/test/principal", headers=bearer(token)).json() == {
+                "user_id": str(user_id),
+                "role": "CLIENT",
+            }
+        with app_engines[0].connect() as connection:
+            assert connection.execute(text("SELECT current_user")).scalar_one() == "gpm_api_rw"
+    finally:
+        for engine in app_engines:
+            engine.dispose()
+        with baseline_database.begin() as connection:
+            connection.execute(text("DELETE FROM user_roles WHERE user_id = :id"), {"id": user_id})
+            connection.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
+
+
 def test_full_flow_logs_no_credentials(
     conn: Connection, client: TestClient, password_hash: str, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -214,11 +300,11 @@ def test_full_flow_logs_no_credentials(
 
 
 @pytest.fixture
-def unreachable_client() -> Iterator[TestClient]:
+def unreachable_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     # Port 1 on loopback refuses connections; nothing is written anywhere.
     engine: Engine = create_engine("postgresql+psycopg://probe:secret-in-dsn@127.0.0.1:1/gpu_marketplace_probe")
     try:
-        with TestClient(build_app(sessionmaker(bind=engine))) as test_client:
+        with TestClient(build_app(sessionmaker(bind=engine), monkeypatch)) as test_client:
             yield test_client
     finally:
         engine.dispose()
