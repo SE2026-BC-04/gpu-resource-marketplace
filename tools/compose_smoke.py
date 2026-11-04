@@ -133,9 +133,11 @@ def http_response(
     request = Request(url, data=body, headers=headers or {}, method=method)
     try:
         with urlopen(request, timeout=8) as response:
-            return response.status, dict(response.headers.items()), response.read()
+            response_headers = {name.lower(): value for name, value in response.headers.items()}
+            return response.status, response_headers, response.read()
     except HTTPError as response:
-        return response.code, dict(response.headers.items()), response.read()
+        response_headers = {name.lower(): value for name, value in response.headers.items()}
+        return response.code, response_headers, response.read()
 
 
 def expect_http_status(
@@ -508,7 +510,7 @@ def main() -> int:
         )
         if json.loads(auth_body).get("error", {}).get("code") != "INVALID_CREDENTIALS":
             raise RuntimeError("Mounted Auth router did not return the generic invalid-credentials response")
-        if auth_headers.get("Access-Control-Allow-Origin") != origin:
+        if auth_headers.get("access-control-allow-origin") != origin:
             raise RuntimeError("Mounted Auth route did not return the configured CORS origin")
 
         verify_runtime_role(smoke_env, "api", "gpm_api_app")

@@ -75,6 +75,7 @@ No schema, migration, D1 grant, JWT policy, or public API contract was edited. T
 |---|---|---|
 | GitHub Actions on old PR #39 HEAD `03c9b9a` | Python **FAIL: 623 passed, 1 failed**; frontend PASS; Compose PASS | [Run #41662546603](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41662546603). The failing test was `test_config_and_imports.py::test_jwt_secret_must_contain_at_least_256_bits`; Pydantic printed the rejected input value. |
 | Independent Codex PR review on `03c9b9a` | Two findings: P1 missing schema readiness/provisioning; P2 CORS headers absent on unexpected Auth 500 | PR timeline; both are addressed in the local remediation diff and await verification. |
+| GitHub Actions after remediation commit `6c841d1` | Python **success** (backend, PostgreSQL, Simulator); frontend **success**; Compose **failure** | [Run #41832981735](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41832981735). Compose smoke reached its post-migration Auth CORS assertion and failed because the script looked up an HTTP header in a case-sensitive Python `dict`; HTTP field names are case-insensitive. Smoke cleanup passed and confirmed the local CI stack resources were unchanged. A follow-up normalizes response header keys and awaits a new CI run. |
 
 ### Local remediation verification
 
@@ -93,14 +94,14 @@ No schema, migration, D1 grant, JWT policy, or public API contract was edited. T
 | Frontend typecheck | PASS (exit 0) | Ran `node_modules/.bin/tsc.cmd -b --pretty false` with Node 22.13.0; not locked-runtime evidence |
 | Frontend production build | PASS (exit 0) | Ran `node_modules/.bin/vite.cmd build` with Node 22.13.0; not locked-runtime evidence |
 | Compose config and smoke | NOT_RUN (exit 1 before Compose started) | `docker` is not recognized; no Docker daemon was available |
-| GitHub Actions for remediation | NOT_RUN | Remediation is uncommitted and unpushed; old CI does not verify this diff |
+| GitHub Actions on `6c841d1` | PARTIAL / Compose FAIL | Python and Frontend jobs passed; Compose failed at the smoke CORS-header lookup, which is fixed locally and needs a new run |
 
-Frontend regression checks passed on the installed Node 22.13.0, but no Python, PostgreSQL, or Compose remediation test is reported as PASS. The exact locked Node 24 frontend checks remain pending.
+The CI Python job passed, including backend/PostgreSQL and Simulator tests; CI Frontend passed. CI Compose is not fully verified until the follow-up header-normalization change passes. Local frontend checks also passed on Node 22.13.0, but the exact locked Node 24 run is the CI result.
 
 ## Remaining blockers and next actions
 
-1. Run security, Auth mount/health/CORS, PostgreSQL Auth, and full backend tests with Python 3.12 and locked uv dependencies.
-2. Run Compose config and the five-service smoke on Docker. Confirm pre-migration readiness/Auth failure, post-migration Auth 401, exact API/Manager runtime logins, host access, Simulator DB isolation, and smoke-only cleanup.
+1. Push the case-insensitive CORS header lookup follow-up and confirm a green Compose smoke run on the new HEAD.
+2. Keep security, Auth mount/health/CORS, PostgreSQL Auth, and full backend CI evidence attached to the final pushed HEAD.
 3. Ask TV2 to confirm the real D1 runtime login/provisioning procedure; keep it isolated from persistent database provisioning.
 4. Obtain GPU-003/004/005 ACKs for the final shared wiring and one independent human L1 review on the pushed final diff.
-5. Commit and push this same branch only after separate owner authorization. Then wait for CI on the new HEAD and keep PR #39 Draft while Stages B–E are incomplete.
+5. Keep PR #39 Draft while Stages B–E are incomplete; do not merge.
