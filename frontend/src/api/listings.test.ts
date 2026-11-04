@@ -118,6 +118,28 @@ describe("Listings authenticated API boundary", () => {
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    { label: "canonical", header: LISTING_ID, requestId: LISTING_ID },
+    { label: "invalid", header: "untrusted-request-text", requestId: undefined },
+    { label: "absent", header: undefined, requestId: undefined },
+  ])("retains only a valid request ID on unreadable create 503 ($label)", async ({ header, requestId }) => {
+    const unauthorized = vi.fn();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("<html>private-response-secret</html>", {
+      status: 503, headers: header === undefined ? {} : { "X-Request-ID": header },
+    }));
+    const api = createListingsApi(() => "test-token", unauthorized, fetcher);
+    const error = await api.create({ gpu_model: "A100", vram_gb: 80, total_gpu_count: 8 }).catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(ListingsApiError);
+    expect(error).toMatchObject({
+      code: "INVALID_RESPONSE", status: 503, requestId,
+      message: expect.stringContaining("trước khi tạo lại"),
+    });
+    expect(String(error)).not.toContain("private-response-secret");
+    expect(String(error)).not.toContain("untrusted-request-text");
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(unauthorized).not.toHaveBeenCalled();
+  });
+
   it("preserves aborts and never saves tokens to browser storage", async () => {
     const storage = vi.spyOn(Storage.prototype, "setItem");
     const controller = new AbortController();

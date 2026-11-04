@@ -135,13 +135,14 @@ export function createListingsApi(
       if (getAccessToken() === token) onUnauthorized();
       throw new ListingsApiError("UNAUTHORIZED", 401);
     }
+    const headerRequestId = response.headers.get("X-Request-ID");
+    const requestId = headerRequestId && uuid.test(headerRequestId) ? headerRequestId : undefined;
     let payload: unknown;
-    try { payload = await response.json(); } catch { throw new ListingsApiError("INVALID_RESPONSE", response.status); }
+    try { payload = await response.json(); } catch { throw new ListingsApiError("INVALID_RESPONSE", response.status, requestId); }
     if (!response.ok) {
       const code = object(payload) && object(payload.error) && typeof payload.error.code === "string" ? payload.error.code : "INTERNAL_ERROR";
-      const requestId = response.headers.get("X-Request-ID") ?? undefined;
       // Do not display server-provided raw error text (it could contain secrets/SQL).
-      throw new ListingsApiError(code, response.status, requestId && uuid.test(requestId) ? requestId : undefined);
+      throw new ListingsApiError(code, response.status, requestId);
     }
     return payload;
   }

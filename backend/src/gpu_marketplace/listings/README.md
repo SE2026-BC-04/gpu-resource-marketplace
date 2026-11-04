@@ -2,7 +2,7 @@
 
 Status: **core/router/UI on `feat/gpu-004-listings`; real Auth dependency connected;
 PostgreSQL/shared-app integration BLOCKED**.
-Baseline: `main@681c5fe` (04/11/2026), merged normally to retain accepted D2/D3,
+Baseline: `main@35139f6` (04/11/2026), merged normally to retain accepted D2/D3,
 Jobs foundation and PostgreSQL Auth tests, including PR #25's AccountReader.
 The user explicitly authorized GPU-004 coding.
 This does not claim that the complete Phase 1D acceptance gates have passed.
@@ -44,7 +44,7 @@ delivered adapter or PostgreSQL Listing test PASS. TV3 also
 
 | Owner | Required implementation / evidence |
 |---|---|
-| GPU-002 / TV2 owner, TV4 delegated R1 | TV4 supplies Listing UoW/readers/writes/D7 in separate [PR #31](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31). [D7 is approved with conditions](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#issuecomment-6396753378); [TV2 validated `72d57f0`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#issuecomment-6610106183). D3 has since merged; current R1 is `6594c41`, with [versioned handoff](https://github.com/SE2026-BC-04/gpu-resource-marketplace/blob/6594c4188f40276dc2b81a52de631ed4b63ab427/docs/development/handoffs/GPU-004_R1_postgres_handoff.md) and [new CI](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41690653091). Exact-SHA revalidation, affected-owner actions and human L2 reviews remain open; this branch contains no R1 DB code |
+| GPU-002 / TV2 owner, TV4 delegated R1 | R1 stays in separate [PR #31](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31), now `48c88b9` after documentation-only main sync. [Versioned handoff](https://github.com/SE2026-BC-04/gpu-resource-marketplace/blob/48c88b97bc9eff05cec0dd0e54eb123b3d761db6/docs/development/handoffs/GPU-004_R1_postgres_handoff.md). Runtime/migrations/tests are identical to `6594c41`: [TV2 migration/DDL/ACL/round-trip ACK](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#issuecomment-6613651798), [owner P1/P2 resolution](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#pullrequestreview-5757960714), [TV5 ACK_WITH_ACTIONS](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#issuecomment-6620778491). Preserve each original SHA/scope; no duplicate domain ACK is needed for the NO_IMPACT docs sync. Human L2 reviews and integration actions remain open; no R1 DB code is in #17 |
 | GPU-003 / TV3 + TV2 | Canonical principal dependency is consumed; PostgreSQL AccountReader #25 is merged/available. Provisioning, production AuthService wiring and shared-shell session integration are still pending |
 | Leader | Shared AuthService/engine/session/JWT-secret configuration, router registration in `api/app.py`, frontend shell mounting, cursor-key injection, request correlation and audit integration |
 | TV2/TV3/leader | Resolution of the documented Auth sync/provisioning gates and applicable D1–D12 decisions/ACKs |
@@ -155,6 +155,12 @@ and does not retry POST or add idempotency keys. Matching metadata is not an
 exactly-once operation identifier. Component tests cover manual mine/refresh
 using the real session/client with mocked HTTP; mounted PostgreSQL/browser and
 request-ID/audit correlation still need integration evidence.
+
+The API client validates `X-Request-ID` before decoding a response body and
+retains that canonical UUID in `INVALID_RESPONSE` even for unreadable 503 bodies.
+Absent/invalid header values are omitted; raw body text is never displayed.
+This addresses the owner/TV5 P3 support-correlation note without changing public
+error codes, session handling or the create reconciliation guidance.
 
 ### Approved Listings body bounds — CR-GPU-004-BODY-01
 
