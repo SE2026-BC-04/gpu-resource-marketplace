@@ -385,6 +385,48 @@ def test_owner_login_with_api_role_is_rejected_by_default_for_locator_and_transa
         engine.dispose()
 
 
+def test_native_api_login_cancels_with_default_allowlist_and_restricted_grants(
+    cancel_postgres: Engine, test_database: TestDatabase
+) -> None:
+    """V1: a real ``gpm_api_app`` login (no SET ROLE, no test allowlist) cancels a QUEUED Job.
+
+    The disposable cluster's owner gives the bootstrap login a throwaway password, then the
+    adapter connects as that login with its production defaults. Persisted-state invariants
+    must match the SET ROLE tests: only the Job lifecycle changes.
+    """
+    fixture = _seed(cancel_postgres)
+    before = read_persisted_snapshot(cancel_postgres, fixture)
+    password = uuid.uuid4().hex  # throwaway; the cluster is disposable and reset after the test
+    with cancel_postgres.begin() as connection:
+        connection.execute(text(f"ALTER ROLE \"{API_ROLE}\" LOGIN PASSWORD '{password}'"))
+    native_url = make_url(test_database.url).set(username=API_ROLE, password=password)
+    engine = create_engine(
+        native_url.render_as_string(hide_password=False),
+        connect_args={"application_name": "gpm-cancel-native-login", "connect_timeout": 5},
+    )
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    uow = PostgresJobCancelUnitOfWork(sessions)  # production defaults: no allowed_session_users
+    service = JobCancelService(locator_reader=PostgresJobLocatorReader(sessions), uow=uow)
+    try:
+        with uow.transaction(principal=_owner(fixture)) as tx:
+            identity = tx._session.execute(  # type: ignore[union-attr]
+                text("SELECT current_user, session_user")
+            ).one()
+        assert tuple(identity) == (API_ROLE, API_ROLE)
+
+        response = service.cancel(principal=_owner(fixture), job_id=uuid.UUID(fixture.job_id))
+
+        assert response.status == JobStatus.CANCELLED.value
+        after = read_persisted_snapshot(cancel_postgres, fixture)
+        assert after.job_row[6] == "CANCELLED"
+        assert after.job_row[8] is None and after.job_row[10] is None  # started_at, failure_reason
+        assert after.job_row[9] is not None  # terminal_at from the database clock
+        assert_non_job_side_effects_unchanged(before, after)
+        assert engine.pool.checkedout() == 0  # type: ignore[attr-defined]
+    finally:
+        engine.dispose()
+
+
 # -- PG-CANCEL-10 / 11 / 12: DB clock and concurrency ----------------------------------
 
 
