@@ -333,6 +333,27 @@ def test_transaction_runs_as_api_role_in_read_committed_and_rejects_owner_role(
         owner_engine.dispose()
 
 
+def test_locator_with_owner_role_fails_identically_for_existing_and_absent_jobs(
+    cancel_postgres: Engine, test_database: TestDatabase
+) -> None:
+    """P2-01: no existence oracle and no Job read when the session is a privileged login.
+
+    Boundary: the restricted ``stack`` binds ``gpm_api_app`` with ``SET ROLE`` over the
+    owner DSN, so these tests prove *effective* role checks, not direct API-login
+    credentials (that needs a real ``gpm_api_app`` login, see the GPU-002 handoff).
+    """
+    fixture = _seed(cancel_postgres)
+    owner_engine = create_engine(test_database.url)
+    try:
+        reader = PostgresJobLocatorReader(sessionmaker(owner_engine, expire_on_commit=False))
+        for job_id in (uuid.UUID(fixture.job_id), uuid.uuid4()):
+            with pytest.raises(DependencyUnavailable):
+                reader.get_locator(job_id=job_id)
+        assert owner_engine.pool.checkedout() == 0  # type: ignore[attr-defined]
+    finally:
+        owner_engine.dispose()
+
+
 # -- PG-CANCEL-10 / 11 / 12: DB clock and concurrency ----------------------------------
 
 

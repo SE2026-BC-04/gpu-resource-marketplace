@@ -62,7 +62,8 @@ _CANCEL_SQL = text(
     f"AND status = 'QUEUED' RETURNING {_JOB_COLUMNS}"
 )
 _CLASSIFY_SQL = text("SELECT client_id, listing_id FROM jobs WHERE id = :job_id")
-_SESSION_CHECK_SQL = text("SELECT current_user, current_setting('transaction_isolation')")
+_ROLE_CHECK_SQL = text("SELECT current_user")
+_SESSION_CHECK_SQL =text("SELECT current_user, current_setting('transaction_isolation')")
 _SET_TIMEOUT_SQL = text("SELECT set_config(:name, :value, true)")
 
 
@@ -114,6 +115,12 @@ class PostgresJobLocatorReader:
     def get_locator(self, *, job_id: UUID) -> JobLocator | None:
         try:
             with self._sessions() as session:
+                # Fail closed on the effective DB role before reading any Job identity, so a
+                # misconfigured privileged session cannot act as an existence oracle.
+                role = session.execute(_ROLE_CHECK_SQL).scalar_one()
+                if role not in ALLOWED_RUNTIME_ROLES:
+                    logger.error("job_locator_session_misconfigured")
+                    raise DependencyUnavailable()
                 listing_id = session.execute(_LOCATOR_SQL, {"job_id": job_id}).scalar_one_or_none()
         except SQLAlchemyError as error:
             _log_store_failure("job_locator_read_failed", error, None)
@@ -214,6 +221,7 @@ class PostgresJobCancelTransaction:
         if session is None:
             return False
         cleanup_failed = False
+        unexpected: Exception | None = None
         try:
             if not self._committed:
                 session.rollback()
@@ -222,14 +230,26 @@ class PostgresJobCancelTransaction:
         except SQLAlchemyError as error:
             cleanup_failed = True
             _log_store_failure("job_cancel_rollback_failed", error, self._outcome)
+        except Exception as error:  # noqa: BLE001 - must never replace an in-flight exception
+            cleanup_failed = True
+            unexpected = error
+            _log_store_failure("job_cancel_rollback_failed", error, self._outcome)
         finally:
             try:
                 session.close()
             except SQLAlchemyError as error:
                 cleanup_failed = True
                 _log_store_failure("job_cancel_close_failed", error, self._outcome)
+            except Exception as error:  # noqa: BLE001 - same priority rule as rollback
+                cleanup_failed = True
+                unexpected = unexpected or error
+                _log_store_failure("job_cancel_close_failed", error, self._outcome)
         if cleanup_failed and exc_type is None and not self._committed:
-            # Never replace an exception in flight; on a clean body, surface cleanup loss.
+            # An exception already in flight always wins (it was ignored above after being
+            # logged by type only). On a clean body surface the cleanup loss: a programming
+            # fault stays visible, a storage fault becomes the sanitized outage error.
+            if unexpected is not None:
+                raise unexpected
             raise DependencyUnavailable() from None
         return False
 
