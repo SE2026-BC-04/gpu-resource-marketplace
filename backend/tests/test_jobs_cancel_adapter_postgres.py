@@ -46,7 +46,7 @@ from jobs_cancel_pg_support import (
     seed_committed_job,
 )
 from sqlalchemy import create_engine, event, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from test_schema_constraints import add_user
@@ -93,8 +93,18 @@ def _runtime_engine(url: str, *, role: str = API_ROLE, application_name: str = "
 def _stack(url: str, *, application_name: str = "gpm-cancel-adapter", **uow_options: int) -> Stack:
     engine = _runtime_engine(url, application_name=application_name)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    uow = PostgresJobCancelUnitOfWork(sessions, **uow_options)
-    return Stack(engine, sessions, uow, JobCancelService(locator_reader=PostgresJobLocatorReader(sessions), uow=uow))
+    # These tests use the disposable cluster's owner login plus SET ROLE, so the native login
+    # (session_user) is allowed explicitly; production defaults to the gpm_api_app login only.
+    test_logins = frozenset({make_url(url).username or ""})
+    uow = PostgresJobCancelUnitOfWork(sessions, allowed_session_users=test_logins, **uow_options)
+    return Stack(
+        engine,
+        sessions,
+        uow,
+        JobCancelService(
+            locator_reader=PostgresJobLocatorReader(sessions, allowed_session_users=test_logins), uow=uow
+        ),
+    )
 
 
 @pytest.fixture
@@ -339,8 +349,10 @@ def test_locator_with_owner_role_fails_identically_for_existing_and_absent_jobs(
     """P2-01: no existence oracle and no Job read when the session is a privileged login.
 
     Boundary: the restricted ``stack`` binds ``gpm_api_app`` with ``SET ROLE`` over the
-    owner DSN, so these tests prove *effective* role checks, not direct API-login
-    credentials (that needs a real ``gpm_api_app`` login, see the GPU-002 handoff).
+    owner DSN and opts that owner login in explicitly, so the functional tests prove
+    *effective* role behaviour. The native ``session_user`` default is covered by
+    ``test_owner_login_with_api_role_is_rejected_by_default_for_locator_and_transaction``;
+    a real ``gpm_api_app`` login is exercised by the Compose smoke, not by this module.
     """
     fixture = _seed(cancel_postgres)
     owner_engine = create_engine(test_database.url)
@@ -352,6 +364,28 @@ def test_locator_with_owner_role_fails_identically_for_existing_and_absent_jobs(
         assert owner_engine.pool.checkedout() == 0  # type: ignore[attr-defined]
     finally:
         owner_engine.dispose()
+
+
+def test_owner_login_with_api_role_is_rejected_by_default_for_locator_and_transaction(
+    cancel_postgres: Engine, test_database: TestDatabase
+) -> None:
+    """session_user guard: an owner login that runs SET ROLE gpm_api_app is not the API login.
+
+    This is the scenario of the post-#31 bot finding. The production default allows only
+    the native ``gpm_api_app`` login; the other tests in this module opt in explicitly.
+    """
+    fixture = _seed(cancel_postgres)
+    engine = _runtime_engine(test_database.url, application_name="gpm-cancel-session-user")
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    try:
+        with pytest.raises(DependencyUnavailable):
+            PostgresJobLocatorReader(sessions).get_locator(job_id=uuid.UUID(fixture.job_id))
+        with pytest.raises(DependencyUnavailable):
+            with PostgresJobCancelUnitOfWork(sessions).transaction(principal=_owner(fixture)):
+                raise AssertionError("body must not run for a non-API login")
+        assert engine.pool.checkedout() == 0  # type: ignore[attr-defined]
+    finally:
+        engine.dispose()
 
 
 # -- PG-CANCEL-10 / 11 / 12: DB clock and concurrency ----------------------------------

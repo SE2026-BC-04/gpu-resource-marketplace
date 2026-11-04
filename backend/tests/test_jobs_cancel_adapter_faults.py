@@ -43,12 +43,14 @@ class _FakeSession:
         self,
         *,
         role: str = API_ROLE,
+        login: str = API_ROLE,
         listing_id: uuid.UUID | None = None,
         rollback_error: Exception | None = None,
         close_error: Exception | None = None,
         commit_error: Exception | None = None,
     ) -> None:
         self.role = role
+        self.login = login
         self.listing_id = listing_id
         self.rollback_error = rollback_error
         self.close_error = close_error
@@ -70,9 +72,9 @@ class _FakeSession:
         sql = str(statement)
         self.executed.append(sql)
         if "current_setting('transaction_isolation')" in sql:
-            return _Result((self.role, "read committed"))
-        if sql.strip() == "SELECT current_user":
-            return _Result(self.role)
+            return _Result((self.role, self.login, "read committed"))
+        if sql.strip() == "SELECT current_user, session_user":
+            return _Result((self.role, self.login))
         if "FROM jobs WHERE id" in sql:
             return _Result(self.listing_id)
         return _Result(None)
@@ -129,6 +131,56 @@ def test_locator_returns_none_for_absent_job_under_api_role() -> None:
     reader = PostgresJobLocatorReader(lambda: _FakeSession(listing_id=None))  # type: ignore[arg-type,return-value]
 
     assert reader.get_locator(job_id=uuid.uuid4()) is None
+
+
+# -- session_user: the native login must be the API login, not just the effective role --
+
+
+@pytest.mark.parametrize("listing_id", [uuid.uuid4(), None], ids=["existing-job", "absent-job"])
+def test_locator_rejects_owner_login_with_api_effective_role(listing_id: uuid.UUID | None) -> None:
+    session = _FakeSession(role=API_ROLE, login="gpm_owner", listing_id=listing_id)
+    reader = PostgresJobLocatorReader(lambda: session)  # type: ignore[arg-type,return-value]
+
+    with pytest.raises(DependencyUnavailable):
+        reader.get_locator(job_id=uuid.uuid4())
+
+    assert not any("FROM jobs" in sql for sql in session.executed)
+
+
+def test_locator_accepts_explicitly_allowed_test_login() -> None:
+    listing = uuid.uuid4()
+    session = _FakeSession(role=API_ROLE, login="gpm_owner", listing_id=listing)
+    reader = PostgresJobLocatorReader(
+        lambda: session,  # type: ignore[arg-type,return-value]
+        allowed_session_users=frozenset({"gpm_owner"}),
+    )
+
+    assert reader.get_locator(job_id=uuid.uuid4()) is not None
+
+
+def test_transaction_rejects_owner_login_with_api_effective_role() -> None:
+    session = _FakeSession(role=API_ROLE, login="gpm_owner")
+
+    with pytest.raises(DependencyUnavailable):
+        with _transaction(session):
+            raise AssertionError("body must not run for a non-API login")
+
+    assert session.closed
+
+
+def test_transaction_accepts_explicitly_allowed_test_login() -> None:
+    session = _FakeSession(role=API_ROLE, login="gpm_owner")
+    transaction = PostgresJobCancelTransaction(
+        lambda: session,  # type: ignore[arg-type,return-value]
+        lock_timeout_ms=1_000,
+        statement_timeout_ms=1_000,
+        allowed_session_users=frozenset({"gpm_owner"}),
+    )
+
+    with transaction:
+        pass
+
+    assert session.closed
 
 
 # -- P2-02: cleanup never replaces an in-flight exception -------------------------------

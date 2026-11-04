@@ -39,6 +39,11 @@ from gpu_marketplace.jobs.ports import JobPrincipal, JobRecord
 logger = logging.getLogger(__name__)
 
 ALLOWED_RUNTIME_ROLES = frozenset({"gpm_api_app", "gpm_api_rw"})
+# The login (``session_user``) the runtime must connect with. ``current_user`` alone can be
+# changed by ``SET ROLE`` / a ``role`` connection option on an owner login, so production
+# also requires the native API login. Tests that deliberately use an owner login plus
+# ``SET ROLE`` must pass ``allowed_session_users`` explicitly.
+ALLOWED_RUNTIME_LOGINS = frozenset({"gpm_api_app"})
 
 # SQLSTATE classes after which PostgreSQL has definitely aborted the transaction
 # (class 23 = integrity violation incl. deferred checks at COMMIT; 40 = rollback).
@@ -62,8 +67,10 @@ _CANCEL_SQL = text(
     f"AND status = 'QUEUED' RETURNING {_JOB_COLUMNS}"
 )
 _CLASSIFY_SQL = text("SELECT client_id, listing_id FROM jobs WHERE id = :job_id")
-_ROLE_CHECK_SQL = text("SELECT current_user")
-_SESSION_CHECK_SQL =text("SELECT current_user, current_setting('transaction_isolation')")
+_ROLE_CHECK_SQL = text("SELECT current_user, session_user")
+_SESSION_CHECK_SQL = text(
+    "SELECT current_user, session_user, current_setting('transaction_isolation')"
+)
 _SET_TIMEOUT_SQL = text("SELECT set_config(:name, :value, true)")
 
 
@@ -109,16 +116,22 @@ def _to_record(row: Any) -> JobRecord:
 class PostgresJobLocatorReader:
     """Unlocked, single-statement read of ``jobs.listing_id`` in a short Session."""
 
-    def __init__(self, sessions: Callable[[], Session]) -> None:
+    def __init__(
+        self,
+        sessions: Callable[[], Session],
+        *,
+        allowed_session_users: frozenset[str] = ALLOWED_RUNTIME_LOGINS,
+    ) -> None:
         self._sessions = sessions
+        self._allowed_session_users = allowed_session_users
 
     def get_locator(self, *, job_id: UUID) -> JobLocator | None:
         try:
             with self._sessions() as session:
                 # Fail closed on the effective DB role before reading any Job identity, so a
                 # misconfigured privileged session cannot act as an existence oracle.
-                role = session.execute(_ROLE_CHECK_SQL).scalar_one()
-                if role not in ALLOWED_RUNTIME_ROLES:
+                role, login = session.execute(_ROLE_CHECK_SQL).one()
+                if role not in ALLOWED_RUNTIME_ROLES or login not in self._allowed_session_users:
                     logger.error("job_locator_session_misconfigured")
                     raise DependencyUnavailable()
                 listing_id = session.execute(_LOCATOR_SQL, {"job_id": job_id}).scalar_one_or_none()
@@ -133,7 +146,8 @@ class PostgresJobCancelUnitOfWork:
 
     ``sessions`` must create Sessions connected as ``gpm_api_app`` (or the
     ``gpm_api_rw`` group), never an owner/superuser DSN; the transaction verifies
-    ``current_user`` and isolation on entry and fails closed otherwise.
+    ``current_user``, the native login (``session_user``) and isolation on entry and
+    fails closed otherwise.
     """
 
     def __init__(
@@ -142,6 +156,7 @@ class PostgresJobCancelUnitOfWork:
         *,
         lock_timeout_ms: int = 5_000,
         statement_timeout_ms: int = 10_000,
+        allowed_session_users: frozenset[str] = ALLOWED_RUNTIME_LOGINS,
     ) -> None:
         for value in (lock_timeout_ms, statement_timeout_ms):
             if type(value) is not int or not 1 <= value <= 120_000:
@@ -149,6 +164,7 @@ class PostgresJobCancelUnitOfWork:
         self._sessions = sessions
         self._lock_timeout_ms = lock_timeout_ms
         self._statement_timeout_ms = statement_timeout_ms
+        self._allowed_session_users = allowed_session_users
 
     def transaction(self, *, principal: JobPrincipal) -> PostgresJobCancelTransaction:
         # Authorization is decided by the service and by predicates in the UPDATE;
@@ -157,6 +173,7 @@ class PostgresJobCancelUnitOfWork:
             self._sessions,
             lock_timeout_ms=self._lock_timeout_ms,
             statement_timeout_ms=self._statement_timeout_ms,
+            allowed_session_users=self._allowed_session_users,
         )
 
 
@@ -167,10 +184,12 @@ class PostgresJobCancelTransaction:
         *,
         lock_timeout_ms: int,
         statement_timeout_ms: int,
+        allowed_session_users: frozenset[str] = ALLOWED_RUNTIME_LOGINS,
     ) -> None:
         self._sessions = sessions
         self._lock_timeout_ms = lock_timeout_ms
         self._statement_timeout_ms = statement_timeout_ms
+        self._allowed_session_users = allowed_session_users
         self._session: Session | None = None
         self._entered = False
         self._committed = False
@@ -193,8 +212,12 @@ class PostgresJobCancelTransaction:
             self._session = self._sessions()
             self._session.autoflush = False
             self._session.connection(execution_options={"isolation_level": "READ COMMITTED"})
-            role, isolation = self._session.execute(_SESSION_CHECK_SQL).one()
-            if role not in ALLOWED_RUNTIME_ROLES or isolation != "read committed":
+            role, login, isolation = self._session.execute(_SESSION_CHECK_SQL).one()
+            if (
+                role not in ALLOWED_RUNTIME_ROLES
+                or login not in self._allowed_session_users
+                or isolation != "read committed"
+            ):
                 logger.error("job_cancel_session_misconfigured")
                 raise DependencyUnavailable()
             for name, value in (
