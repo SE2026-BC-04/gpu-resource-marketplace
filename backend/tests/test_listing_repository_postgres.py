@@ -246,7 +246,9 @@ def test_create_uses_db_defaults_and_commit(sessions, data):
             0,
             data.worker,
         )
-        assert record.created_at.utcoffset().total_seconds() == 0
+        # The driver returns the session time zone; compare the instant, not the offset.
+        assert record.created_at.utcoffset() is not None
+        assert record.created_at.astimezone(UTC).utcoffset().total_seconds() == 0
         assert record.updated_at >= record.created_at
         uow.commit()
     assert uow.outcome is TransactionOutcome.COMMITTED
