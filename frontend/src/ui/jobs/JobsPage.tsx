@@ -77,76 +77,97 @@ export function JobsList({
   );
 }
 
-export function CancelJobAction({ job, api, onCancelled, onReconciled, onConflict }: {
+type DetailRequestContext = {
+  jobId: string;
+  requestKey: string;
+  generation: number;
+};
+
+type CancelActionLifecycle = {
+  busy: boolean;
+  error: unknown | null;
+  inFlight: boolean;
+  needsReconciliation: boolean;
+};
+
+function newCancelActionLifecycle(): CancelActionLifecycle {
+  return { busy: false, error: null, inFlight: false, needsReconciliation: false };
+}
+
+export function CancelJobAction({ job, api, requestContext, lifecycle, onLifecycleChange, onCancelled, onReconciled, onReconcileStart, onConflict }: {
   job: JobResponse;
   api: JobsApi;
-  onCancelled: (job: JobResponse) => void;
-  onReconciled: (job: JobResponse) => void;
+  requestContext: DetailRequestContext;
+  lifecycle: CancelActionLifecycle;
+  onLifecycleChange: () => void;
+  onCancelled: (job: JobResponse, context: DetailRequestContext) => void;
+  onReconciled: (job: JobResponse, context: DetailRequestContext) => void;
+  onReconcileStart: (context: DetailRequestContext) => DetailRequestContext;
   onConflict: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const [needsReconciliation, setNeedsReconciliation] = useState(false);
-  const inFlight = useRef(false);
+  function updateLifecycle(patch: Partial<CancelActionLifecycle>) {
+    Object.assign(lifecycle, patch);
+    onLifecycleChange();
+  }
 
   async function reconcile() {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    setBusy(true);
-    setError(null);
+    if (lifecycle.inFlight) return;
+    updateLifecycle({ inFlight: true, busy: true, error: null });
+    const reconciliationContext = onReconcileStart(requestContext);
     try {
-      onReconciled(await api.getJob(job.id));
-      setNeedsReconciliation(false);
+      const reconciledJob = await api.getJob(job.id);
+      onReconciled(reconciledJob, reconciliationContext);
+      updateLifecycle({ needsReconciliation: false });
     } catch (caught) {
-      setNeedsReconciliation(true);
-      setError(caught);
+      updateLifecycle({ needsReconciliation: true, error: caught });
     } finally {
-      inFlight.current = false;
-      setBusy(false);
+      updateLifecycle({ inFlight: false, busy: false });
     }
   }
 
   if (job.status !== "QUEUED") return null;
 
   async function cancel() {
-    if (inFlight.current || needsReconciliation) return;
-    inFlight.current = true;
-    setBusy(true);
-    setError(null);
+    if (lifecycle.inFlight || lifecycle.needsReconciliation) return;
+    updateLifecycle({ inFlight: true, busy: true, error: null });
     try {
-      onCancelled(await api.cancelJob(job.id));
-      setError(null);
+      const cancelledJob = await api.cancelJob(job.id);
+      onCancelled(cancelledJob, requestContext);
+      updateLifecycle({ error: null });
     } catch (caught) {
       if (caught instanceof JobsApiError && ((caught.status === 409 && caught.code === "JOB_NOT_CANCELLABLE") || caught.status === 0 || caught.status >= 500)) {
-        setNeedsReconciliation(true);
+        updateLifecycle({ needsReconciliation: true });
         onConflict();
-        inFlight.current = false;
+        updateLifecycle({ inFlight: false, busy: false });
         await reconcile();
       } else {
-        setError(caught);
+        updateLifecycle({ error: caught });
       }
     } finally {
-      inFlight.current = false;
-      setBusy(false);
+      updateLifecycle({ inFlight: false, busy: false });
     }
   }
 
   return (
     <div className="jobs-action">
-      {error !== null && <ErrorNotice error={error} retry={needsReconciliation ? reconcile : undefined} retryLabel="Tải lại trạng thái" />}
-      <button type="button" className="jobs-danger" disabled={busy || needsReconciliation} onClick={cancel}>
-        {busy ? "Đang hủy…" : "Hủy công việc"}
+      {lifecycle.error !== null && <ErrorNotice error={lifecycle.error} retry={lifecycle.needsReconciliation ? reconcile : undefined} retryLabel="Tải lại trạng thái" />}
+      <button type="button" className="jobs-danger" disabled={lifecycle.busy || lifecycle.needsReconciliation} onClick={cancel}>
+        {lifecycle.busy ? "Đang hủy…" : "Hủy công việc"}
       </button>
     </div>
   );
 }
 
-export function JobDetail({ job, role, api, onCancelled, onReconciled, onConflict }: {
+export function JobDetail({ job, role, api, requestContext, cancelLifecycle, onCancelLifecycleChange, onCancelled, onReconciled, onReconcileStart, onConflict }: {
   job: JobResponse;
   role: AuthUser["role"];
   api: JobsApi;
-  onCancelled: (job: JobResponse) => void;
-  onReconciled: (job: JobResponse) => void;
+  requestContext: DetailRequestContext;
+  cancelLifecycle: CancelActionLifecycle;
+  onCancelLifecycleChange: () => void;
+  onCancelled: (job: JobResponse, context: DetailRequestContext) => void;
+  onReconciled: (job: JobResponse, context: DetailRequestContext) => void;
+  onReconcileStart: (context: DetailRequestContext) => DetailRequestContext;
   onConflict: () => void;
 }) {
   return (
@@ -163,7 +184,18 @@ export function JobDetail({ job, role, api, onCancelled, onReconciled, onConflic
         {job.terminal_at && <><dt>Kết thúc</dt><dd>{job.terminal_at}</dd></>}
         {job.status === "FAILED" && job.failure_reason && <><dt>Lý do</dt><dd>{failureLabels[job.failure_reason]}</dd></>}
       </dl>
-      {role === "CLIENT" && <CancelJobAction job={job} api={api} onCancelled={onCancelled} onReconciled={onReconciled} onConflict={onConflict} />}
+      {role === "CLIENT" && <CancelJobAction
+        key={job.id}
+        job={job}
+        api={api}
+        requestContext={requestContext}
+        lifecycle={cancelLifecycle}
+        onLifecycleChange={onCancelLifecycleChange}
+        onCancelled={onCancelled}
+        onReconciled={onReconciled}
+        onReconcileStart={onReconcileStart}
+        onConflict={onConflict}
+      />}
     </section>
   );
 }
@@ -281,10 +313,16 @@ export function JobsPage({ api, user }: { api: JobsApi; user: AuthUser }) {
   } | null>(null);
   const [reloadVersion, setReloadVersion] = useState(0);
   const [detailReloadVersion, setDetailReloadVersion] = useState(0);
+  const [detailGeneration, setDetailGeneration] = useState(0);
   const listRequestKey = JSON.stringify([user.id, user.role, statusFilter, cursor ?? null, reloadVersion]);
   const detailRequestKey = JSON.stringify([user.id, user.role, selectedId, detailReloadVersion]);
   const detailRequestKeyRef = useRef(detailRequestKey);
+  const selectedIdRef = useRef(selectedId);
+  const detailGenerationRef = useRef(0);
+  const cancelLifecyclesRef = useRef(new Map<string, CancelActionLifecycle>());
+  const [, refreshCancelLifecycles] = useState(0);
   detailRequestKeyRef.current = detailRequestKey;
+  selectedIdRef.current = selectedId;
   const collection = listResult?.key === listRequestKey ? listResult.collection : emptyCollection;
   const listError = listResult?.key === listRequestKey ? listResult.error : null;
   const listLoading = listResult?.key !== listRequestKey;
@@ -304,9 +342,26 @@ export function JobsPage({ api, user }: { api: JobsApi; user: AuthUser }) {
     if (!selectedId) return;
     const controller = new AbortController();
     const requestKey = detailRequestKey;
+    const requestGeneration = ++detailGenerationRef.current;
+    setDetailGeneration(requestGeneration);
     api.getJob(selectedId, controller.signal)
-      .then((job) => { if (!controller.signal.aborted && detailRequestKeyRef.current === requestKey) setDetailResult({ key: requestKey, job, error: null }); })
-      .catch((error: unknown) => { if (!controller.signal.aborted && detailRequestKeyRef.current === requestKey) setDetailResult({ key: requestKey, job: null, error }); });
+      .then((job) => {
+        if (
+          !controller.signal.aborted &&
+          job.id === selectedId &&
+          selectedIdRef.current === selectedId &&
+          detailRequestKeyRef.current === requestKey &&
+          detailGenerationRef.current === requestGeneration
+        ) setDetailResult({ key: requestKey, job, error: null });
+      })
+      .catch((error: unknown) => {
+        if (
+          !controller.signal.aborted &&
+          selectedIdRef.current === selectedId &&
+          detailRequestKeyRef.current === requestKey &&
+          detailGenerationRef.current === requestGeneration
+        ) setDetailResult({ key: requestKey, job: null, error });
+      });
     return () => controller.abort();
   }, [api, user.id, user.role, selectedId, detailReloadVersion]);
 
@@ -329,25 +384,68 @@ export function JobsPage({ api, user }: { api: JobsApi; user: AuthUser }) {
   }
 
   function submitSucceeded(job: JobResponse) {
-    const nextKey = JSON.stringify([user.id, user.role, job.id, detailReloadVersion]);
+    const nextDetailReloadVersion = detailReloadVersion + 1;
+    const nextKey = JSON.stringify([user.id, user.role, job.id, nextDetailReloadVersion]);
+    detailGenerationRef.current += 1;
+    setDetailGeneration(detailGenerationRef.current);
     detailRequestKeyRef.current = nextKey;
+    selectedIdRef.current = job.id;
     setSelectedId(job.id);
     setDetailResult({ key: nextKey, job, error: null });
-    setDetailReloadVersion((version) => version + 1);
+    setDetailReloadVersion(nextDetailReloadVersion);
     setReloadVersion((version) => version + 1);
   }
 
-  function cancelled(job: JobResponse) {
-    setDetailResult({ key: detailRequestKey, job, error: null });
+  function isCurrentDetailRequest(context: DetailRequestContext): boolean {
+    return context.jobId === selectedIdRef.current &&
+      context.requestKey === detailRequestKeyRef.current &&
+      context.generation === detailGenerationRef.current;
+  }
+
+  function cancelled(job: JobResponse, context: DetailRequestContext) {
+    if (job.id === context.jobId && isCurrentDetailRequest(context)) {
+      setDetailResult({ key: context.requestKey, job, error: null });
+    }
     setReloadVersion((version) => version + 1);
   }
 
-  function reconciled(job: JobResponse) {
-    setDetailResult({ key: detailRequestKey, job, error: null });
+  function reconciled(job: JobResponse, context: DetailRequestContext) {
+    if (job.id === context.jobId && isCurrentDetailRequest(context)) {
+      setDetailResult({ key: context.requestKey, job, error: null });
+    }
+  }
+
+  function beginReconciliation(context: DetailRequestContext): DetailRequestContext {
+    if (!isCurrentDetailRequest(context)) return context;
+    const generation = ++detailGenerationRef.current;
+    setDetailGeneration(generation);
+    return { ...context, generation };
+  }
+
+  function cancelLifecycleFor(jobId: string): CancelActionLifecycle {
+    let lifecycle = cancelLifecyclesRef.current.get(jobId);
+    if (!lifecycle) {
+      lifecycle = newCancelActionLifecycle();
+      cancelLifecyclesRef.current.set(jobId, lifecycle);
+    }
+    return lifecycle;
+  }
+
+  function reloadSelectedDetail() {
+    const nextVersion = detailReloadVersion + 1;
+    const nextKey = JSON.stringify([user.id, user.role, selectedId, nextVersion]);
+    detailGenerationRef.current += 1;
+    setDetailGeneration(detailGenerationRef.current);
+    detailRequestKeyRef.current = nextKey;
+    setDetailReloadVersion(nextVersion);
   }
 
   function selectJob(id: string) {
-    detailRequestKeyRef.current = JSON.stringify([user.id, user.role, id, detailReloadVersion]);
+    const nextKey = JSON.stringify([user.id, user.role, id, detailReloadVersion]);
+    detailGenerationRef.current += 1;
+    setDetailGeneration(detailGenerationRef.current);
+    detailRequestKeyRef.current = nextKey;
+    selectedIdRef.current = id;
     setSelectedId(id);
   }
 
@@ -386,8 +484,20 @@ export function JobsPage({ api, user }: { api: JobsApi; user: AuthUser }) {
       </section>
       <section className="jobs-detail-panel" aria-live="polite">
         {detailLoading && <p role="status">Đang tải chi tiết…</p>}
-        {detailError !== null && <ErrorNotice error={detailError} retry={() => setDetailReloadVersion((version) => version + 1)} />}
-        {detail && <JobDetail job={detail} role={user.role} api={api} onCancelled={cancelled} onReconciled={reconciled} onConflict={() => setReloadVersion((version) => version + 1)} />}
+        {detailError !== null && <ErrorNotice error={detailError} retry={reloadSelectedDetail} />}
+        {detail && <JobDetail
+          key={detail.id}
+          job={detail}
+          role={user.role}
+          api={api}
+          requestContext={{ jobId: detail.id, requestKey: detailRequestKey, generation: detailGeneration }}
+          cancelLifecycle={cancelLifecycleFor(detail.id)}
+          onCancelLifecycleChange={() => refreshCancelLifecycles((version) => version + 1)}
+          onCancelled={cancelled}
+          onReconciled={reconciled}
+          onReconcileStart={beginReconciliation}
+          onConflict={() => setReloadVersion((version) => version + 1)}
+        />}
       </section>
     </main>
   );
