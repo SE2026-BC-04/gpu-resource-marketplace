@@ -193,13 +193,13 @@ describe("GPU-005 Jobs frontend foundation", () => {
   });
 
   it("P2-01B ignores a stale detail response that completes after a successful new submission", async () => {
-    let finishA!: (value: JobResponse) => void;
+    const detailA = deferred<JobResponse>();
     const api = setup("CLIENT", {
       listJobs: vi.fn()
         .mockResolvedValueOnce({ items: [job("QUEUED", JOB_A)], next_cursor: null })
         .mockResolvedValueOnce({ items: [job("QUEUED", JOB_A), job("QUEUED", JOB_B)], next_cursor: null }),
       getJob: vi.fn().mockImplementation((id: string) => id === JOB_A
-        ? new Promise<JobResponse>((resolve) => { finishA = resolve; })
+        ? detailA.promise
         : Promise.resolve(job("QUEUED", JOB_B))),
       submitJob: vi.fn().mockResolvedValue(job("QUEUED", JOB_B)),
     });
@@ -208,11 +208,17 @@ describe("GPU-005 Jobs frontend foundation", () => {
     fireEvent.change(screen.getByLabelText("Listing ID (UUIDv4)"), { target: { value: LISTING_ID } });
     fireEvent.click(screen.getByRole("button", { name: "Gửi công việc" }));
     expect(await within(await screen.findByRole("region", { name: "Chi tiết công việc" })).findByText(JOB_B)).toBeInTheDocument();
-    finishA(job("QUEUED", JOB_A));
-    const detailRegion = screen.getByRole("region", { name: "Chi tiết công việc" });
-    await waitFor(() => expect(within(detailRegion).getByText(JOB_B)).toBeInTheDocument());
-    expect(within(detailRegion).queryByText(JOB_A)).not.toBeInTheDocument();
+
+    await act(async () => {
+      detailA.resolve(job("QUEUED", JOB_A));
+      await detailA.promise;
+    });
+
+    const currentDetail = within(screen.getByRole("region", { name: "Chi tiết công việc" }));
+    expect(currentDetail.getByText(JOB_B)).toBeInTheDocument();
+    expect(currentDetail.queryByText(JOB_A)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: new RegExp(JOB_B) })).toHaveAttribute("aria-current", "true");
+    expect(screen.queryByText("Đang tải chi tiết…")).not.toBeInTheDocument();
   });
 
   it("P2-01C keeps the same Job selected after cancel and refreshes its list state", async () => {
