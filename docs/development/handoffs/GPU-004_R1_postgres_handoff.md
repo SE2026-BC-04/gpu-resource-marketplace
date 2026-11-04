@@ -1,6 +1,6 @@
 # GPU-004 R1 — delegated PostgreSQL Listings persistence
 
-**Status: D7_IMPLEMENTED / RE_REVIEW_IN_PROGRESS / DRAFT / HOLD.** Baseline `main@681c5fe` (verified 2026-11-04), including accepted D2/D3. [TV2 validated `72d57f0`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#issuecomment-6610106183), including the P2 commit-outcome fix, with migration ordering as a pre-merge action. #29 has since merged first: this revision completes that action and needs a renewed exact-SHA ACK. [TV5's scoped ACK_WITH_ACTIONS](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6611540155) and human L2/integration gates remain separate; no R1/Phase 1D acceptance is claimed.
+**Status: TECHNICAL_P1_P2_RESOLVED / DRAFT / HOLD.** Baseline `main@35139f6` (verified 2026-11-04), including accepted D2/D3 and documentation-only #38. [Owner verified P1/P2 on `6594c41`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#pullrequestreview-5757960714). [TV2 ACK_COMPATIBLE on that SHA](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#issuecomment-6613651798) covers migration/DDL/ACL/round trip only; [TV5 maintains ACK_WITH_ACTIONS](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#issuecomment-6620778491). The current sync changes documentation only; original ACK SHAs/scopes are retained without presenting them as new approvals. Two independent human L2 reviews, lead disposition and integration acceptance remain open.
 
 ## Assignment and scope
 
@@ -62,7 +62,7 @@ Tests distinguish failures before a commit attempt (confirmed rollback and no ro
 
 Use the existing `backend/tests/db_safety.py`/conftest disposable-cluster guards. Tests cover restricted-role read/create/update/status, keyset/filter/projection, forbidden writes, DB clock and immutable diagnostics, no-ops, downgrade/upgrade, real two-session Listing locks with adapter UPDATE and fresh post-wait snapshots, rollback and injected commit failure. The new test also opens a real TCP gpm_api_app engine without SET ROLE: a guarded disposable-only fixture installs a random libpq-computed SCRAM verifier and restores/verifies the original afterward; no production credential/bootstrap/ACL changes. Full consumer/HTTP/browser integration is still pending. GPU-005 TX-SUBMIT / Phase 2 allocation races remain BLOCKED/NOT_RUN until actual implementations exist; current Manager grants are not expanded to pretend allocation is available.
 
-TV2 must review SQL/transaction/security/D7 compatibility and return an exact-HEAD technical ACK; affected-owner ACK actions and two independent human reviews are required before merge. PR #17 and this PR remain HOLD until their own gates pass.
+TV2's exact-`6594c41` migration/DDL/ACL/round-trip ACK is recorded above; it explicitly excludes a new line-by-line repository review and separate TV2 lock/commit-outcome testing. Keep its scope and the earlier `72d57f0` validation distinct. The documentation-only sync introduces no persistence-domain change requiring a duplicate technical ACK. Any later runtime/migration change needs impact review; affected-owner actions and two independent human confirmations on the final PR diff are still required. Both PRs remain HOLD until their own gates pass.
 
 ## Historical pre-D7 local checks — 2026-10-25 (`953ceb8`)
 
@@ -88,9 +88,17 @@ TV2 must review SQL/transaction/security/D7 compatibility and return an exact-HE
 - Ruff 0.14.0 format/check `--select F,E9` on the four changed Python files: **PASS**. Offline Alembic `0003_phase1b_jobs_guard_update:0004_listing_d7` emits D7 SQL with the stable profile and no grant/role changes: **PASS**, not a live DB upgrade.
 - New-head CI must rerun all disposable PostgreSQL tests, including fresh upgrade, D2 regression, D7 round trip preserving D2/ACL/data, confirmed rollback, actual-commit/lost-ack independent reads, restricted login, locks and safe errors. The 2026-10-29 green run cannot close the current P1/P2 review. Exact-head CI results belong in PR #31 after completion; TV2/TV5/integrator re-review and independent human L2 gates remain open.
 
-## Current D3→D7 checks — 2026-11-04
+## D3→D7 checks on `6594c41` — 2026-11-04
 
 - Normal merge of `main@681c5fe` retains accepted D2/D3 and decision-status docs. Only unmerged D7 is renamed/re-parented. `repositories/listings.py` and its commit-outcome handling are unchanged from TV2-validated `72d57f0`.
 - Targeted R1/D7 pytest command above: **2 passed / 54 skipped**, one existing Alembic warning. Full backend command: **393 passed / 311 skipped**, existing Starlette/Alembic warnings. PostgreSQL remains **NOT_RUN locally**.
 - Ruff 0.14.0 format/check `--select F,E9` on the changed migration/test module, single-head graph and offline Alembic `0004_phase1b_jobs_guard_delete:0005_listing_d7`: **PASS**. Offline SQL is not live DB execution.
 - Current-head CI must rerun fresh upgrade, D2/D3 retention/lifecycle/ACL regressions, D7 round trip preserving both Job guards and data/grants, all R1 lock/login/rollback/lost-ack cases. CI results are recorded on #31 without creating another documentation-only SHA. The 673-pass run on `72d57f0` is historical, not evidence of D3 plus D7 together. Renew TV2/affected-owner ACKs and independent human reviews before merge.
+
+## Review follow-up and main synchronization — 2026-11-04
+
+- Normal merge of `main@35139f6` imports #38's D2 pseudocode correction. This follow-up edits only the schema-matrix document from main and R1/CR review records; backend/frontend/migrations/tests/config/workflow trees remain byte-identical to `6594c41`. Impact is **NO_IMPACT** to runtime and contracts, within the overall L2 PR.
+- Original exact-`6594c41` CI [41690653091](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41690653091): **704 backend passed / 0 skipped**, 56 R1/D7 cases, simulator 2, frontend 69, Compose success. Fresh CI on the synchronized SHA is recorded in the PR; local DB remains NOT_RUN. No local functional rerun is needed for this documentation-only delta.
+- TV2's 701 tests run `pytest backend/tests`; CI's 704 run `pytest backend/tests tests`. The three extra functions are in `tests/test_compose_topology.py`; these are separate observed commands, not a claim that TV4 reran TV2's environment.
+- The owner's current COMMENT explicitly resolves the earlier P1/P2 technical defects, but the older `CHANGES_REQUESTED` review and review-thread state are separate GitHub metadata. Ask the original reviewer to reconcile that state with their recorded resolution; author/assistant does not dismiss the review or count it as human approval. No new domain ACK is requested for this justified NO_IMPACT sync.
+- Remaining: final human L2 confirmations and lead merge decision; TV5/integrator reconciliation/audit and future Manager/Jobs evidence; mounted API/UI/acceptance on #17. These are not reopened P1/P2 code findings and do not authorize author merge or production wiring.

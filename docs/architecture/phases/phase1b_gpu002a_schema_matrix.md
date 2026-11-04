@@ -362,7 +362,7 @@ Trigger là **defense in depth**, áp dụng cả cho owner. Owner/superuser v�
 
 | Trigger | Bảng / thời điểm | Quy tắc | Nguồn yêu cầu |
 |---|---|---|---|
-| `trg_jobs_guard_update` | `jobs` BEFORE UPDATE | (a) Job terminal (`COMPLETED`/`FAILED`/`CANCELLED`) không được UPDATE; (b) cột bất biến không đổi: `id, client_id, client_role, listing_id, worker_id, requested_gpu_count, duration_seconds, submitted_at, enqueue_seq, idempotency_key, request_sha256, correlation_id`; (c) chỉ cho cạnh `QUEUED→RUNNING`, `QUEUED→CANCELLED`, `RUNNING→COMPLETED`, `RUNNING→FAILED`; nếu `status` không đổi thì không cột nào được đổi; (d) ràng buộc cạnh theo loại caller (API/Manager/owner/không xác định) — xem bảng phân loại bên dưới | BR-05; §9.2-07 "never rewrite core Job identity"; §9.5.8; §11.5 "no API/Manager UPDATE grant bypassing lifecycle"; Module Design §5 |
+| `trg_jobs_guard_update` | `jobs` BEFORE UPDATE | (a) Job terminal (`COMPLETED`/`FAILED`/`CANCELLED`) không được UPDATE; (b) cột bất biến không đổi: `id, client_id, client_role, listing_id, worker_id, requested_gpu_count, duration_seconds, submitted_at, enqueue_seq, idempotency_key, request_sha256, correlation_id`; (c) chỉ cho cạnh `QUEUED→RUNNING`, `QUEUED→CANCELLED`, `RUNNING→COMPLETED`, `RUNNING→FAILED`; nếu `status` không đổi thì không cột nào được đổi; (d) ràng buộc cạnh theo loại caller (API/Manager/owner/không xác định) — xem bảng phân loại bên dưới; caller được phân loại **trước** khi chấp nhận mọi UPDATE, kể cả no-op | BR-05; §9.2-07 "never rewrite core Job identity"; §9.5.8; §11.5 "no API/Manager UPDATE grant bypassing lifecycle"; Module Design §5 |
 | `trg_jobs_guard_delete` | `jobs` BEFORE DELETE | Xem mục 8 | §9.3 safety barrier |
 | `trg_simulation_references_immutable` | `simulation_references` BEFORE UPDATE | Từ chối mọi UPDATE (DELETE chỉ qua cascade sau guard) | §9.2-08 "immutable truth record"; §9.5.8 |
 | `trg_audit_events_immutable` | `audit_events` BEFORE UPDATE | Từ chối mọi UPDATE | §9.2-18 "insert-only" |
@@ -375,28 +375,31 @@ Pseudocode `trg_jobs_guard_update` (không phải SQL chạy được):
 ```text
 IF OLD.status IN terminal: REJECT 'job_terminal_immutable'
 IF any immutable column IS DISTINCT FROM OLD: REJECT 'job_identity_immutable'
+caller = classify(current_user)          # xem bảng bên dưới; chạy cho MỌI UPDATE, kể cả no-op
+IF caller = AMBIGUOUS:                                          REJECT 'job_update_role_ambiguous'
+IF caller = UNKNOWN:                                            REJECT 'job_update_role_not_permitted'
 IF NEW.status = OLD.status:
     IF NEW row IS DISTINCT FROM OLD row: REJECT 'job_update_without_transition'
-    RETURN NEW
+    RETURN NEW                           # no-op chỉ được chấp nhận SAU khi caller đã được phân loại
 IF (OLD.status, NEW.status) NOT IN legal edges: REJECT 'job_illegal_transition'
-caller = classify(current_user)          # xem bảng bên dưới
 IF caller = API     AND edge <> QUEUED -> CANCELLED:            REJECT 'job_transition_not_owned_by_api'
 IF caller = MANAGER AND edge NOT IN (QUEUED -> RUNNING,
                                      RUNNING -> COMPLETED, RUNNING -> FAILED):
                                                                 REJECT 'job_transition_not_owned_by_manager'
-IF caller = UNKNOWN:                                            REJECT 'job_update_role_not_permitted'
 RETURN NEW                               # caller = OWNER_MAINTENANCE: chỉ qua (a)-(c)
 ```
+
+**Đồng bộ 03/11/2026 theo quyết định nhóm trưởng (D2 reconfirmed, PR #28):** phải phân loại caller **trước khi** chấp nhận bất kỳ UPDATE nào, kể cả no-op (`NEW IS NOT DISTINCT FROM OLD`); caller `AMBIGUOUS` hoặc `UNKNOWN` bị từ chối ngay cả với no-op. Bản pseudocode trước đó `RETURN NEW` cho no-op trước bước `classify`, mâu thuẫn với bảng phân loại bên dưới; migration `0003` đã làm đúng thứ tự mới. Các cạnh lifecycle hợp lệ và quy tắc sở hữu cạnh theo role không đổi.
 
 **Cách xác định caller (sửa theo review P2-3).** Function là `SECURITY INVOKER` (không dùng `SECURITY DEFINER`), nên `current_user` là role đang thực thi câu lệnh, kể cả sau `SET ROLE`. Membership được tính bằng truy vấn **đệ quy trên `pg_auth_members`** bắt đầu từ chính `current_user` (bao gồm trường hợp `current_user` là group), **không** dùng `pg_has_role()`/`is_member_of()` vì hai hàm này trả `true` cho superuser với mọi role:
 
 | Thứ tự xét | Điều kiện | Caller | Hành vi |
 |---|---|---|---|
-| 1 | Thuộc **cả** `gpm_api_rw` và `gpm_manager_rw` | — | Từ chối mọi UPDATE (`job_update_role_ambiguous`): cấu hình role sai |
+| 1 | Thuộc **cả** `gpm_api_rw` và `gpm_manager_rw` | `AMBIGUOUS` | Từ chối mọi UPDATE, kể cả no-op (`job_update_role_ambiguous`): cấu hình role sai |
 | 2 | Thuộc `gpm_api_rw` | `API` | Chỉ `QUEUED→CANCELLED` |
 | 3 | Thuộc `gpm_manager_rw` | `MANAGER` | Chỉ `QUEUED→RUNNING`, `RUNNING→COMPLETED`, `RUNNING→FAILED` (Phase 2 mới cấp grant UPDATE) |
 | 4 | Không thuộc group nào, và `rolsuper` hoặc là owner của DB | `OWNER_MAINTENANCE` | **Không** được miễn (a)–(c): Job terminal vẫn bất biến, cột định danh vẫn bất biến, chỉ đi theo cạnh hợp lệ. Chỉ bỏ ràng buộc "cạnh thuộc service nào" để phục vụ sửa dữ liệu có kiểm soát |
-| 5 | Mọi trường hợp còn lại | `UNKNOWN` | Từ chối (fail closed), kể cả khi role đó có grant UPDATE |
+| 5 | Mọi trường hợp còn lại | `UNKNOWN` | Từ chối mọi UPDATE, kể cả no-op (`job_update_role_not_permitted`; fail closed), kể cả khi role đó có grant UPDATE |
 
 **Giới hạn phải ghi nhận:** superuser có thể `ALTER TABLE ... DISABLE TRIGGER` hoặc `SET session_replication_role = replica` để bỏ qua trigger. Trigger không chặn được việc này; lớp bảo vệ thực sự là runtime **không bao giờ** chạy bằng superuser/owner (mục 6.2). Test ở GPU-002-D phải kiểm: `gpm_api_app` và `gpm_manager_app` có `rolsuper = false`, `rolreplication = false`, `rolbypassrls = false`; `gpm_api_app` đi `QUEUED→RUNNING` bị từ chối, `QUEUED→CANCELLED` được phép; owner sửa Job terminal hoặc đi `RUNNING→QUEUED` bị từ chối; một role thử nghiệm có grant UPDATE nhưng không thuộc group nào bị từ chối; `SET ROLE gpm_api_rw` vẫn được phân loại `API`.
 
