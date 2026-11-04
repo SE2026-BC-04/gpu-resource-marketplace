@@ -180,13 +180,34 @@ def test_close_runtime_error_without_body_exception_is_not_swallowed() -> None:
             pass
 
 
-def test_close_failure_after_successful_commit_does_not_turn_success_into_error() -> None:
+def test_close_programming_fault_after_successful_commit_propagates_and_keeps_outcome() -> None:
     session = _FakeSession(close_error=RuntimeError("close boom"))
+    transaction = _transaction(session)
+
+    with pytest.raises(RuntimeError, match="close boom"):
+        with transaction as tx:
+            tx.commit()
+
+    # The write is durable: the outcome evidence must still say so.
+    assert transaction.outcome.value == "COMMITTED"
+
+
+def test_close_storage_fault_after_successful_commit_is_logged_not_raised() -> None:
+    session = _FakeSession(close_error=OperationalError("stmt", {}, Exception("secret dsn")))
 
     with _transaction(session) as tx:
         tx.commit()
 
     assert tx.outcome.value == "COMMITTED"
+
+
+def test_programming_fault_after_commit_does_not_mask_a_later_body_exception() -> None:
+    session = _FakeSession(close_error=RuntimeError("close boom"))
+
+    with pytest.raises(JobNotFound):
+        with _transaction(session) as tx:
+            tx.commit()
+            raise JobNotFound()
 
 
 def test_storage_cleanup_failure_on_clean_body_is_sanitized_outage() -> None:

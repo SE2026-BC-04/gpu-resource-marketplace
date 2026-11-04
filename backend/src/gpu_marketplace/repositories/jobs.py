@@ -244,13 +244,17 @@ class PostgresJobCancelTransaction:
                 cleanup_failed = True
                 unexpected = unexpected or error
                 _log_store_failure("job_cancel_close_failed", error, self._outcome)
-        if cleanup_failed and exc_type is None and not self._committed:
+        if exc_type is None:
             # An exception already in flight always wins (it was ignored above after being
-            # logged by type only). On a clean body surface the cleanup loss: a programming
-            # fault stays visible, a storage fault becomes the sanitized outage error.
+            # logged by type only). On a clean body, unexpected programming faults propagate
+            # unchanged, as the port requires, even after a confirmed COMMIT; the retained
+            # ``outcome`` still records COMMITTED. A storage fault during cleanup becomes the
+            # sanitized outage error only before COMMIT; after COMMIT it is logged, because
+            # the mutation is durable and reporting an outage would be a false failure.
             if unexpected is not None:
                 raise unexpected
-            raise DependencyUnavailable() from None
+            if cleanup_failed and not self._committed:
+                raise DependencyUnavailable() from None
         return False
 
     def _active(self) -> Session:
