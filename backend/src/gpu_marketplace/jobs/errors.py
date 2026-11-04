@@ -75,6 +75,11 @@ class JobNotFound(JobDomainError):
         super().__init__(JobErrorCode.JOB_NOT_FOUND)
 
 
+class JobNotCancellable(JobDomainError):
+    def __init__(self) -> None:
+        super().__init__(JobErrorCode.JOB_NOT_CANCELLABLE)
+
+
 class InvalidFilter(JobDomainError):
     def __init__(self) -> None:
         super().__init__(JobErrorCode.INVALID_FILTER)
