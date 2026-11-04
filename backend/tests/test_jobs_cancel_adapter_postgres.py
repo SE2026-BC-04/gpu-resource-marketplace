@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
-from conftest import reset_schema
 from db_safety import TestDatabase
 from gpu_marketplace.jobs.cancel import JobCancelService
 from gpu_marketplace.jobs.cancel_ports import (
@@ -108,11 +107,9 @@ def _stack(url: str, *, application_name: str = "gpm-cancel-adapter", **uow_opti
 
 
 @pytest.fixture
-def cancel_postgres(migrated_database: Engine, test_database: TestDatabase) -> Iterator[Engine]:
-    try:
-        yield migrated_database
-    finally:
-        reset_schema(migrated_database, test_database)
+def cancel_postgres(migrated_database_with_teardown: Engine) -> Engine:
+    """Shared guarded fixture: migrated disposable DB, schema reset after every test (G8)."""
+    return migrated_database_with_teardown
 
 
 @pytest.fixture
