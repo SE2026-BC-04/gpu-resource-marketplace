@@ -7,14 +7,12 @@ exercise JobCancelService or a production TX-CANCEL adapter.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 
-from db_safety import TestDatabase
 from jobs_cancel_pg_support import (
     ListingLockAttempt,
     assert_non_job_side_effects_unchanged,
@@ -23,7 +21,6 @@ from jobs_cancel_pg_support import (
     seed_cancel_side_effect_rows,
     seed_committed_job,
 )
-from conftest import reset_schema
 
 
 API_ROLE = "gpm_api_app"
@@ -32,14 +29,9 @@ INTEGRITY_SQLSTATE = "23000"
 
 
 @pytest.fixture
-def cancel_postgres(migrated_database: Engine, test_database: TestDatabase) -> Iterator[Engine]:
-    """Use the vetted, migrated disposable DB and reset it safely after this test."""
-    try:
-        yield migrated_database
-    finally:
-        # reset_schema revalidates the disposable-cluster marker before DROP SCHEMA.
-        # No row-level DELETE bypasses D3 or other lifecycle triggers.
-        reset_schema(migrated_database, test_database)
+def cancel_postgres(migrated_database_with_teardown: Engine) -> Engine:
+    """Use the verified disposable DB fixture, including its guarded teardown."""
+    return migrated_database_with_teardown
 
 
 def _cancel_as_api(engine: Engine, job_id: str) -> None:
@@ -166,9 +158,15 @@ def test_d2_cancel_is_allowed_for_paused_listing(cancel_postgres: Engine) -> Non
     assert_non_job_side_effects_unchanged(before, after)
 
 
-def test_d2_cancel_after_listing_lock_wait_uses_database_clock_and_two_connections(
+def test_d2_direct_sql_cancel_after_listing_lock_wait_uses_explicit_db_clock(
     cancel_postgres: Engine,
 ) -> None:
+    """Prove the D2 SQL guard, real Listing lock wait, and an explicit DB clock.
+
+    This test itself issues UPDATE ... clock_timestamp(); it does not verify
+    how the production PostgreSQL TX-CANCEL adapter samples terminal_at.
+    That adapter property belongs to PG-CANCEL-10 on PR #40.
+    """
     fixture = _seed_snapshot_fixture(cancel_postgres, listing_status="PAUSED")
     before = read_persisted_snapshot(cancel_postgres, fixture)
     first = cancel_postgres.connect()
