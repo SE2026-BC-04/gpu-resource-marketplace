@@ -34,13 +34,26 @@ def test_readiness_requires_database() -> None:
 
 
 def test_readiness_reports_database_probe_success() -> None:
-    app = create_app(settings(), database_probe=lambda: True)
+    app = create_app(settings(), database_probe=lambda: True, auth_schema_probe=lambda: True)
 
     with TestClient(app) as client:
         response = client.get("/health/ready")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ready", "components": {"database": "ok"}}
+
+
+def test_readiness_fails_when_auth_schema_is_missing() -> None:
+    app = create_app(settings(), database_probe=lambda: True, auth_schema_probe=lambda: False)
+
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "not_ready",
+        "components": {"database": "ok", "auth_schema": "unavailable"},
+    }
 
 
 def test_unexpected_errors_do_not_expose_exception_details(capsys) -> None:

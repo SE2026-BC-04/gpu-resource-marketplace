@@ -14,3 +14,14 @@ def database_is_ready(engine: Engine) -> bool:
     except SQLAlchemyError:
         return False
     return True
+
+
+def authentication_schema_is_ready(engine: Engine) -> bool:
+    """Return whether the API runtime role can query the required Auth tables."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT id, login_name, password_hash, status FROM users LIMIT 0"))
+            connection.execute(text("SELECT user_id, role_code FROM user_roles LIMIT 0"))
+    except SQLAlchemyError:
+        return False
+    return True

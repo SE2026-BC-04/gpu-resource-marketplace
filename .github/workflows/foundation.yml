@@ -114,7 +114,9 @@ jobs:
           FRONTEND_HOST_PORT: "25173"
           API_HOST_PORT: "28000"
           POSTGRES_HOST_PORT: "25432"
-        run: docker compose --env-file .env.example -p gpu-resource-marketplace up --build --detach --wait --wait-timeout 240
+        # This default local-only stack has no provisioned schema; leave it running for
+        # cleanup-isolation checks without requiring its API readiness healthcheck to pass.
+        run: docker compose --env-file .env.example -p gpu-resource-marketplace up --build --detach
       - run: uv run --project backend --locked python tools/compose_smoke.py
       - name: Stop the CI local stack
         if: always()

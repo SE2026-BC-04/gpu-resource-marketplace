@@ -14,6 +14,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     api_host: str = "0.0.0.0"
@@ -37,8 +38,9 @@ class Settings(BaseSettings):
     def validate_database_url(cls, value: str) -> str:
         try:
             url = make_url(value)
-        except Exception as exc:
-            raise ValueError("database URL is invalid") from exc
+        except Exception:
+            # SQLAlchemy parser exceptions can include the original URL, including its password.
+            raise ValueError("database URL is invalid") from None
         if url.drivername != "postgresql+psycopg":
             raise ValueError("database URL must use the approved postgresql+psycopg driver")
         if not url.host or not url.database:

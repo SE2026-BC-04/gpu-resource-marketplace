@@ -38,11 +38,28 @@ def test_port_configuration_is_bounded() -> None:
 
 
 def test_jwt_secret_must_contain_at_least_256_bits() -> None:
-    Settings(_env_file=None, jwt_secret="x" * 32)
-    short_secret = "x" * 31
+    valid_secret = "valid-jwt-test-secret-0123456789ab"
+    settings = Settings(_env_file=None, jwt_secret=valid_secret)
+    assert settings.jwt_secret is not None
+    assert settings.jwt_secret.get_secret_value() == valid_secret
+
+    short_secret = "jwt-short-secret-sentinel"
     with pytest.raises(ValidationError, match="at least 256 bits") as error:
         Settings(_env_file=None, jwt_secret=short_secret)
     assert short_secret not in str(error.value)
+    assert short_secret not in repr(error.value)
+
+
+def test_invalid_database_url_hides_password_from_validation_error() -> None:
+    password = "dsn-password-sentinel-do-not-log"
+    database_url = f"not-a-database-url-{password}"
+
+    with pytest.raises(ValidationError, match="database URL is invalid") as error:
+        Settings(_env_file=None, database_url=database_url)
+
+    assert password not in str(error.value)
+    assert database_url not in str(error.value)
+    assert password not in repr(error.value)
 
 
 def test_jwt_secret_is_redacted_from_settings_repr() -> None:

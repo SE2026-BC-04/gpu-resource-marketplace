@@ -39,7 +39,7 @@ def test_unexpected_auth_error_keeps_private_headers_and_contract_envelope(
     app = create_app(Settings(_env_file=None, jwt_secret=JWT_SECRET), database_probe=lambda: True)
 
     def fail_closed(_: str) -> None:
-        raise RuntimeError("do-not-return-or-log-exception-text")
+        raise RuntimeError("jwt-secret-sentinel-do-not-return-or-log")
 
     monkeypatch.setattr(app.state.auth_service, "current_identity", fail_closed)
     with caplog.at_level(logging.ERROR), TestClient(app, raise_server_exceptions=False) as client:
@@ -48,11 +48,14 @@ def test_unexpected_auth_error_keeps_private_headers_and_contract_envelope(
             headers={
                 "Authorization": "Bearer opaque-test-token",
                 "X-Request-ID": "client-supplied-value",
+                "Origin": "http://localhost:5173",
             },
         )
 
     assert response.status_code == 500
     assert response.headers["Cache-Control"] == "no-store"
+    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    assert response.headers["Vary"] == "Origin"
     request_id = response.headers["X-Request-ID"]
     assert UUID(request_id).version == 4 and request_id != "client-supplied-value"
     assert response.json() == {
@@ -62,5 +65,25 @@ def test_unexpected_auth_error_keeps_private_headers_and_contract_envelope(
             "request_id": request_id,
         }
     }
-    assert "do-not-return-or-log-exception-text" not in response.text
-    assert "do-not-return-or-log-exception-text" not in caplog.text
+    secret = "jwt-secret-sentinel-do-not-return-or-log"
+    assert secret not in response.text
+    assert secret not in caplog.text
+
+
+def test_unexpected_auth_error_does_not_reflect_disallowed_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = create_app(Settings(_env_file=None, jwt_secret=JWT_SECRET), database_probe=lambda: True)
+
+    def fail_closed(_: str) -> None:
+        raise RuntimeError("test-only-failure")
+
+    monkeypatch.setattr(app.state.auth_service, "current_identity", fail_closed)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": "Bearer opaque-test-token", "Origin": "https://evil.example"},
+        )
+
+    assert response.status_code == 500
+    assert "Access-Control-Allow-Origin" not in response.headers

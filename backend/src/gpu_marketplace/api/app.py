@@ -11,7 +11,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from gpu_marketplace.common.config import Settings
-from gpu_marketplace.common.database import create_engine, database_is_ready
+from gpu_marketplace.common.database import authentication_schema_is_ready, create_engine, database_is_ready
 from gpu_marketplace.common.logging import configure_logging
 from gpu_marketplace.identity.dependencies import create_principal_dependency
 from gpu_marketplace.identity.passwords import ScryptPasswordHasher
@@ -27,6 +27,7 @@ def create_app(
     settings: Settings | None = None,
     *,
     database_probe: Callable[[], bool] | None = None,
+    auth_schema_probe: Callable[[], bool] | None = None,
     account_sessions: sessionmaker[Session] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
@@ -43,6 +44,10 @@ def create_app(
     if database_probe is None:
         assert engine is not None
         database_probe = lambda: database_is_ready(engine)
+    if auth_schema_probe is None:
+        auth_schema_probe = (
+            (lambda: authentication_schema_is_ready(engine)) if engine is not None else (lambda: True)
+        )
     assert account_sessions is not None
 
     auth_service = AuthService(
@@ -92,6 +97,11 @@ def create_app(
                 status_code=503,
                 content={"status": "not_ready", "components": {"database": "unavailable"}},
             )
+        if not auth_schema_probe():
+            return JSONResponse(
+                status_code=503,
+                content={"status": "not_ready", "components": {"database": "ok", "auth_schema": "unavailable"}},
+            )
         return {"status": "ready", "components": {"database": "ok"}}
 
     @app.exception_handler(Exception)
@@ -105,6 +115,11 @@ def create_app(
                 "unhandled_api_exception",
                 extra={"exception_type": type(exc).__name__, "request_id": request_id},
             )
+            headers = {"X-Request-ID": request_id, "Cache-Control": "no-store"}
+            origin = request.headers.get("origin")
+            if origin in resolved_settings.cors_origins:
+                headers["Access-Control-Allow-Origin"] = origin
+                headers["Vary"] = "Origin"
             return JSONResponse(
                 status_code=500,
                 content={
@@ -114,7 +129,7 @@ def create_app(
                         "request_id": request_id,
                     }
                 },
-                headers={"X-Request-ID": request_id, "Cache-Control": "no-store"},
+                headers=headers,
             )
         logger.error("unhandled_api_exception", extra={"exception_type": type(exc).__name__})
         return JSONResponse(
