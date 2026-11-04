@@ -88,6 +88,21 @@ def migrated_database(clean_database: Engine, alembic_config: Config) -> Engine:
     return clean_database
 
 
+@pytest.fixture
+def migrated_database_with_teardown(
+    migrated_database: Engine, test_database: TestDatabase
+) -> Iterator[Engine]:
+    """Use the migrated disposable database with verified per-test teardown.
+
+    Reuse reset_schema's guard on every teardown rather than importing
+    conftest directly from individual test modules.
+    """
+    try:
+        yield migrated_database
+    finally:
+        reset_schema(migrated_database, test_database)
+
+
 @pytest.fixture(scope="module")
 def baseline_database(db_engine: Engine, test_database: TestDatabase, cluster_roles: None) -> Iterator[Engine]:
     """Schema at ``head`` for a whole module; tests isolate themselves with a rolled-back transaction."""
