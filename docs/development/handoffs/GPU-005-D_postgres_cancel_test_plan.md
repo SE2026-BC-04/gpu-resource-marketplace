@@ -2,26 +2,26 @@
 
 **Status:** TEST HARNESS PREPARATION — DRAFT / HOLD — NOT APPROVED FOR MERGE
 
-**Review snapshot:** 2026-11-05; PR #34 baseline `1c237596246c700940db82b78a71d734cd510fba`, stacked on #33; adapter PR #40 HEAD `9c389b8f573eb281378bb393f6b9b9cf6b4dfaae` (separate, NOT merged).
+**Review snapshot:** 2026-11-05; #34 reconciled pre-documentation-cleanup HEAD `fcbe30d140edc665f7c5d81eaa1126859825a81c`, based on refreshed #33 `c644a1a545370133a06ea7aceada6d073a6ceb77`, containing accepted `main@7fd7dea` (D2/D3/D7). This snapshot has [completed exact-HEAD CI #41890091499](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41890091499). Subsequent documentation-only commits require their own checks. Adapter PR #40 is a **separate Draft candidate** (last checked `f394b3c`), not merged/accepted.
 **Parent:** PR #33, `feat/gpu-005-d-cancel-foundation`
-**Parent before sync:** PR #33 `13cd3736052321d64980e4d89c730dc612d6abe8`
-**PR #34 before sync:** `92c25424e67563bcd62b1582465eb3ec72dc19d2`
-**Synchronized main:** `ef9ddcb0b0f594e11ef6ed787c9ad58ce92a613d` (includes merged PR #28 / D2)
-**Parent after sync:** `a4805d4773f09a32153e919288a1a733f2dc27bf`
-**Assessment:** The six SQL-level D2 tests are separate from production TX-CANCEL integration. TV2 has delivered a **Draft candidate** adapter on PR #40 (technical P2-01/P2-02 code fixes re-reviewed on `9c389b8`), but it has NOT passed final exact-HEAD PostgreSQL CI or human L2 acceptance and is NOT merged into #34. Status `CANDIDATE_ONLY_NOT_ACCEPTED` in the scenario matrix means **the integrated accepted path on PR #34 was NOT_RUN**, not a passed acceptance test.
+**Historical parent before original D2 sync (superseded):** PR #33 `13cd3736052321d64980e4d89c730dc612d6abe8`
+**Historical #34 before original D2 sync (superseded):** `92c25424e67563bcd62b1582465eb3ec72dc19d2`
+**Historical D2-only main (superseded):** `ef9ddcb0b0f594e11ef6ed787c9ad58ce92a613d` (included merged PR #28 / D2)
+**Historical parent after D2-only sync (superseded):** `a4805d4773f09a32153e919288a1a733f2dc27bf`
+**Assessment:** The six SQL-level D2 trigger tests are separate from production TX-CANCEL integration. TV2's Draft adapter is on PR #40 (`f394b3c` at review snapshot), with positive native-login evidence added and a separately raised P2 test-credential-isolation issue still to be resolved. It has **not** been accepted or merged into #34. Status `CANDIDATE_ONLY_NOT_ACCEPTED` in the scenario matrix means **service+production-adapter acceptance on PR #34 was NOT_RUN**, regardless of author-local test reports from #40.
 
 ## Dependency gates
 
-- `POSTGRES_CANCEL_ADAPTER_CANDIDATE_DRAFT`: TV2 delivered the adapter on PR #40 (`9c389b8`); TV5 re-reviewed and closed the original P2s at source/test level. It is not in this PR's diff, has no current-HEAD PostgreSQL CI, and is not accepted or merged.
+- `POSTGRES_CANCEL_ADAPTER_CANDIDATE_DRAFT`: TV2 delivered the adapter on PR #40 (review snapshot `f394b3c`); prior production P2s were technically closed, but the native-login test's cluster-wide password mutation needs safe isolation/restoration. TV2's local PostgreSQL evidence is not CI on this #34 head; the adapter is not accepted or merged.
 - `JOB_LIFECYCLE_D2_AVAILABLE`: PR #28 merged; migration `0003_phase1b_jobs_guard_update` is in this stacked branch.
-- `MIGRATION_MAIN_AHEAD_OF_STACK`: accepted `main@7fd7dea` includes PR #29 (D3, `0004`) and PR #31 (D7, `0005_listing_d7`), with a **single Alembic head `0005_listing_d7`**. Current #33 → #34 stack is still based on `main@ef9ddcb` at D2/`0003`. Do not claim the #34 code already contains D3/D7; after #33 normally synchronizes `main`, redo this check on the actual combined branch.
-- `JOB_LIFECYCLE_D3_MERGED_ON_MAIN`: PR #29 is merged; the harness uses no row-level DELETE and its guarded schema reset must stay compatible after the parent branch receives D3.
+- `MIGRATION_MAIN_SYNCED_IN_STACK`: #33 normally merged accepted `main@7fd7dea` (D3 `0004`, D7 `0005_listing_d7`), then TV5 normally merged refreshed #33 `c644a1a` into #34 at `fcbe30d`. All five migration source scripts form the single revision head `0005_listing_d7`; guarded CI on `fcbe30d` exercised D2/D3/D7 PostgreSQL tests. This is not a claim of a separate local `alembic heads` CLI execution.
+- `JOB_LIFECYCLE_D3_D7_PRESENT`: PR #29 (D3) and #31 (D7) are merged on main **and now included in this stacked #34 source/CI**. The harness uses no row-level DELETE; teardown keeps the verified whole-schema disposable reset.
 - `PHASE2_MANAGER_NOT_IMPLEMENTED`: there is no Manager allocation implementation/schema on this baseline. No query against Phase 2 allocation, signed-result, or contribution tables is included.
 - TV2's adapter candidate is at [PR #40](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/40); TV2's **port `ACK_COMPATIBLE`** is recorded on [PR #33](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/33#issuecomment-6611328038) at `a4805d4`. Neither is a human L2 review or merge authorization.
 
 PostgreSQL tests use the repository's `migrated_database_with_teardown` fixture layered on `migrated_database`, `cluster_roles`, `test_database`, `db_engine`, `reset_schema()`, `resolve_test_database()` and `verify_cluster()` safety path. The test imports **no function directly from `conftest.py`**. Each test starts from a reset disposable schema, runs migrations to `head`, commits fixtures for cross-connection visibility, and resets the schema in teardown after rechecking the cluster marker. This avoids direct `DELETE`, does not disable triggers, and is never allowed against a persistent database. No SQLite substitute is used. The helper reads snapshots through independent connections and fingerprints protected reference values. Its bounded lock probe sets PostgreSQL `lock_timeout`/`statement_timeout`, observes `pg_blocking_pids()`, and bounds thread join time.
 
-`READY` refers only to SQL-level test code prepared against D2, not JobCancelService integration. On the **old #34 HEAD `1c23759`**, CI [#41685020137](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41685020137) actually ran the six D2 SQL-level cases and 67 existing D2 guards on disposable PostgreSQL (PASS); local runs without opt-ins SKIPPED. The matrix below concerns service+production-adapter acceptance, which is **NOT_RUN on #34**. A separate PR #40 adapter candidate exists but is not yet accepted.
+`READY` refers only to SQL-level test code prepared against D2, not JobCancelService integration. On the **historical #34 HEAD `1c23759`**, CI [#41685020137](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41685020137) ran the six D2 SQL-level cases and 67 existing D2 guards on disposable PostgreSQL (PASS). On the **reconciled pre-doc HEAD `fcbe30d`**, [CI #41890091499](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41890091499) again ran these tests (PASS), with D3/D7 tests also included. Local runs without DB opt-ins previously SKIPPED. The matrix below concerns service+production-adapter acceptance, which is **NOT_RUN on #34**. A separate PR #40 adapter candidate exists but is not yet accepted.
 
 ## D2 SQL-level PostgreSQL coverage (separate evidence class)
 
@@ -29,12 +29,12 @@ PostgreSQL tests use the repository's `migrated_database_with_teardown` fixture 
 
 | Test | SQL-level behavior | Isolation and persisted-state assertion | Runtime status |
 |---|---|---|---|
-| D2-CANCEL-01 | API role may transition `QUEUED → CANCELLED`; Listing is `ACTIVE` | Fresh-connection Job snapshot; checks DB-set terminal timestamp, null started/failure fields; Listing allocation counter, simulation-reference fingerprint, and reputation unchanged | CI PASS on old HEAD `1c23759`; LOCAL SKIPPED without opt-ins |
-| D2-CANCEL-02 | API role cannot take `QUEUED → RUNNING` Manager edge | Asserts SQLSTATE/constraint/reason and unchanged independent snapshot | CI PASS on old HEAD `1c23759`; LOCAL SKIPPED without opt-ins |
-| D2-CANCEL-03 | Unknown role cannot issue even a no-op UPDATE | Temporary role/ACL are transaction-scoped; rejected statement rolls back; independent snapshot unchanged | CI PASS on old HEAD `1c23759`; LOCAL SKIPPED without opt-ins |
-| D2-CANCEL-04 | Successful SQL transition followed by transaction rollback | Fresh connection still sees `QUEUED`; all existing-schema snapshots unchanged | CI PASS on old HEAD `1c23759`; LOCAL SKIPPED without opt-ins |
-| D2-CANCEL-05 | D2 permits `QUEUED → CANCELLED` when Listing is `PAUSED` | Fresh connection verifies status transition; allocation counter, reference, reputation unchanged | CI PASS on old HEAD `1c23759`; LOCAL SKIPPED without opt-ins |
-| D2-CANCEL-06 | First PostgreSQL session holds Listing lock while a second waits; the test's own direct SQL explicitly calls `clock_timestamp()` (NOT evidence that the production adapter samples DB time) | Wait is observed through `pg_stat_activity`/`pg_blocking_pids()` with bounded timeouts; second connection acquires Listing lock after commit; independent snapshot verifies terminal timestamp bounds and unchanged side effects | CI PASS on old HEAD `1c23759`; LOCAL SKIPPED without opt-ins |
+| D2-CANCEL-01 | API role may transition `QUEUED → CANCELLED`; Listing is `ACTIVE` | Fresh-connection Job snapshot; checks DB-set terminal timestamp, null started/failure fields; Listing allocation counter, simulation-reference fingerprint, and reputation unchanged | CI PASS on reconciled pre-doc HEAD `fcbe30d` (#41890091499); prior local SKIPPED without opt-ins |
+| D2-CANCEL-02 | API role cannot take `QUEUED → RUNNING` Manager edge | Asserts SQLSTATE/constraint/reason and unchanged independent snapshot | CI PASS on reconciled pre-doc HEAD `fcbe30d` (#41890091499); prior local SKIPPED without opt-ins |
+| D2-CANCEL-03 | Unknown role cannot issue even a no-op UPDATE | Temporary role/ACL are transaction-scoped; rejected statement rolls back; independent snapshot unchanged | CI PASS on reconciled pre-doc HEAD `fcbe30d` (#41890091499); prior local SKIPPED without opt-ins |
+| D2-CANCEL-04 | Successful SQL transition followed by transaction rollback | Fresh connection still sees `QUEUED`; all existing-schema snapshots unchanged | CI PASS on reconciled pre-doc HEAD `fcbe30d` (#41890091499); prior local SKIPPED without opt-ins |
+| D2-CANCEL-05 | D2 permits `QUEUED → CANCELLED` when Listing is `PAUSED` | Fresh connection verifies status transition; allocation counter, reference, reputation unchanged | CI PASS on reconciled pre-doc HEAD `fcbe30d` (#41890091499); prior local SKIPPED without opt-ins |
+| D2-CANCEL-06 | First PostgreSQL session holds Listing lock while a second waits; the test's own direct SQL explicitly calls `clock_timestamp()` (NOT evidence that the production adapter samples DB time) | Wait is observed through `pg_stat_activity`/`pg_blocking_pids()` with bounded timeouts; second connection acquires Listing lock after commit; independent snapshot verifies terminal timestamp bounds and unchanged side effects | CI PASS on reconciled pre-doc HEAD `fcbe30d` (#41890091499); prior local SKIPPED without opt-ins |
 
 The existing `backend/tests/test_jobs_guard_update.py` also runs the D2 migration's broader legal/illegal transition, role classification, no-op, and concurrency tests. Those are likewise SQL-level trigger tests.
 
@@ -74,22 +74,22 @@ The helper contract tests in `backend/tests/test_jobs_cancel_pg_support.py` chec
 
 | Check | Status | Boundary |
 |---|---|---|
-| Alembic graph (stacked #34 baseline) | HISTORICAL PASS on `1c23759` | one `0003_phase1b_jobs_guard_update` head; #34 has NOT yet synced accepted D3/D7 from `main` |
-| Alembic graph (accepted `main`) | UPSTREAM STATE, not tested on this branch | one `0005_listing_d7` head after D3 `0004` and D7 `0005`; verify after parent #33 normally syncs `main` |
-| Helper contract tests | PREVIOUS HEAD PASS — 8 passed | `uv run --project backend --locked --group dev pytest backend/tests/test_jobs_cancel_pg_support.py -q`; pure Python assertions, not database evidence |
-| D2 SQL-level PostgreSQL cancellation + existing D2 trigger tests | PREVIOUS HEAD CI PASS (6 new + 67 existing); LOCAL SKIPPED (73) | [#41685020137](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41685020137) on `1c23759` used vetted disposable PostgreSQL; local without opt-ins touched no DB. Re-run on updated HEAD before accepting the new fixture. |
-| Cancellation foundation tests | PREVIOUS HEAD PASS — 34 passed | `uv run --project backend --locked --group dev pytest backend/tests/test_jobs_cancel_foundation.py -q`; service/port test doubles only |
-| Jobs foundation tests | PREVIOUS HEAD PASS — 88 passed | `uv run --project backend --locked --group dev pytest backend/tests/test_jobs_foundation.py -q`; not PostgreSQL integration |
+| Alembic graph (historical D2-only stack) | HISTORICAL SOURCE PASS on `1c23759` | one `0003_phase1b_jobs_guard_update` head **before** the later main sync |
+| Alembic graph (reconciled #34 `fcbe30d`) | STATIC SOURCE GRAPH PASS; guarded D2/D3/D7 PostgreSQL CI PASS | `0001 → 0002 → 0003 → 0004 → 0005_listing_d7` with one head. Source revision inspection plus [CI #41890091499](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41890091499); direct local `alembic heads` NOT_RUN. |
+| Helper contract tests | CI PASS — 8 tests on `fcbe30d` | [Python CI #41890091499](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41890091499): helper-only assertions, not production adapter acceptance |
+| D2 SQL-level PostgreSQL cancellation + existing D2 trigger tests | CI PASS on reconciled `fcbe30d`: 6 new + 67 existing | [#41890091499](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41890091499) on guarded disposable PostgreSQL with D3/D7 present; local PG execution NOT_RUN by TV5 in this update. |
+| Cancellation foundation tests | CI PASS — 34 tests on `fcbe30d` | Python CI #41890091499; service/port test doubles only |
+| Jobs foundation tests | CI PASS — 88 tests on `fcbe30d` | Python CI #41890091499; not production Cancel adapter integration |
 | Python compilation | PREVIOUS HEAD PASS | `python3 -m compileall -q backend/tests` |
 | Diff whitespace check | PREVIOUS HEAD PASS | `git diff --check` |
-| Production PostgreSQL TX-CANCEL scenarios PG-CANCEL-01..14 | NOT_RUN on #34; candidate in #40 | TV2 previously reported 24 PostgreSQL adapter tests PASS on **old #40 `fac3a93`**, not on latest `9c389b8`; exact-HEAD PG validation and merged integration remain pending. |
+| Production PostgreSQL TX-CANCEL scenarios PG-CANCEL-01..14 | NOT_RUN on #34; candidate in #40 | TV2 reports local disposable PostgreSQL tests on #40 `f394b3c` (712 total tests); #40 remains Draft with pending test-role credential isolation, current-head CI, human L2 and owner decisions. #34 SQL-only CI does not count as adapter acceptance. |
 | Phase 2 cancel-vs-allocation | BLOCKED | Real Manager path/schema absent |
-| CI on updated #34 P3 HEAD | NOT_RUN at time of this document update | PR #34 targets #33, so the normal PR-to-main GitHub Actions workflow may not trigger. Do not mislabel previous-HEAD CI as new-HEAD CI. |
+| CI on reconciled #34 pre-documentation-cleanup HEAD `fcbe30d` | **COMPLETED / SUCCESS** | [GitHub Actions #41890091499](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41890091499): Python **752 passed**, Simulator **2 passed**, Frontend **69 passed**, TypeScript/build and **Compose SUCCESS**. This is immutable evidence for `fcbe30d`; later doc-only SHA requires a separate run/check. |
 
 ## Transition gate to real PostgreSQL integration
 
-1. TV2's Draft adapter on #40 implements the `JobCancelTransaction` port; TV5 verified P2-01/P2-02 code fixes at `9c389b8`. Preserve lock order and uncertain-COMMIT safety, then obtain exact-final-HEAD PostgreSQL CI, owner decisions (timeouts/503/HTTP unknown-COMMIT) and two human L2 confirmations before acceptance.
-2. Previously achieved: D2 SQL-level tests PASS in CI on #34 old HEAD `1c23759`. Repeat on the **new** HEAD, verify the one-head Alembic chain after #33 takes current `main` (D3/D7), and check restricted API role using a vetted disposable cluster. PG-CANCEL-01..14 service+adapter evidence must be validated separately.
+1. TV2's separate Draft adapter on #40 implements the `JobCancelTransaction` port; prior adapter P2-01/P2-02 code findings were technically closed. The native-login positive test is present at `f394b3c`, but its test-only cluster-wide role-password mutation still needs safe containment/restoration. Preserve lock order and uncertain-COMMIT safety; obtain exact-final-HEAD PostgreSQL CI, owner decisions (timeouts/503/HTTP unknown-COMMIT) and two independent human L2 confirmations before acceptance.
+2. Verified on the reconciled pre-documentation-cleanup #34 HEAD `fcbe30d`: guarded D2 SQL tests **6 PASS**, existing D2 guards **67 PASS**, D3/D7 PostgreSQL tests executed, and the full Python job **752 PASS** in #41890091499. The source Alembic chain has one head `0005_listing_d7`; direct local Alembic CLI was NOT_RUN. Re-run/review checks for later final SHAs, and validate PG-CANCEL-01..14 service+adapter evidence separately on #40.
 3. TV4/TV2 confirm the Listing locking contract, including cancellation when Listing is PAUSED.
 4. Keep fixture reset behind `reset_schema()`/`verify_cluster()`; never use direct row DELETE to bypass D3.
 5. Implement PG-CANCEL-15 only after a real Phase 2 Manager/allocation path exists. Obtain required cross-phase ACKs; this preparation branch creates none.
