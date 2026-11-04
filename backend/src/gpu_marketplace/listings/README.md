@@ -1,18 +1,19 @@
 # GPU-004 Listings — implementation and integration handoff
 
-Status: **core/router/UI on `feat/gpu-004-listings`; real Auth dependency connected;
-PostgreSQL/shared-app integration BLOCKED**.
-Baseline: `main@35139f6` (04/11/2026), merged normally to retain accepted D2/D3,
-Jobs foundation and PostgreSQL Auth tests, including PR #25's AccountReader.
+Status: **CORE/UI READY FOR FINAL SCOPED REVIEW; full runtime acceptance pending**.
+Baseline: `main@7fd7dea` (04/11/2026), merged normally, including merged #31
+Listing PostgreSQL UoW/D7, D2/D3, Jobs foundation and Auth/AccountReader tests.
 The user explicitly authorized GPU-004 coding.
 This does not claim that the complete Phase 1D acceptance gates have passed.
 GPU-002 supplies ORM mappings and accepted migrations; delegated Listing R1 is
-in separate PR #31 awaiting acceptance. GPU-003 core and Auth routes are on
+merged through PR #31 and now present on this branch via main. GPU-003 core and Auth routes are on
 this baseline, including the volatile session store. The PostgreSQL account
 reader from merged PR #25 is available as
 `gpu_marketplace.repositories.accounts.PostgresAccountReader(sessionmaker)`.
-It still needs integrator-owned AuthService/app wiring. Listing UoW/D7 code is
-reviewed separately in PR #31; accepted handoff/integration remains pending.
+Runtime AuthService/app wiring remains lead-owned on #39. The
+[owner's two-track decision](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6630302919)
+separates #17 core/UI merge from #39 mounted runtime acceptance. R2/R3 are
+mandatory for full GPU-004 completion, not prerequisites for this scoped merge.
 
 ## Implemented scope
 
@@ -38,23 +39,36 @@ reviewed separately in PR #31; accepted handoff/integration remains pending.
 
 `ports.py` contains **GPU-004 consumption interfaces**, not an implementation of
 GPU-002 persistence. [TV2 ACK_WITH_ACTIONS on `f7d3c0d`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6388130749)
-confirmed these ports and service usage; they remain unchanged. This is not a
-delivered adapter or PostgreSQL Listing test PASS. TV3 also
+confirmed these ports and service usage; they remain unchanged. The PostgreSQL
+adapter is now delivered by merged #31; its availability is distinct from
+mounting it in the application. TV3 also
 [confirmed the Auth connection](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6389075737).
 
 | Owner | Required implementation / evidence |
 |---|---|
-| GPU-002 / TV2 owner, TV4 delegated R1 | R1 stays in separate [PR #31](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31), now `48c88b9` after documentation-only main sync. [Versioned handoff](https://github.com/SE2026-BC-04/gpu-resource-marketplace/blob/48c88b97bc9eff05cec0dd0e54eb123b3d761db6/docs/development/handoffs/GPU-004_R1_postgres_handoff.md). Runtime/migrations/tests are identical to `6594c41`: [TV2 migration/DDL/ACL/round-trip ACK](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#issuecomment-6613651798), [owner P1/P2 resolution](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#pullrequestreview-5757960714), [TV5 ACK_WITH_ACTIONS](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31#issuecomment-6620778491). Preserve each original SHA/scope; no duplicate domain ACK is needed for the NO_IMPACT docs sync. Human L2 reviews and integration actions remain open; no R1 DB code is in #17 |
+| GPU-002 / TV2 owner, TV4 delegated R1 | [#31 MERGED](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31) by the lead as `7fd7dea`, original HEAD `48c88b9`. R1 prerequisite is satisfied per the two-track owner decision; source/migration/tests are consumed unchanged through main. [R1 handoff](../../../../docs/development/handoffs/GPU-004_R1_postgres_handoff.md). Preserve original TV2/TV5 review scopes; TV2 re-ACK is needed only if a meaningful DB interface change occurs. A new post-merge bot note on original DB session identity is recorded separately for lead/TV2 follow-up |
 | GPU-003 / TV3 + TV2 | Canonical principal dependency is consumed; PostgreSQL AccountReader #25 is merged/available. Provisioning, production AuthService wiring and shared-shell session integration are still pending |
 | Leader | Shared AuthService/engine/session/JWT-secret configuration, router registration in `api/app.py`, frontend shell mounting, cursor-key injection, request correlation and audit integration |
 | TV2/TV3/leader | Resolution of the documented Auth sync/provisioning gates and applicable D1–D12 decisions/ACKs |
 
-The production `api/app.py` and frontend `App.tsx` are intentionally not changed:
-their ownership is shared and required DB adapters/configuration are absent. The
-merged GPU-003 Login-first shell remains the default screen, without Listings.
+The production `api/app.py` and frontend `ui/App.tsx` are shared-boundary work
+on #39. Required persistence code is available, but runtime composition/config
+and mounted acceptance are pending. The Login-first shell remains the default screen.
 Do not mount test doubles,
 accept a user/role header as authentication, or use a privileged DB connection as
-a substitute for the missing runtime adapters.
+a substitute for the approved restricted runtime composition.
+
+## Two-track acceptance
+
+| Track | Required gate |
+|---|---|
+| Stage 1 / #17 core/API/UI | Current-main sync retaining merged R1/D7, one Alembic head, current-HEAD tests/CI, TV3 Auth-principal and TV5 Listing–Jobs scoped ACKs, two independent human L2 reviews, explicit lead merge authorization. Result: CORE/UI INTEGRATION-READY, not full Phase 1D completion |
+| Stage 2 / lead-owned #39 | Verify Stage A Auth first; after #17 merges consume latest main, wire real restricted API sessions/UoW, shared Auth, separate cursor key, request-ID/audit, backend router and UI. Then real PostgreSQL HTTP/business/browser acceptance and affected integration ACKs/reviews |
+
+R2 shared mounting and R3 real PostgreSQL/browser tests are not #17 Stage 1
+merge blockers under the recorded decision. Unavailable Jobs/Manager races
+remain BLOCKED/NOT_RUN until real implementations exist. Do not deploy or mark
+full GPU-004 accepted from a core/UI merge alone.
 
 ### Auth decision tracking
 
