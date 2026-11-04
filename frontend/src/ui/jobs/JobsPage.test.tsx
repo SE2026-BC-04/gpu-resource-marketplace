@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AuthUser, UserRole } from "../../api/auth";
@@ -342,11 +342,17 @@ describe("GPU-005 Jobs frontend foundation", () => {
     await waitFor(() => expect(selectedB).toHaveAttribute("aria-current", "true"));
     const detailB = await screen.findByRole("region", { name: "Chi tiết công việc" });
     expect(await within(detailB).findByText(JOB_B)).toBeInTheDocument();
-    reconciliationA.resolve(job("RUNNING", JOB_A));
+    await act(async () => {
+      reconciliationA.resolve(job("RUNNING", JOB_A));
+      await reconciliationA.promise;
+    });
 
-    await waitFor(() => expect(within(screen.getByRole("region", { name: "Chi tiết công việc" })).getByText(JOB_B)).toBeInTheDocument());
-    expect(within(screen.getByRole("region", { name: "Chi tiết công việc" })).queryByText("Đang chạy")).not.toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "Chi tiết công việc" })).getByRole("button", { name: "Hủy công việc" })).toBeEnabled();
+    const currentDetailB = within(screen.getByRole("region", { name: "Chi tiết công việc" }));
+    expect(currentDetailB.getByText(JOB_B)).toBeInTheDocument();
+    expect(currentDetailB.queryByText(JOB_A)).not.toBeInTheDocument();
+    expect(currentDetailB.getByRole("button", { name: "Hủy công việc" })).toBeEnabled();
+    expect(currentDetailB.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: new RegExp(JOB_B) })).toHaveAttribute("aria-current", "true");
     expect(api.cancelJob).toHaveBeenCalledTimes(1);
   });
 
@@ -370,12 +376,74 @@ describe("GPU-005 Jobs frontend foundation", () => {
     await waitFor(() => expect(selectedB).toHaveAttribute("aria-current", "true"));
     const detailB = await screen.findByRole("region", { name: "Chi tiết công việc" });
     expect(await within(detailB).findByText(JOB_B)).toBeInTheDocument();
-    reconciliationA.reject(new JobsApiError("DEPENDENCY_UNAVAILABLE", 503));
+    await act(async () => {
+      reconciliationA.reject(new JobsApiError("DEPENDENCY_UNAVAILABLE", 503));
+      await reconciliationA.promise.catch(() => undefined);
+    });
 
-    await waitFor(() => expect(within(screen.getByRole("region", { name: "Chi tiết công việc" })).getByText(JOB_B)).toBeInTheDocument());
-    expect(within(screen.getByRole("region", { name: "Chi tiết công việc" })).queryByRole("alert")).not.toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "Chi tiết công việc" })).getByRole("button", { name: "Hủy công việc" })).toBeEnabled();
+    const currentDetailB = within(screen.getByRole("region", { name: "Chi tiết công việc" }));
+    expect(currentDetailB.getByText(JOB_B)).toBeInTheDocument();
+    expect(currentDetailB.queryByText(JOB_A)).not.toBeInTheDocument();
+    expect(currentDetailB.queryByRole("alert")).not.toBeInTheDocument();
+    expect(currentDetailB.getByRole("button", { name: "Hủy công việc" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: new RegExp(JOB_B) })).toHaveAttribute("aria-current", "true");
     expect(api.cancelJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("P2-03D starts a fresh A detail request after A to B to A and ignores old reconciliation", async () => {
+    const reconciliationA = deferred<JobResponse>();
+    const currentDetailA = deferred<JobResponse>();
+    let aReads = 0;
+    const getJob = vi.fn((id: string) => {
+      if (id === JOB_A) {
+        aReads += 1;
+        if (aReads === 1) return Promise.resolve(job("QUEUED", JOB_A));
+        if (aReads === 2) return reconciliationA.promise;
+        return currentDetailA.promise;
+      }
+      return Promise.resolve(job("QUEUED", JOB_B));
+    });
+    const api = setup("CLIENT", {
+      listJobs: vi.fn().mockResolvedValue({ items: [job("QUEUED", JOB_A), job("QUEUED", JOB_B)], next_cursor: null }),
+      getJob,
+      cancelJob: vi.fn().mockRejectedValue(new JobsApiError("JOB_NOT_CANCELLABLE", 409)),
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(JOB_A) }));
+    const initialDetailA = await screen.findByRole("region", { name: "Chi tiết công việc" });
+    expect(await within(initialDetailA).findByText(JOB_A)).toBeInTheDocument();
+    fireEvent.click(within(initialDetailA).getByRole("button", { name: "Hủy công việc" }));
+    await waitFor(() => expect(getJob).toHaveBeenCalledTimes(2));
+    expect(getJob).toHaveBeenLastCalledWith(JOB_A);
+
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(JOB_B) }));
+    const detailB = await screen.findByRole("region", { name: "Chi tiết công việc" });
+    expect(await within(detailB).findByText(JOB_B)).toBeInTheDocument();
+    expect(within(detailB).getByRole("button", { name: "Hủy công việc" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(JOB_A) }));
+    await waitFor(() => expect(getJob).toHaveBeenCalledTimes(4));
+    expect(screen.getByText("Đang tải chi tiết…")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Chi tiết công việc" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      currentDetailA.resolve(job("RUNNING", JOB_A));
+      await currentDetailA.promise;
+    });
+    const freshDetailA = within(screen.getByRole("region", { name: "Chi tiết công việc" }));
+    expect(freshDetailA.getByText(JOB_A)).toBeInTheDocument();
+    expect(freshDetailA.getByRole("status")).toHaveTextContent("Đang chạy");
+    expect(freshDetailA.queryByRole("button", { name: "Hủy công việc" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      reconciliationA.resolve(job("QUEUED", JOB_A));
+      await reconciliationA.promise;
+    });
+    expect(freshDetailA.getByText(JOB_A)).toBeInTheDocument();
+    expect(freshDetailA.getByRole("status")).toHaveTextContent("Đang chạy");
+    expect(freshDetailA.queryByRole("button", { name: "Hủy công việc" })).not.toBeInTheDocument();
+    expect(api.cancelJob).toHaveBeenCalledTimes(1);
+    expect(getJob).toHaveBeenCalledTimes(4);
   });
 
   it("prevents a double submit and retains the same key and payload after an uncertain response", async () => {
