@@ -1,10 +1,13 @@
-"""Safe PostgreSQL support for future TX-CANCEL integration tests.
+"""PostgreSQL support for TX-CANCEL SQL-level and adapter integration tests.
 
-Call these helpers only with the repository's ``baseline_database`` Engine
-fixture. That fixture depends on ``test_database``/``db_engine`` and therefore
-the disposable-cluster opt-in and verification guards in ``db_safety.py``.
-Seed helpers commit on purpose so independent PostgreSQL connections can see
-the fixtures; teardown removes only the generated rows.
+Use only an Engine from verified disposable PostgreSQL fixtures. The current
+SQL-level tests use ``migrated_database_with_teardown``, which depends on
+``migrated_database`` and the ``db_safety.py`` cluster/database guards.
+Seeding intentionally commits so independent PostgreSQL connections can
+observe fixtures. Teardown calls guarded ``reset_schema()`` to drop and
+recreate the disposable ``public`` schema, **not** just delete seed rows.
+Schema reset does not undo cluster-level role or credential changes.
+Never use these helpers with a persistent or shared database.
 """
 
 from __future__ import annotations
@@ -72,10 +75,11 @@ def seed_committed_job(
 ) -> CommittedJobFixture:
     """Seed a committed Client/Worker/Listing/Job using existing schema helpers.
 
-    ``engine`` must come from ``baseline_database``. The database-clock read and
-    all rows are in one committed setup unit. Independent test connections can
-    therefore observe these fixtures (unlike seeds made through rollback-only
-    ``conn``).
+    ``engine`` must come from a verified disposable migrated database fixture
+    with guarded schema-reset teardown (currently ``migrated_database_with_teardown``).
+    The database-clock read and rows are committed together, so independent
+    connections can observe them, unlike seeds made through rollback-only
+    ``conn``. Teardown resets the disposable public schema, not just these rows.
     """
     if listing_status not in LISTING_STATES:
         raise ValueError(f"Unsupported Listing fixture status: {listing_status}")
