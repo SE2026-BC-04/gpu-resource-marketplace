@@ -393,21 +393,29 @@ def test_native_api_login_cancels_with_default_allowlist_and_restricted_grants(
     The disposable cluster's owner gives the bootstrap login a throwaway password, then the
     adapter connects as that login with its production defaults. Persisted-state invariants
     must match the SET ROLE tests: only the Job lifecycle changes.
+
+    ``reset_schema()`` only recreates the ``public`` schema, so it does not undo a role
+    password. The ``finally`` block therefore replaces the throwaway password with another
+    random value that is never recorded, which restores the bootstrap state (a LOGIN role
+    whose password nobody knows) even when the test fails. The role stays LOGIN, exactly as
+    ``cluster_roles`` created it, so other tests are not affected.
     """
     fixture = _seed(cancel_postgres)
     before = read_persisted_snapshot(cancel_postgres, fixture)
-    password = uuid.uuid4().hex  # throwaway; the cluster is disposable and reset after the test
-    with cancel_postgres.begin() as connection:
-        connection.execute(text(f"ALTER ROLE \"{API_ROLE}\" LOGIN PASSWORD '{password}'"))
-    native_url = make_url(test_database.url).set(username=API_ROLE, password=password)
-    engine = create_engine(
-        native_url.render_as_string(hide_password=False),
-        connect_args={"application_name": "gpm-cancel-native-login", "connect_timeout": 5},
-    )
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    uow = PostgresJobCancelUnitOfWork(sessions)  # production defaults: no allowed_session_users
-    service = JobCancelService(locator_reader=PostgresJobLocatorReader(sessions), uow=uow)
+    password = uuid.uuid4().hex  # throwaway; replaced with an unknown random value in `finally`
+    engine: Engine | None = None
     try:
+        with cancel_postgres.begin() as connection:
+            connection.execute(text(f"ALTER ROLE \"{API_ROLE}\" LOGIN PASSWORD '{password}'"))
+        native_url = make_url(test_database.url).set(username=API_ROLE, password=password)
+        engine = create_engine(
+            native_url.render_as_string(hide_password=False),
+            connect_args={"application_name": "gpm-cancel-native-login", "connect_timeout": 5},
+        )
+        sessions = sessionmaker(engine, expire_on_commit=False)
+        uow = PostgresJobCancelUnitOfWork(sessions)  # production defaults: no allowed_session_users
+        service = JobCancelService(locator_reader=PostgresJobLocatorReader(sessions), uow=uow)
+
         with uow.transaction(principal=_owner(fixture)) as tx:
             identity = tx._session.execute(  # type: ignore[union-attr]
                 text("SELECT current_user, session_user")
@@ -424,7 +432,12 @@ def test_native_api_login_cancels_with_default_allowlist_and_restricted_grants(
         assert_non_job_side_effects_unchanged(before, after)
         assert engine.pool.checkedout() == 0  # type: ignore[attr-defined]
     finally:
-        engine.dispose()
+        if engine is not None:
+            engine.dispose()
+        with cancel_postgres.begin() as connection:
+            connection.execute(
+                text(f"ALTER ROLE \"{API_ROLE}\" PASSWORD '{uuid.uuid4().hex}'")
+            )
 
 
 # -- PG-CANCEL-10 / 11 / 12: DB clock and concurrency ----------------------------------
