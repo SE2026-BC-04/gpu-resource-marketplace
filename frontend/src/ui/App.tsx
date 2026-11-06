@@ -4,6 +4,7 @@ import type { SessionStore } from "../api/session";
 import { AccountPanel } from "./auth/AccountPanel";
 import { LoginForm } from "./auth/LoginForm";
 import { SessionListingsPage } from "./listings/SessionListingsPage";
+import { SessionJobsPage } from "./jobs/SessionJobsPage";
 import "./auth/auth.css";
 
 export function App({ session }: { session: SessionStore }) {
@@ -23,6 +24,7 @@ export function App({ session }: { session: SessionStore }) {
         <span className="status"><span aria-hidden="true" /> Development preview</span>
       </section>
       {state.status === "signed-in" && <SessionListingsPage session={session} />}
+      {state.status === "signed-in" && <SessionJobsPage session={session} />}
     </main>
   );
 }

@@ -72,7 +72,7 @@ describe("App shell with Login", () => {
     consoleSpies.forEach((spy) => expect(spy).not.toHaveBeenCalled());
   });
 
-  it("mounts Listings with the same volatile SessionStore after sign-in", async () => {
+  it("mounts Listings and Jobs with the same volatile SessionStore after sign-in", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ items: [], next_cursor: null }), {
         status: 200,
@@ -88,11 +88,19 @@ describe("App shell with Login", () => {
     fillAndSubmit(user.loginName);
 
     expect(await screen.findByRole("heading", { name: "GPU Listings" })).toBeInTheDocument();
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
-    const request = fetcher.mock.calls[0];
-    const headers = new Headers(request?.[1]?.headers);
-    expect(headers.get("Authorization")).toBe(`Bearer ${TOKEN}`);
-    expect(String(request?.[0])).toContain("/api/v1/gpu-listings?");
+    expect(await screen.findByRole("heading", { name: "My Jobs" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Gửi công việc" })).toBeInTheDocument();
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    const requests = fetcher.mock.calls;
+    const urls = requests.map(([input]) => String(input));
+    expect(urls.some((url) => url.includes("/api/v1/gpu-listings?"))).toBe(true);
+    expect(urls.some((url) => url.includes("/api/v1/jobs?"))).toBe(true);
+    for (const request of requests) {
+      const headers = new Headers(request[1]?.headers);
+      expect(headers.get("Authorization")).toBe(`Bearer ${TOKEN}`);
+      expect(request[1]?.cache).toBe("no-store");
+      expect(request[1]?.credentials).toBe("omit");
+    }
   });
 
   it("asks for both fields without calling the API", () => {
