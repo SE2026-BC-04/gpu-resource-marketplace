@@ -8,13 +8,13 @@ This file records integration progress and evidence. It does not replace approve
 
 | Item | State |
 |---|---|
-| Local branch / HEAD | `feat/gpu-int-01-runtime-integration` / `267168d5028fe199a908b7e5d17f07c598823c12` |
+| Local branch / HEAD | `feat/gpu-int-01-runtime-integration` / `bdc7c63670f70db19d9bc5c6bed0df39b945109f` (Compose smoke fix is now being prepared on this same branch) |
 | Current main baseline | `1d8b1b2c52b759d99a072c3d0d889b375083a8c4` (main branch tip confirmed locally and through GitHub commit search) |
 | Local integration merge | `267168d` merges current `main` into the existing integration branch; no new branch was created. |
-| PR #39 | Open, Draft; remote head remains `5619ef08d617e10d73a0ce13fbfa28c52d555083`. GitHub open-PR search found #39 as the only open PR in this repository. |
+| PR #39 | Open, Draft; pushed head `bdc7c63670f70db19d9bc5c6bed0df39b945109f`. GitHub open-PR search found #39 as the only open PR in this repository. |
 | GitHub fetch | Initial sandboxed fetch could not connect to `github.com:443`; authorized network fetch then succeeded. Current `main` and PR branch tracking refs were fetched before staging. |
-| Local edits | Auth/CORS remediation carried forward; Listings backend/frontend integration and this progress update are uncommitted. Nothing has been committed or pushed during this work. |
-| Git gate | Do not commit/push or update PR metadata until the owner authorizes those GitHub write operations. Do not merge PR #39. |
+| Local edits | Auth/CORS and Listings integration are pushed as `bdc7c63`. A Compose smoke environment-isolation fix and its regression test are local and uncommitted. |
+| Git gate | Owner authorized push to this branch. Do not push `main`, update PR metadata, approve, or merge PR #39. |
 
 ## Upstream PRs on current main
 
@@ -73,12 +73,12 @@ Only work present on `main` is consumed. No unmerged member branch has been merg
 | Docker Compose config validation | **NOT_RUN** | Docker CLI is not found on PATH; checks for the standard Docker Desktop executable locations also found none. Attempted `docker compose --env-file .env.example config --quiet`; PowerShell reported `docker` not recognized (exit 1). |
 | Compose smoke / PostgreSQL HTTP and role checks | **NOT_RUN** | Docker CLI is unavailable. No claim is made for real PostgreSQL Listing or Compose runtime behavior. |
 | `git diff --check` | **PASS** | Exit 0 after the implementation and progress update. |
-| GitHub Actions on current local HEAD | **NOT_RUN** | This HEAD is not pushed. Earlier Actions runs on `5619ef0` do not verify these local changes. |
+| GitHub Actions on pushed `bdc7c63` | **PARTIAL / compose failed** | Run [#42249960600](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42249960600): `python` and `frontend` passed; `compose` failed at the new separate-cursor-key assertion. Docker Compose inherited CI process variables ahead of the smoke project's `--env-file`, so the smoke config saw the workflow-level key instead of its disposable key. A fix now clears process variables defined in the isolated env file; root Compose topology/environment regression: **4 passed**; full backend regression: **778 passed, 346 skipped**. The fix is not yet pushed or verified by Actions. |
 
 ## Next actions and blockers
 
 1. Make Docker CLI/runtime available, then run Compose validation and isolated Compose smoke, including real PostgreSQL Listing paths and role boundaries.
 2. Obtain disposable PostgreSQL evidence for Auth and Listings; keep persistent user databases untouched.
 3. Wait for an approved PostgreSQL JobReader and TX-SUBMIT adapter/reference-vector implementation before wiring Jobs stages.
-4. After owner authorization to push, update PR #39 on the same branch, wait for CI, request renewed TV2/TV4/TV5 compatibility ACKs, and obtain one independent human L1 review.
+4. Push the local Compose smoke fix to PR #39 on this same branch and wait for CI; then request renewed TV2/TV4/TV5 compatibility ACKs and obtain one independent human L1 review.
 5. Keep PR #39 Draft and do not merge while Stages B–E are blocked or required evidence/review gates are pending.

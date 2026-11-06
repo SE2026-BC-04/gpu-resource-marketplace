@@ -1,7 +1,9 @@
 from pathlib import Path
+import subprocess
 
 import yaml
 
+from tools import compose_smoke
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -54,3 +56,29 @@ def test_frontend_compose_builds_production_bundle_for_selected_api_host_port() 
     assert 'CMD ["npm", "run", "dev"' not in dockerfile
     assert "VITE_API_BASE_URL=${VITE_API_BASE_URL}" in dockerfile
     assert "file = indexFile;" in production_server
+
+
+def test_smoke_env_file_is_not_overridden_by_ambient_process_values(
+    tmp_path: Path, monkeypatch
+) -> None:
+    env_file = tmp_path / "smoke.env"
+    env_file.write_text(
+        "GPU_MARKETPLACE_LISTING_CURSOR_SECRET=smoke-cursor-key\n"
+        "POSTGRES_HOST_PORT=45678\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GPU_MARKETPLACE_LISTING_CURSOR_SECRET", "ambient-ci-key")
+    monkeypatch.setenv("POSTGRES_HOST_PORT", "5432")
+    captured: dict[str, object] = {}
+
+    def capture_run(command, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(compose_smoke.subprocess, "run", capture_run)
+    compose_smoke.compose(env_file, "isolated-smoke", "config")
+
+    child_env = captured["env"]
+    assert isinstance(child_env, dict)
+    assert "GPU_MARKETPLACE_LISTING_CURSOR_SECRET" not in child_env
+    assert "POSTGRES_HOST_PORT" not in child_env

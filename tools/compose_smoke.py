@@ -32,6 +32,12 @@ def compose(
     process_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     child_env = os.environ.copy()
+    # Docker Compose gives the caller's process environment precedence over --env-file.
+    # Clear keys defined by the isolated smoke file so ambient CI/local secrets or port
+    # overrides cannot leak into the smoke project. Explicit per-command overrides are
+    # applied last (for example the disposable owner DSN used only by Alembic).
+    for name in read_env_values(env_file):
+        child_env.pop(name, None)
     if process_env:
         child_env.update(process_env)
     return subprocess.run(
