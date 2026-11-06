@@ -9,13 +9,14 @@ This file records integration progress and evidence. It does not replace approve
 | Item | State |
 |---|---|
 | Local branch | `feat/gpu-int-01-runtime-integration` (existing shared integration branch; no additional branch created) |
-| Integration commits | `b457c0f` — backend/runtime wiring and tests; `ccdfce6` — Jobs frontend/shared-session integration; `a3f9d26` — progress snapshot; `deb352c` — fix random-Job-ID reference assertion |
-| Local HEAD before this progress update | `deb352c` |
-| PR #39 remote head before this update | `a3f9d261da060c07ef3616de598fb37da6e45417` |
+| Integration commits | `b457c0f` — backend/runtime wiring and tests; `ccdfce6` — Jobs frontend/shared-session integration; `a3f9d26` — initial progress snapshot; `deb352c` — fix random-Job-ID reference assertion; `ce6b821` — CI evidence snapshot |
+| Local HEAD before this progress update | `ce6b821` |
+| PR #39 remote head before this update | `ce6b8218031adf1962a50747618027a9cea76514` |
 | Local base before this work | `46e976356b83c2384f359f35b08262dfd2970f0b` |
 | Main baseline | `1d8b1b2c52b759d99a072c3d0d889b375083a8c4` |
-| PR #39 before this work | Open, Draft, base `main`, head `46e976356b83c2384f359f35b08262dfd2970f0b`; rechecked through GitHub on 2026-11-07 |
-| Working tree | Backend/frontend changes and the PostgreSQL assertion fix are committed locally; this progress update is not yet committed/pushed. |
+| PR #39 before the integration extension | Open, Draft, base `main`, head `46e976356b83c2384f359f35b08262dfd2970f0b`; rechecked through GitHub on 2026-11-07 |
+| PR #39 current state before this progress update | Open, Draft, base `main`, head `ce6b8218031adf1962a50747618027a9cea76514`; GitHub Actions run #42267396758 has all 3 jobs successful |
+| Working tree | Backend/frontend changes, test fix, and the prior progress snapshot are pushed. This post-CI progress update is not yet committed/pushed. |
 | Git gate | Owner authorized work on this branch and PR #39. Do not push `main`, force-push, approve, mark Ready, or merge. |
 
 ## Upstream dependencies
@@ -37,11 +38,11 @@ Only code already merged to `main` was integrated. No unmerged member branch was
 
 | Stage | Status | Evidence / blocker |
 |---|---|---|
-| A — Auth runtime | **IMPLEMENTED** | `create_app()` wires one AuthService, PostgreSQL AccountReader, configured JWT codec, one Scrypt hasher, shared principal dependency, and engine lifespan. The real HTTP/PostgreSQL E2E test passed on GitHub Actions run #42266303614. |
-| B — Jobs read | **IMPLEMENTED** | `PostgresJobReader` enforces Client/Worker/Admin visibility in SQL; all three PostgreSQL reader tests passed in run #42266303614. |
-| C — Listings | **IMPLEMENTED** | Production Listing UoW/router and `SessionListingsPage` use the shared Auth principal and SessionStore. Worker create + Client browse passed in the real HTTP/PostgreSQL E2E test in run #42266303614. |
-| D — Jobs submit/view/cancel | **IMPLEMENTED** | HTTP E2E Submit → View → Cancel → PostgreSQL verification passed in run #42266303614. One separate TX-SUBMIT adapter assertion failed because it expected the fixed-vector seed for a randomly generated Job ID; corrected in local commit `deb352c`, CI rerun pending. |
-| E — full Phase 1 acceptance | **BLOCKED** | Browser E2E has not run. The first new-head Python job also had the adapter assertion failure above; the fix is committed locally and awaits CI. No full Phase 1 E2E PASS is claimed. |
+| A — Auth runtime | **IMPLEMENTED** | `create_app()` wires one AuthService, PostgreSQL AccountReader, configured JWT codec, one Scrypt hasher, shared principal dependency, and engine lifespan. Real HTTP/PostgreSQL E2E passed on run #42267396758. |
+| B — Jobs read | **IMPLEMENTED** | `PostgresJobReader` enforces Client/Worker/Admin visibility in SQL; PostgreSQL reader tests passed in run #42267396758. |
+| C — Listings | **IMPLEMENTED** | Production Listing UoW/router and `SessionListingsPage` use the shared Auth principal and SessionStore. Worker create + Client browse passed in the real HTTP/PostgreSQL E2E test. |
+| D — Jobs submit/view/cancel | **IMPLEMENTED** | TX-SUBMIT/Cancel/Job reads and PostgreSQL verification passed in the real HTTP E2E. The first CI run exposed an incorrect fixed-seed assertion for a random Job ID; it was fixed in `deb352c`, and the full PostgreSQL suite then passed. |
+| E — full Phase 1 acceptance | **BLOCKED** | HTTP E2E and CI pass. Browser E2E has not run; the current CI workflow has no browser automation. No full Phase 1 E2E PASS is claimed. |
 
 ## Decisions and compatibility gates
 
@@ -67,7 +68,8 @@ Commands used existing local venvs directly because `uv` is not on PATH. Docker 
 | Browser + real HTTP + PostgreSQL acceptance | **NOT_RUN** | No local browser E2E or disposable database was run. |
 | `git diff --check` | **PASS** | Exit 0; Git only warns that an existing test file with LF will convert to CRLF on a future checkout write. |
 | Secret scan | **PASS** | Changed-file scan found no private-key block, GitHub token, or AWS access-key pattern. `.env.example` contains blank signing keys and local-only sample DB credentials. |
-| GitHub Actions on pushed `a3f9d26` | **FAIL — 1 Python assertion; Frontend and Compose PASS** | Run [#42266303614](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42266303614): 1,152 passed / 1 failed in Python. The network HTTP E2E test passed using real Auth, Listing, Jobs, native `gpm_api_app`, and disposable PostgreSQL; the only failure was the test's fixed seed expectation for a DB-generated Job ID. Frontend and Compose jobs passed. Corrected in local commit `deb352c`; rerun is pending push. |
+| GitHub Actions on pushed `ce6b821` | **PASS — all 3 jobs** | Run [#42267396758](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42267396758): Python **PASS** (backend 1,153 passed; Simulator 2 passed), Frontend **PASS** (Vitest/typecheck/build), Compose **PASS** (config/smoke). PostgreSQL submit/cancel adapter tests and the real HTTP + disposable PostgreSQL E2E test passed. |
+| Earlier GitHub Actions on `a3f9d26` | **FAIL — corrected and rerun** | Run [#42266303614](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42266303614): 1,152 passed / 1 failed in Python; Frontend and Compose passed. The failed adapter assertion assumed a fixed seed for a DB-generated random Job ID; corrected in `deb352c`. Run #42267396758 on `ce6b821` then passed all jobs. |
 | Earlier CI on `46e9763` | **PASS, older HEAD only** | Run [#42252304145](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42252304145) passed Python, Frontend, and Compose before this integration diff; it is not evidence for new changes. |
 
 ## Changed implementation scope
@@ -77,8 +79,6 @@ Commands used existing local venvs directly because `uv` is not on PATH. Docker 
 
 ## Next actions
 
-1. Commit this progress update, then push the local assertion fix and progress commits only to `feat/gpu-int-01-runtime-integration`; keep PR #39 Draft.
-2. Wait for and inspect all GitHub Actions on the new SHA, including the safety-marked disposable PostgreSQL adapter tests and Compose smoke.
-3. Ask TV2/TV3/TV4 and the Phase 2 owner to renew the applicable compatibility ACKs on the new SHA.
-4. Obtain the required independent human review and address review findings; ACKs do not count as PR approval.
-5. Execute a successful browser → HTTP → PostgreSQL flow before declaring Stage E verified. No merge until all required evidence and review gates are complete.
+1. Obtain the owner's decision on adding a test-only Playwright/browser toolchain; the repository CI currently has no browser automation package or runner.
+2. Keep PR #39 Draft. Request renewed TV2/TV3/TV4 compatibility ACKs and an independent human review on the final pushed HEAD.
+3. Run browser → HTTP → PostgreSQL acceptance after the browser-toolchain decision. No merge until all required evidence and review gates are complete.
