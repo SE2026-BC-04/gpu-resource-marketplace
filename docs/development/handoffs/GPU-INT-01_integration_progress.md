@@ -9,15 +9,15 @@ This file records integration progress and evidence. It does not replace approve
 | Item | State |
 |---|---|
 | Local branch | `feat/gpu-int-01-runtime-integration` (existing shared integration branch; no additional branch created) |
-| Key integration commits | `b457c0f` — backend/runtime wiring and tests; `ccdfce6` — Jobs frontend/shared-session integration; `a3f9d26` — initial progress snapshot; `deb352c` — fix random-Job-ID reference assertion; `ce6b821` — implementation CI evidence snapshot |
-| Implementation HEAD whose CI evidence is summarized here | `ce6b8218031adf1962a50747618027a9cea76514` |
-| PR #39 head when implementation CI evidence was collected | `ce6b8218031adf1962a50747618027a9cea76514` |
+| Key integration commits | `b457c0f` — runtime wiring; `ccdfce6` — Jobs frontend; `deb352c` — adapter assertion fix; `ce6b821` — first green implementation CI; `1255831` — Playwright browser E2E and CI setup |
+| Latest implementation HEAD with browser E2E evidence | `125583170829421d5ea5be5022465f715a5b3d2a` |
+| CI run for the browser E2E HEAD | [#42274038230](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42274038230) — all 3 jobs passed |
 | Local base before this work | `46e976356b83c2384f359f35b08262dfd2970f0b` |
 | Main baseline | `1d8b1b2c52b759d99a072c3d0d889b375083a8c4` |
 | PR #39 before the integration extension | Open, Draft, base `main`, head `46e976356b83c2384f359f35b08262dfd2970f0b`; rechecked through GitHub on 2026-11-07 |
-| Latest pushed HEAD before Playwright addition | `dd49f5c7f3acda8731d05e43ce546838fed449d0`; run #42269027796 passed Python, Frontend, and Compose jobs |
-| PR #39 state verified before Playwright addition | Open, Draft, base `main`, head `dd49f5c7f3acda8731d05e43ce546838fed449d0`; not merged |
-| Worktree before Playwright addition | Clean at `dd49f5c7f3acda8731d05e43ce546838fed449d0`; Playwright changes are being added to this same branch |
+| Latest pushed HEAD before this progress update | `125583170829421d5ea5be5022465f715a5b3d2a`; Actions run #42274038230 passed all 3 jobs |
+| PR #39 state verified before this progress update | Open, Draft, base `main`, head `125583170829421d5ea5be5022465f715a5b3d2a`; not merged |
+| Worktree before this progress update | Clean at `125583170829421d5ea5be5022465f715a5b3d2a`; this evidence update is being added to the same branch |
 | Git gate | Owner authorized work on this branch and PR #39. Do not push `main`, force-push, approve, mark Ready, or merge. |
 
 ## Upstream dependencies
@@ -43,7 +43,7 @@ Only code already merged to `main` was integrated. No unmerged member branch was
 | B — Jobs read | **IMPLEMENTED** | `PostgresJobReader` enforces Client/Worker/Admin visibility in SQL; PostgreSQL reader tests passed in run #42267396758. |
 | C — Listings | **IMPLEMENTED** | Production Listing UoW/router and `SessionListingsPage` use the shared Auth principal and SessionStore. Worker create + Client browse passed in the real HTTP/PostgreSQL E2E test. |
 | D — Jobs submit/view/cancel | **IMPLEMENTED** | TX-SUBMIT/Cancel/Job reads and PostgreSQL verification passed in the real HTTP E2E. The first CI run exposed an incorrect fixed-seed assertion for a random Job ID; it was fixed in `deb352c`, and the full PostgreSQL suite then passed. |
-| E — full Phase 1 acceptance | **IN_PROGRESS** | Added a Chromium Playwright test for production frontend → Auth/Listings/Jobs API → disposable PostgreSQL, with persisted Job/reference assertions. Local execution is skipped by the disposable-DB safety guard; CI verification is pending. No full Phase 1 E2E PASS is claimed yet. |
+| E — full Phase 1 acceptance | **VERIFIED** | On `125583170829421d5ea5be5022465f715a5b3d2a`, GitHub Actions run #42274038230 passed the production frontend Chromium flow through Auth/Listings/Jobs and disposable PostgreSQL. The browser creates a Listing, submits/views/cancels a Job, and PostgreSQL confirms the final Job and protected reference. All 3 CI jobs passed. Human review and cross-phase ACKs remain separate merge gates. |
 
 ## Decisions and compatibility gates
 
@@ -74,6 +74,7 @@ Local backend and Simulator commands used the repository venvs because `uv` and 
 | Secret scan | **PASS** | Changed-file scan found no private-key block, GitHub token, or AWS access-key pattern. Test credentials are synthetic fixture values; `.env.example` contains blank signing keys and local-only sample DB credentials. |
 | GitHub Actions on pushed `ce6b821` | **PASS — all 3 jobs** | Run [#42267396758](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42267396758): Python **PASS** (backend 1,153 passed; Simulator 2 passed), Frontend **PASS** (Vitest/typecheck/build), Compose **PASS** (config/smoke). PostgreSQL submit/cancel adapter tests and the real HTTP + disposable PostgreSQL E2E test passed. |
 | GitHub Actions on pushed `6dff518` | **PASS — all 3 jobs** | Run [#42268439328](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42268439328): Python, Frontend, and Compose jobs all completed successfully after the progress-documentation update. |
+| GitHub Actions on browser E2E HEAD `1255831` | **PASS — all 3 jobs** | Run [#42274038230](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42274038230): Python **PASS** (1,153 passed; Simulator 2 passed), Frontend **PASS**, Compose **PASS**. Python logs show Chromium/Playwright installed and `test_phase1_runtime_http_postgres_e2e.py` passed against the safety-marked disposable PostgreSQL cluster; this includes the Worker → Client browser flow and DB assertions. |
 | Earlier GitHub Actions on `a3f9d26` | **FAIL — corrected and rerun** | Run [#42266303614](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42266303614): 1,152 passed / 1 failed in Python; Frontend and Compose passed. The failed adapter assertion assumed a fixed seed for a DB-generated random Job ID; corrected in `deb352c`. Run #42267396758 on `ce6b821` then passed all jobs. |
 | Earlier CI on `46e9763` | **PASS, older HEAD only** | Run [#42252304145](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42252304145) passed Python, Frontend, and Compose before this integration diff; it is not evidence for new changes. |
 
@@ -84,6 +85,6 @@ Local backend and Simulator commands used the repository venvs because `uv` and 
 
 ## Next actions
 
-1. Push the Playwright test-only dependency, production frontend browser E2E, and CI browser setup to the existing integration branch; inspect the actual browser + HTTP + PostgreSQL result on that HEAD.
-2. Keep PR #39 Draft. Request renewed TV2/TV3/TV4 compatibility ACKs and an independent human review on the final pushed HEAD.
-3. No full Stage E PASS or merge until the browser test passes and all required compatibility/review gates are complete.
+1. Keep PR #39 Draft and obtain renewed TV2/TV3/TV4 compatibility ACKs plus one independent human review on the latest head.
+2. Address any review findings on this same branch and rerun CI; approvals for older SHAs do not carry over.
+3. Do not mark Ready or merge until the required review confirmations and applicable gates are complete.
