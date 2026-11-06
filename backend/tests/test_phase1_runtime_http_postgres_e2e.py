@@ -1,21 +1,23 @@
-"""Real HTTP Phase 1 happy path using the production app and disposable PostgreSQL.
+"""Exercise the production API and frontend against a disposable PostgreSQL database.
 
 The database fixtures refuse to run unless the target cluster is explicitly marked disposable.
 This test connects the app as the native ``gpm_api_app`` login, not an owner session or fake
-repository, and exercises Worker Login → Listing → Client Login → Submit/View/Cancel.
+repository, and verifies the Worker → Listing → Client → Job lifecycle through HTTP and a browser.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import httpx
@@ -27,11 +29,18 @@ from gpu_marketplace.common.db_roles import bootstrap_roles
 from gpu_marketplace.identity.passwords import ScryptPasswordHasher
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
+FRONTEND_ROOT = BACKEND_ROOT.parent / "frontend"
 API_LOGIN = "gpm_api_app"
 PASSWORD = "phase1-e2e-test-password"
 JWT_SECRET = "phase1-e2e-jwt-secret-32-bytes-minimum-value"
 LISTING_CURSOR_SECRET = "phase1-e2e-listing-cursor-secret-32-bytes"
 JOBS_CURSOR_SECRET = "phase1-e2e-jobs-cursor-secret-32-bytes"
+TEST_DATABASE_ENV_KEYS = (
+    "GPU_MARKETPLACE_TEST_DATABASE_URL",
+    "GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS",
+    "GPU_MARKETPLACE_TEST_CLUSTER_TOKEN",
+    "GPM_CI_PGPASSWORD",
+)
 
 
 def _free_loopback_port() -> int:
@@ -51,7 +60,7 @@ def _login(client: httpx.Client, name: str) -> tuple[str, dict[str, object]]:
     return body["access_token"], body["user"]
 
 
-def test_worker_client_job_lifecycle_over_http_and_native_runtime_role(
+def test_worker_client_job_lifecycle_over_http_browser_and_native_runtime_role(
     migrated_database_with_teardown: Engine,
     test_database,
 ) -> None:
@@ -120,6 +129,8 @@ def test_worker_client_job_lifecycle_over_http_and_native_runtime_role(
             connection.execute(text("SELECT seed_value FROM simulation_references LIMIT 1"))
 
     port = _free_loopback_port()
+    frontend_port = _free_loopback_port()
+    frontend_origin = f"http://127.0.0.1:{frontend_port}"
     process_environment = os.environ.copy()
     process_environment.update(
         {
@@ -129,11 +140,39 @@ def test_worker_client_job_lifecycle_over_http_and_native_runtime_role(
             "GPU_MARKETPLACE_JWT_SECRET": JWT_SECRET,
             "GPU_MARKETPLACE_LISTING_CURSOR_SECRET": LISTING_CURSOR_SECRET,
             "GPU_MARKETPLACE_JOBS_CURSOR_SECRET": JOBS_CURSOR_SECRET,
-            "GPU_MARKETPLACE_CORS_ORIGINS": '["http://127.0.0.1:5173"]',
+            "GPU_MARKETPLACE_CORS_ORIGINS": json.dumps([frontend_origin]),
         }
     )
+    for test_secret_name in TEST_DATABASE_ENV_KEYS:
+        process_environment.pop(test_secret_name, None)
     base_url = f"http://127.0.0.1:{port}"
-    with tempfile.TemporaryFile() as server_log:
+    node_binary = shutil.which("node")
+    assert node_binary is not None, "Node.js is required for the browser E2E test."
+    vite_cli = FRONTEND_ROOT / "node_modules" / "vite" / "bin" / "vite.js"
+    playwright_cli = FRONTEND_ROOT / "node_modules" / "@playwright" / "test" / "cli.js"
+    assert vite_cli.is_file(), "Install the frontend dependencies with npm ci before the PostgreSQL E2E test."
+    assert playwright_cli.is_file(), "Install @playwright/test with npm ci before the PostgreSQL E2E test."
+
+    frontend_environment = os.environ.copy()
+    for test_secret_name in TEST_DATABASE_ENV_KEYS:
+        frontend_environment.pop(test_secret_name, None)
+    frontend_environment["VITE_API_BASE_URL"] = base_url
+    build = subprocess.run(
+        [node_binary, str(vite_cli), "build"],
+        cwd=FRONTEND_ROOT,
+        env=frontend_environment,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert build.returncode == 0, (
+        "Production frontend build failed before browser E2E:\n"
+        f"{build.stdout}\n{build.stderr}"
+    )
+
+    frontend_process: subprocess.Popen[bytes] | None = None
+    with tempfile.TemporaryFile() as server_log, tempfile.TemporaryFile() as frontend_log:
         process = subprocess.Popen(
             [sys.executable, "-m", "gpu_marketplace.api"],
             cwd=BACKEND_ROOT,
@@ -228,20 +267,110 @@ def test_worker_client_job_lifecycle_over_http_and_native_runtime_role(
                 assert final.status_code == 200
                 assert final.json()["status"] == "CANCELLED"
 
+                frontend_url = frontend_origin
+                frontend_process = subprocess.Popen(
+                    [
+                        node_binary,
+                        str(vite_cli),
+                        "preview",
+                        "--host",
+                        "127.0.0.1",
+                        "--port",
+                        str(frontend_port),
+                        "--strictPort",
+                    ],
+                    cwd=FRONTEND_ROOT,
+                    env=frontend_environment,
+                    stdout=frontend_log,
+                    stderr=frontend_log,
+                )
+                frontend_deadline = time.monotonic() + 30
+                with httpx.Client(timeout=2.0, trust_env=False) as frontend_probe:
+                    while True:
+                        if frontend_process.poll() is not None:
+                            frontend_log.seek(0)
+                            details = frontend_log.read().decode("utf-8", errors="replace")
+                            raise AssertionError(
+                                "Production frontend preview exited before readiness "
+                                f"(exit={frontend_process.returncode}):\n{details}"
+                            )
+                        try:
+                            preview = frontend_probe.get(frontend_url)
+                            if preview.status_code == 200:
+                                break
+                        except httpx.HTTPError:
+                            pass
+                        if time.monotonic() >= frontend_deadline:
+                            raise AssertionError(
+                                "Production frontend preview did not become ready within 30 seconds"
+                            )
+                        time.sleep(0.25)
+
+                with tempfile.TemporaryDirectory(prefix="gpu-marketplace-browser-e2e-") as result_directory:
+                    browser_result_path = Path(result_directory) / "browser-result.json"
+                    browser_environment = os.environ.copy()
+                    for test_secret_name in TEST_DATABASE_ENV_KEYS:
+                        browser_environment.pop(test_secret_name, None)
+                    browser_environment.update(
+                        {
+                            "PHASE1_E2E_BASE_URL": frontend_url,
+                            "PHASE1_E2E_WORKER_LOGIN": worker_name,
+                            "PHASE1_E2E_CLIENT_LOGIN": client_name,
+                            "PHASE1_E2E_PASSWORD": PASSWORD,
+                            "PHASE1_E2E_RESULT_PATH": str(browser_result_path),
+                        }
+                    )
+                    browser_run = subprocess.run(
+                        [
+                            node_binary,
+                            str(playwright_cli),
+                            "test",
+                            "--config=playwright.config.ts",
+                            "e2e/phase1-runtime.spec.ts",
+                        ],
+                        cwd=FRONTEND_ROOT,
+                        env=browser_environment,
+                        capture_output=True,
+                        text=True,
+                        timeout=240,
+                        check=False,
+                    )
+                    assert browser_run.returncode == 0, (
+                        "Browser E2E failed "
+                        f"(exit={browser_run.returncode}):\n{browser_run.stdout}\n{browser_run.stderr}"
+                    )
+                    assert browser_result_path.is_file(), (
+                        "Browser E2E did not produce its database-verification result."
+                    )
+                    browser_result = json.loads(browser_result_path.read_text(encoding="utf-8"))
+                    assert browser_result["listingId"] != listing["id"]
+
             with owner_engine.connect() as connection:
                 rows = connection.execute(
                     text(
-                        "SELECT j.status, j.terminal_at, count(sr.job_id) AS reference_count "
+                        "SELECT j.id, j.status, j.terminal_at, count(sr.job_id) AS reference_count "
                         "FROM jobs AS j JOIN simulation_references AS sr ON sr.job_id = j.id "
-                        "WHERE j.client_id = :client_id GROUP BY j.id"
+                        "WHERE j.client_id = :client_id AND j.id IN (:http_job_id, :browser_job_id) "
+                        "GROUP BY j.id"
                     ),
-                    {"client_id": client_id},
+                    {
+                        "client_id": client_id,
+                        "http_job_id": UUID(job["id"]),
+                        "browser_job_id": UUID(browser_result["jobId"]),
+                    },
                 ).mappings().all()
-            assert len(rows) == 1
-            assert rows[0]["status"] == "CANCELLED"
-            assert rows[0]["terminal_at"] is not None
-            assert rows[0]["reference_count"] == 1
+            assert {str(row["id"]) for row in rows} == {job["id"], browser_result["jobId"]}
+            assert all(row["status"] == "CANCELLED" for row in rows)
+            assert all(row["terminal_at"] is not None for row in rows)
+            assert all(row["reference_count"] == 1 for row in rows)
         finally:
+            if frontend_process is not None and frontend_process.poll() is None:
+                frontend_process.terminate()
+                try:
+                    frontend_process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    frontend_process.kill()
+                    frontend_process.wait(timeout=10)
             if process.poll() is None:
                 process.terminate()
                 try:

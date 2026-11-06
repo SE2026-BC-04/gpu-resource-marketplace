@@ -67,6 +67,8 @@ uv sync --project simulator --locked --group dev
 uv run --project simulator --locked --group dev pytest simulator/tests
 ```
 
+The guarded Phase 1 PostgreSQL E2E test also drives the production frontend in Chromium. Run `npm ci` in `frontend/` and install Chromium with `npx playwright install chromium` before running it. The test only executes when the disposable database safety markers described in `backend/tests/db_safety.py` are set; without them pytest reports the database case as skipped.
+
 For the frontend:
 
 ```powershell
