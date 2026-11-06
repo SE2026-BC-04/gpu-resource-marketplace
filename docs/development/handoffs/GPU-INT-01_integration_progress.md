@@ -9,12 +9,13 @@ This file records integration progress and evidence. It does not replace approve
 | Item | State |
 |---|---|
 | Local branch | `feat/gpu-int-01-runtime-integration` (existing shared integration branch; no additional branch created) |
-| Integration commits | `b457c0f` — backend/runtime wiring and tests; `ccdfce6` — Jobs frontend/shared-session integration |
-| Local HEAD before the documentation commit | `ccdfce6` |
+| Integration commits | `b457c0f` — backend/runtime wiring and tests; `ccdfce6` — Jobs frontend/shared-session integration; `a3f9d26` — progress snapshot; `deb352c` — fix random-Job-ID reference assertion |
+| Local HEAD before this progress update | `deb352c` |
+| PR #39 remote head before this update | `a3f9d261da060c07ef3616de598fb37da6e45417` |
 | Local base before this work | `46e976356b83c2384f359f35b08262dfd2970f0b` |
 | Main baseline | `1d8b1b2c52b759d99a072c3d0d889b375083a8c4` |
 | PR #39 before this work | Open, Draft, base `main`, head `46e976356b83c2384f359f35b08262dfd2970f0b`; rechecked through GitHub on 2026-11-07 |
-| Working tree | Backend/frontend changes are committed locally; this progress record is the remaining documentation commit. Nothing has been pushed yet. |
+| Working tree | Backend/frontend changes and the PostgreSQL assertion fix are committed locally; this progress update is not yet committed/pushed. |
 | Git gate | Owner authorized work on this branch and PR #39. Do not push `main`, force-push, approve, mark Ready, or merge. |
 
 ## Upstream dependencies
@@ -36,11 +37,11 @@ Only code already merged to `main` was integrated. No unmerged member branch was
 
 | Stage | Status | Evidence / blocker |
 |---|---|---|
-| A — Auth runtime | **IMPLEMENTED** | `create_app()` wires one AuthService, PostgreSQL AccountReader, configured JWT codec, one Scrypt hasher, shared principal dependency, and engine lifespan. HTTP/unit regressions pass locally. Disposable PostgreSQL/Auth HTTP evidence and new-head CI are pending. |
-| B — Jobs read | **IMPLEMENTED** | `PostgresJobReader` enforces Client/Worker/Admin visibility in SQL; Jobs list/detail use the shared principal. Reader PostgreSQL tests exist but were skipped locally because the safety-marked database was not configured. |
-| C — Listings | **IMPLEMENTED** | Production Listing UoW/router and `SessionListingsPage` use the shared Auth principal and SessionStore. Local real PostgreSQL/Compose evidence is unavailable. |
-| D — Jobs submit/view/cancel | **IMPLEMENTED** | PostgreSQL TX-SUBMIT creates Job and protected reference atomically; existing TX-CANCEL adapter and SQL-scoped read path are mounted. Jobs UI uses the existing volatile SessionStore. Unit/service/HTTP tests pass; adapter tests requiring PostgreSQL were skipped locally. |
-| E — full Phase 1 acceptance | **BLOCKED** | No successful browser → HTTP → disposable PostgreSQL flow has been executed on this HEAD. Docker CLI and `uv` are unavailable locally; real runtime and new-head CI evidence remain outstanding. |
+| A — Auth runtime | **IMPLEMENTED** | `create_app()` wires one AuthService, PostgreSQL AccountReader, configured JWT codec, one Scrypt hasher, shared principal dependency, and engine lifespan. The real HTTP/PostgreSQL E2E test passed on GitHub Actions run #42266303614. |
+| B — Jobs read | **IMPLEMENTED** | `PostgresJobReader` enforces Client/Worker/Admin visibility in SQL; all three PostgreSQL reader tests passed in run #42266303614. |
+| C — Listings | **IMPLEMENTED** | Production Listing UoW/router and `SessionListingsPage` use the shared Auth principal and SessionStore. Worker create + Client browse passed in the real HTTP/PostgreSQL E2E test in run #42266303614. |
+| D — Jobs submit/view/cancel | **IMPLEMENTED** | HTTP E2E Submit → View → Cancel → PostgreSQL verification passed in run #42266303614. One separate TX-SUBMIT adapter assertion failed because it expected the fixed-vector seed for a randomly generated Job ID; corrected in local commit `deb352c`, CI rerun pending. |
+| E — full Phase 1 acceptance | **BLOCKED** | Browser E2E has not run. The first new-head Python job also had the adapter assertion failure above; the fix is committed locally and awaits CI. No full Phase 1 E2E PASS is claimed. |
 
 ## Decisions and compatibility gates
 
@@ -50,13 +51,13 @@ Only code already merged to `main` was integrated. No unmerged member branch was
 - Required renewed cross-phase checks on the new HEAD remain pending: TV2 for schema/D1 runtime permissions/adapter, TV4 for Listing locking and pause/replay ordering, TV3 for authenticated Client/shared-session behavior, and the assigned Phase 2 owner for compatibility with ADR-004/Signed Result V1. The Phase 2 owner is not recorded in the current handoff.
 - These checks do not replace an independent human review. PR #39 remains Draft; no reviewer has approved this new diff.
 
-## Local verification on the uncommitted worktree
+## Verification evidence
 
 Commands used existing local venvs directly because `uv` is not on PATH. Docker CLI is not installed/available. Node dependencies already existed; `npm` itself could not be used, so installed Node entry points ran the same Vitest/typecheck/build tasks.
 
 | Check | Result | Evidence / limitation |
 |---|---|---|
-| Full backend regression | **PASS — 798 passed, 355 skipped, 0 failed** | `backend/.venv/Scripts/python.exe -m pytest backend/tests tests -rs`; exit 0, 28.24s. PostgreSQL tests skip because `GPU_MARKETPLACE_TEST_DATABASE_URL`, `GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS`, and `GPU_MARKETPLACE_TEST_CLUSTER_TOKEN` were not configured. Includes the new Jobs reader/submit and real HTTP E2E tests as skipped, not passed. |
+| Full local backend regression after `deb352c` | **PASS — 798 passed, 355 skipped, 0 failed** | `backend/.venv/Scripts/python.exe -m pytest backend/tests tests -rs`; exit 0, 48.08s. PostgreSQL tests, including the new HTTP E2E and adapter suite, skip because the disposable database safety variables are unavailable locally. |
 | Simulator regression | **PASS — 2 passed** | `simulator/.venv/Scripts/python.exe -m pytest simulator/tests`; exit 0. This tests Simulator regression only, not Phase 2 execution. |
 | Frontend Vitest | **PASS — 158 passed, 10 files** | `node node_modules/vitest/vitest.mjs run --reporter=dot`; exit 0. |
 | Frontend typecheck | **PASS** | `node node_modules/typescript/bin/tsc -b --pretty false`; exit 0. |
@@ -66,7 +67,8 @@ Commands used existing local venvs directly because `uv` is not on PATH. Docker 
 | Browser + real HTTP + PostgreSQL acceptance | **NOT_RUN** | No local browser E2E or disposable database was run. |
 | `git diff --check` | **PASS** | Exit 0; Git only warns that an existing test file with LF will convert to CRLF on a future checkout write. |
 | Secret scan | **PASS** | Changed-file scan found no private-key block, GitHub token, or AWS access-key pattern. `.env.example` contains blank signing keys and local-only sample DB credentials. |
-| Prior GitHub Actions | **PASS on older HEAD only** | Run [#42252304145](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42252304145) passed Python, Frontend, and Compose on the old PR HEAD `46e9763`. It does not verify these local changes. New-head CI has not run yet. |
+| GitHub Actions on pushed `a3f9d26` | **FAIL — 1 Python assertion; Frontend and Compose PASS** | Run [#42266303614](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42266303614): 1,152 passed / 1 failed in Python. The network HTTP E2E test passed using real Auth, Listing, Jobs, native `gpm_api_app`, and disposable PostgreSQL; the only failure was the test's fixed seed expectation for a DB-generated Job ID. Frontend and Compose jobs passed. Corrected in local commit `deb352c`; rerun is pending push. |
+| Earlier CI on `46e9763` | **PASS, older HEAD only** | Run [#42252304145](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42252304145) passed Python, Frontend, and Compose before this integration diff; it is not evidence for new changes. |
 
 ## Changed implementation scope
 
@@ -75,8 +77,8 @@ Commands used existing local venvs directly because `uv` is not on PATH. Docker 
 
 ## Next actions
 
-1. Commit this progress record, then push the three commits only to `feat/gpu-int-01-runtime-integration`; keep PR #39 Draft.
-2. Wait for and inspect all GitHub Actions on the pushed SHA, including the safety-marked disposable PostgreSQL adapter tests and Compose smoke.
+1. Commit this progress update, then push the local assertion fix and progress commits only to `feat/gpu-int-01-runtime-integration`; keep PR #39 Draft.
+2. Wait for and inspect all GitHub Actions on the new SHA, including the safety-marked disposable PostgreSQL adapter tests and Compose smoke.
 3. Ask TV2/TV3/TV4 and the Phase 2 owner to renew the applicable compatibility ACKs on the new SHA.
 4. Obtain the required independent human review and address review findings; ACKs do not count as PR approval.
 5. Execute a successful browser → HTTP → PostgreSQL flow before declaring Stage E verified. No merge until all required evidence and review gates are complete.
