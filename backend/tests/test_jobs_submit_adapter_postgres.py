@@ -16,6 +16,7 @@ from gpu_marketplace.jobs.errors import (
     ListingPaused,
 )
 from gpu_marketplace.jobs.models import SubmitJobRequest
+from gpu_marketplace.jobs.reference import create_simulation_reference
 from gpu_marketplace.jobs.submit import JobSubmitService
 from gpu_marketplace.jobs.submit_ports import SimulationReference
 from gpu_marketplace.repositories.job_submit import PostgresJobSubmissionStore
@@ -124,13 +125,18 @@ def test_postgres_submit_commits_job_and_protected_reference_together(
     assert jobs["idempotency_key"] == "postgres-submit-key-01"
     assert len(jobs["request_sha256"]) == 32
     assert len(references) == 1
-    assert references[0]["algorithm_version"] == "demo-v1-public1"
-    assert references[0]["seed_value"] == 3035342533442321017
-    assert references[0]["expected_outcome"] == "SUCCESS"
-    assert references[0]["expected_failure_reason"] is None
-    assert references[0]["expected_digest"] == (
-        "sha256:a643e286d2b4b89606cd8559078a8765cd73c7d602eec4f1ca4bba2ca732ef0c"
+    expected_reference = create_simulation_reference(
+        job_id=result.job.id,
+        listing_id=fixture.listing_id,
+        worker_id=fixture.worker_id,
+        requested_gpu_count=2,
+        duration_seconds=60,
     )
+    assert references[0]["algorithm_version"] == expected_reference.algorithm_version
+    assert references[0]["seed_value"] == expected_reference.seed_value
+    assert references[0]["expected_outcome"] == expected_reference.expected_outcome
+    assert references[0]["expected_failure_reason"] == expected_reference.expected_failure_reason
+    assert references[0]["expected_digest"] == expected_reference.expected_digest
 
 
 def test_postgres_same_key_same_body_replays_after_listing_is_paused(
