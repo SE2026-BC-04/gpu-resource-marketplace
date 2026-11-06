@@ -23,6 +23,8 @@ from gpu_marketplace.common.database import create_engine
 from gpu_marketplace.identity.principal import AuthenticatedPrincipal
 from identity_fakes import HASHER, PASSWORD, SECRET
 
+LISTING_CURSOR_SECRET = "auth-http-listing-cursor-key-at-least-32-bytes"
+
 CLIENT = UUID("0c6f2a1e-3b4d-4e5f-8a6b-7c8d9e0f1a21")
 WORKER = UUID("1d7a3b2f-4c5e-4f60-9b7c-8d9e0f1a2b32")
 ADMIN = UUID("2e8b4c3a-5d6f-4071-8c8d-9e0f1a2b3c43")
@@ -46,7 +48,11 @@ def build_app(sessions: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch) 
     # verify the production ScryptPasswordHasher profile and limits.
     monkeypatch.setattr("gpu_marketplace.api.app.ScryptPasswordHasher", lambda: HASHER)
     app = create_app(
-        Settings(_env_file=None, jwt_secret=SECRET.decode("ascii")),
+        Settings(
+            _env_file=None,
+            jwt_secret=SECRET.decode("ascii"),
+            listing_cursor_secret=LISTING_CURSOR_SECRET,
+        ),
         database_probe=lambda: True,
         account_sessions=sessions,
     )
@@ -252,7 +258,12 @@ def test_production_app_factory_uses_engine_sessionmaker_and_runtime_role(
         monkeypatch.setattr("gpu_marketplace.api.app.create_engine", create_runtime_test_engine)
         monkeypatch.setattr("gpu_marketplace.api.app.ScryptPasswordHasher", lambda: HASHER)
         app = create_app(
-            Settings(_env_file=None, database_url=test_database.url, jwt_secret=SECRET.decode("ascii"))
+            Settings(
+                _env_file=None,
+                database_url=test_database.url,
+                jwt_secret=SECRET.decode("ascii"),
+                listing_cursor_secret=LISTING_CURSOR_SECRET,
+            )
         )
 
         @app.get("/test/principal")

@@ -1,6 +1,6 @@
 # GPU-INT-01 — Phase 1 Runtime Integration Progress
 
-**Updated:** 2026-11-04 · **Repository:** `SE2026-BC-04/gpu-resource-marketplace` · **Branch:** `feat/gpu-int-01-runtime-integration` · **Owner:** `@thangSy221105`
+**Updated:** 2026-11-06 · **Repository:** SE2026-BC-04/gpu-resource-marketplace · **Branch:** `feat/gpu-int-01-runtime-integration` · **Owner:** @thangSy221105
 
 This file records integration progress and evidence. It does not replace approved contracts, architecture, database, module, or test-design documents.
 
@@ -8,99 +8,77 @@ This file records integration progress and evidence. It does not replace approve
 
 | Item | State |
 |---|---|
-| Latest fetched `origin/main` | `7fd7deaabbaaa5f2583656f201cb68dcd9944fd3` |
-| Last CI-verified code HEAD | `9a44f1459f941fbe63e0e3bd24bf181fca133a61`; includes the normal merge of `origin/main` and Stage A remediation |
-| PR #39 | Open and Draft, base `main`; this report records CI evidence for the code HEAD above |
-| Working tree at report update | Code follow-up is committed; this progress evidence update is the only pending local change |
-| Git operation gate | Owner authorized commits and pushes for this remediation. No approval or merge has been performed |
+| Local branch / HEAD | `feat/gpu-int-01-runtime-integration` / `267168d5028fe199a908b7e5d17f07c598823c12` |
+| Current main baseline | `1d8b1b2c52b759d99a072c3d0d889b375083a8c4` (main branch tip confirmed locally and through GitHub commit search) |
+| Local integration merge | `267168d` merges current `main` into the existing integration branch; no new branch was created. |
+| PR #39 | Open, Draft; remote head remains `5619ef08d617e10d73a0ce13fbfa28c52d555083`. GitHub open-PR search found #39 as the only open PR in this repository. |
+| GitHub fetch | Initial sandboxed fetch could not connect to `github.com:443`; authorized network fetch then succeeded. Current `main` and PR branch tracking refs were fetched before staging. |
+| Local edits | Auth/CORS remediation carried forward; Listings backend/frontend integration and this progress update are uncommitted. Nothing has been committed or pushed during this work. |
+| Git gate | Do not commit/push or update PR metadata until the owner authorizes those GitHub write operations. Do not merge PR #39. |
 
-The integration branch was behind `main` after PR #31 merged. The change set from the merge base `ef9ddcb` was inspected; it added the accepted D3/D7 database work and handoff files without overlapping the Stage A edits. `origin/main` was merged normally as local commit `5f4da1d`.
+## Upstream PRs on current main
 
-## Upstream PR snapshot (2026-11-04)
-
-| PR | Current state | Integration relevance |
+| PR | Main history | Integration relevance |
 |---|---|---|
-| #15 | MERGED | Jobs API foundation; no PostgreSQL JobReader adapter on `main` |
-| #17 | OPEN / Draft, head `c09b886` | Listings API/UI is not on `main`; Stage C remains blocked |
-| #28 | MERGED | D2 Jobs lifecycle guard |
-| #29 | MERGED | D3 guarded Job deletion |
-| #30 | MERGED | D1/D2/D3/D8 decision-status documentation |
-| #31 | MERGED at `7fd7dea` | Listing PostgreSQL persistence and D7 are now on `main` |
-| #32 | OPEN / Draft | Jobs frontend foundation |
-| #33 | OPEN / Draft | Queued cancellation command foundation |
-| #34 | OPEN / Draft | PostgreSQL cancellation test preparation; not a production adapter |
-| #35 | MERGED | Auth PostgreSQL HTTP tests |
-| #38 | MERGED | D2 pseudocode documentation sync |
+| #15 | Merged | Jobs API foundation; no PostgreSQL `JobReader` adapter is present. |
+| #17 | Merged | Listings API/UI source is available for integration. |
+| #31 | Merged | PostgreSQL Listings UoW and D7 are available. |
+| #32 | Merged | Jobs frontend foundation; still cannot wire production Jobs without backend dependencies. |
+| #33 / #34 | Merged | TX-CANCEL ports and PostgreSQL test preparation. |
+| #35 | Merged | Auth PostgreSQL HTTP tests. |
+| #40 | Merged | PostgreSQL TX-CANCEL adapter is available. |
+| #41 | Merged | Listing repository timestamp test fix. |
 
-Only merged upstream work is used by this branch. No unmerged member branch has been consumed.
+Only work present on `main` is consumed. No unmerged member branch has been merged or cherry-picked.
 
-## Stage status
+## Dependency and stage status
 
 | Stage | Status | Evidence / blocker |
 |---|---|---|
-| A — Auth runtime integration | **VERIFIED (CI)** | Full Python job, including backend/PostgreSQL and Simulator tests, Frontend job, and five-service Compose smoke all passed on code HEAD `9a44f14`. Human review and cross-phase ACKs remain separate merge gates. |
-| B — Jobs read | **BLOCKED** | PostgreSQL JobReader adapter is not on `main`. |
-| C — Listings | **BLOCKED** | PR #31 merged, but PR #17 remains open; do not consume its branch. |
-| D — Jobs commands/frontend | **BLOCKED** | Required command adapters and acceptance gates are incomplete; #32–#34 remain open. |
-| E — Full Phase 1 acceptance | **BLOCKED** | Requires verified completion of A–D using real HTTP, PostgreSQL, frontend, and CI evidence. |
+| A — Auth runtime integration | **IMPLEMENTED** | `create_app()` composes one AuthService, PostgreSQL AccountReader, JWT codec, password hasher, shared principal dependency, and lifespan engine cleanup. CORS regression fixes are local and tested. Real disposable-PostgreSQL runtime evidence and new-head CI are still required before VERIFIED. |
+| B — Jobs read | **BLOCKED** | Jobs read service/router exist, but current `backend/src/gpu_marketplace/repositories/jobs.py` contains the TX-CANCEL adapters only; no PostgreSQL JobReader adapter is on `main`. No fake production reader is mounted. |
+| C — Listings | **IMPLEMENTED** | Main FastAPI app mounts Listings using `PostgresListingUnitOfWork`, `ListingCursorCodec`, and the same Auth principal dependency. Frontend mounts `SessionListingsPage` using the existing SessionStore. Disposable-PostgreSQL and Compose runtime acceptance is NOT_RUN because Docker CLI is unavailable on this workstation. |
+| D — Jobs commands/frontend | **BLOCKED** | TX-CANCEL PostgreSQL adapter and Jobs UI are merged, but TX-SUBMIT PostgreSQL implementation / approved deterministic reference vectors and Jobs read adapter are still missing. Do not mount fake adapters or claim Submit/View/Cancel E2E. |
+| E — Full Phase 1 acceptance | **BLOCKED** | Requires verified A–D using real HTTP, PostgreSQL, frontend, and CI evidence. |
 
-## Stage A remediation findings
+## Current implementation details
 
-| Finding | Current handling | Evidence boundary |
-|---|---|---|
-| P1 — Pydantic validation leaked rejected JWT input | Added `hide_input_in_errors=True`, removed the chained SQLAlchemy parser cause, and added JWT/DSN sentinel tests. | Python CI passed on `9a44f14`, including the security regression tests. |
-| P1 — fresh Compose database could appear ready before Auth tables existed | API readiness checks query access to `users` and `user_roles`. Isolated Compose smoke verifies fail-closed readiness/Auth before migrations and successful mounted Auth behavior after provisioning its disposable DB. | Compose CI passed on `9a44f14`; only the random smoke project was migrated and cleaned. |
-| P2 — unexpected Auth 500 lost CORS headers | Auth 500 handler returns the exact configured origin and `Vary: Origin`; tests cover allowed/disallowed origins and secret redaction. Smoke normalizes response header names for case-insensitive HTTP lookup. | Python and Compose CI passed on `9a44f14`. |
-| P2 — runtime DB-role evidence | `.env.example` labels its bootstrap/owner DSNs as local-only. Isolated Compose smoke uses generated passwords, verifies API/Manager `current_user` and absence of CREATE privileges, and cleans its disposable project. | Compose CI passed on `9a44f14`. No persistent DB was touched. TV2 confirmation of the real deployment provisioning procedure remains BLOCKED. |
-| P3 — test row cleanup after abrupt process termination | Retained the separate Engine/sessionmaker test and its `finally` cleanup. Reusing the fixture transaction would bypass the default Engine/sessionmaker path under review. | Follow-up: consider a separately disposable database per test to contain forced-termination leftovers without reducing Engine-path coverage. |
+- `api/app.py` now builds one `ListingService` over `PostgresListingUnitOfWork` with the existing API sessionmaker and model factories, then mounts the six approved Listing routes with the same `principal_dependency` used by Auth.
+- `GPU_MARKETPLACE_LISTING_CURSOR_SECRET` is a separate, stable HMAC key. Configuration rejects keys shorter than 32 UTF-8 bytes and redacts secret values. Compose, `.env.example`, README, CI, and Compose smoke configuration pass it to the API independently from the JWT secret.
+- `App.tsx` mounts `SessionListingsPage` only after sign-in and passes the existing SessionStore; the Listings workspace avoids a nested `<main>` landmark.
+- CORS still uses explicit allowlisted origins and the approved GET/POST/PATCH methods/headers, and exposes `X-Request-ID` to allowed browser origins. No API paths, DTOs, business rules, database schema, migrations, grants, or ADR decisions were changed.
+- `test_api_listings_mount.py` verifies all six routes are mounted, each uses the exact shared principal dependency, and an unauthenticated request returns the approved Bearer/no-store 401.
 
-No schema, migration, D1 grant, JWT policy, or public API contract was edited. The smoke procedure runs existing role bootstrap and migrations only inside its uniquely named, disposable Compose project and removes that project's volume during cleanup.
+## Cross-phase and remaining review gates
 
-## Auth, database, and cross-phase gates
+- TV4's earlier `ACK_WITH_ACTIONS` requested Listings runtime wiring and renewed confirmation after the reconciled change. This local implementation has not yet been pushed, so renewed ACK is pending.
+- TV2's earlier Auth compatibility ACK was on the older pushed HEAD. The separate native `gpm_api_app` login/effective role evidence remains required for restricted PostgreSQL runtime acceptance.
+- TV5's earlier CORS action requiring `Access-Control-Expose-Headers: X-Request-ID` is implemented locally and covered by regression tests; renewed confirmation is pending a pushed HEAD.
+- Cross-phase ACKs do not count as the independent human L1 review required for PR #39. The current new diff has not received that review.
+- C1 scrypt load evidence (736 benchmark users) remains NOT_RUN/open; no scrypt profile or concurrency configuration was changed.
+- The existing PR remains Draft. No reviewer was self-selected, and no approval or merge was performed.
 
-- JWT remains HS256, 900 seconds, dedicated configured secret of at least 32 UTF-8 bytes, fail-closed. No refresh/session behavior changed.
-- `create_app()` composes one `AuthService`, the PostgreSQL AccountReader, token codec, password hasher, and the shared principal dependency. Engine lifecycle remains tied to app lifespan.
-- Runtime-role evidence must distinguish `SET ROLE gpm_api_rw` tests from a real login as `gpm_api_app`. The former does not prove D1 login credentials or deployment configuration.
-- The default `.env.example` uses the local bootstrap/owner account only. Do not use that stack as D1/D2/D3 production evidence.
-- TV2 posted `ACK_WITH_ACTIONS` on PR #39 for HEAD `03c9b9a` ([comment](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39#issuecomment-6610112854)): fix the P1 secret leak and keep owner DSNs out of runtime acceptance evidence.
-- GPU-003, GPU-004, and GPU-005 consumer ACKs for the shared principal/configuration wiring are still missing. The merged #31 persistence work does not itself provide a Stage A consumer ACK.
-- PR #39 currently has no independent human review submission. Codex findings do not count as human review. L1 requires one independent human reviewer after the final diff is pushed.
+## Verification on local working tree
 
-## Verification
-
-### Existing remote evidence
+**Python:** 3.12.15 / pytest 9.1.1. `uv` is not on PATH, so the repository's existing locked virtual environments were invoked directly. **Node:** 22.13.0; frontend dependencies were already present. The `npm` launcher fails because it points to a missing per-user npm CLI, so Vitest/TypeScript/Vite were invoked with their installed Node entry points.
 
 | Check | Result | Evidence |
 |---|---|---|
-| GitHub Actions on old PR #39 HEAD `03c9b9a` | Python **FAIL: 623 passed, 1 failed**; frontend PASS; Compose PASS | [Run #41662546603](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41662546603). The failing test was `test_config_and_imports.py::test_jwt_secret_must_contain_at_least_256_bits`; Pydantic printed the rejected input value. |
-| Independent Codex PR review on `03c9b9a` | Two findings: P1 missing schema readiness/provisioning; P2 CORS headers absent on unexpected Auth 500 | PR timeline; both are addressed in the local remediation diff and await verification. |
-| GitHub Actions after remediation commit `6c841d1` | Python **success** (backend, PostgreSQL, Simulator); frontend **success**; Compose **failure** | [Run #41832981735](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41832981735). Compose smoke reached its post-migration Auth CORS assertion and failed because the script looked up an HTTP header in a case-sensitive Python `dict`; HTTP field names are case-insensitive. Smoke cleanup passed and confirmed the local CI stack resources were unchanged. A follow-up normalizes response header keys and awaits a new CI run. |
-| GitHub Actions after follow-up commit `9a44f14` | **PASS:** Python (backend/PostgreSQL and Simulator), Frontend, and Compose | [Run #41833635070](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/41833635070). Compose verified five healthy services, production frontend/SPA route, dynamic host ports, Host→PostgreSQL `SELECT 1`, pre-migration fail-closed behavior, post-migration Auth/CORS, API/Manager runtime logins without CREATE privileges, Simulator DB isolation, and cleanup without changing the default local stack. |
+| Targeted API/Auth/CORS/Listings backend regression | **PASS — 270 passed** | `python -m pytest` over API auth mount, CORS, health, config, Listings mount, and Listings auth/contract/HTTP integration tests; exit 0. One Starlette `httpx` deprecation warning. |
+| Full backend regression | **PASS — 777 passed, 346 skipped, 0 failed** | `backend/.venv/Scripts/python.exe -m pytest backend/tests tests -rs`; exit 0. PostgreSQL tests skipped because the required safety-marked disposable cluster variables were not configured. |
+| Simulator pytest | **PASS — 2 passed** | `simulator/.venv/Scripts/python.exe -m pytest simulator/tests`; exit 0. |
+| Frontend Vitest | **PASS — 158 passed, 10 files** | `node node_modules/vitest/vitest.mjs run --reporter=dot`; exit 0. |
+| Frontend TypeScript typecheck | **PASS** | `node node_modules/typescript/bin/tsc -b --pretty false`; exit 0. |
+| Frontend production build | **PASS** | `node node_modules/vite/bin/vite.js build`; exit 0; Vite 8.3.4. |
+| Docker Compose config validation | **NOT_RUN** | Docker CLI is not found on PATH; checks for the standard Docker Desktop executable locations also found none. Attempted `docker compose --env-file .env.example config --quiet`; PowerShell reported `docker` not recognized (exit 1). |
+| Compose smoke / PostgreSQL HTTP and role checks | **NOT_RUN** | Docker CLI is unavailable. No claim is made for real PostgreSQL Listing or Compose runtime behavior. |
+| `git diff --check` | **PASS** | Exit 0 after the implementation and progress update. |
+| GitHub Actions on current local HEAD | **NOT_RUN** | This HEAD is not pushed. Earlier Actions runs on `5619ef0` do not verify these local changes. |
 
-### Local remediation verification
+## Next actions and blockers
 
-| Check | Result | Notes |
-|---|---|---|
-| `git fetch origin` | PASS | Fetched current refs before merge |
-| Normal merge of `origin/main` | PASS | Local merge commit `5f4da1d`; no conflicts |
-| `git diff --check` | PASS (exit 0) | No whitespace errors; Git emitted only LF-to-CRLF working-copy warnings |
-| Python syntax check | NOT_RUN (exit 1 before Python started) | `py -3.11 -m py_compile ...` could not launch the WindowsApps Python executable (`Access is denied`); Python 3.12 and `uv` are unavailable |
-| Security regression tests (`test_config_and_imports.py`) | NOT_RUN (exit 1 before pytest started) | Attempted locked `uv run`; PowerShell reports `uv` is not recognized |
-| Auth mount/health/CORS tests | NOT_RUN (exit 1 before pytest started) | Same missing `uv` executable; targeted command was attempted |
-| PostgreSQL Auth tests | NOT_RUN | No working Python/uv runtime and no safety-marked disposable PostgreSQL test cluster configured; no persistent database was touched |
-| Full backend pytest | NOT_RUN (exit 1 before pytest started) | Required `uv run --project backend --locked --group dev pytest backend/tests tests -rs`; `uv` is not installed |
-| Simulator pytest | NOT_RUN (exit 1 before pytest started) | Required locked `uv` runner is unavailable |
-| Frontend Vitest | PASS (69 passed, 0 failed; exit 0) | Ran `node_modules/.bin/vitest.cmd run` with Node 22.13.0; repository's container pins Node 24, so this is not locked-runtime evidence |
-| Frontend typecheck | PASS (exit 0) | Ran `node_modules/.bin/tsc.cmd -b --pretty false` with Node 22.13.0; not locked-runtime evidence |
-| Frontend production build | PASS (exit 0) | Ran `node_modules/.bin/vite.cmd build` with Node 22.13.0; not locked-runtime evidence |
-| Compose config and smoke | NOT_RUN (exit 1 before Compose started) | `docker` is not recognized; no Docker daemon was available |
-| GitHub Actions on code HEAD `9a44f14` | PASS | Run #41833635070: Python, Frontend, and Compose jobs all succeeded. This is the code/test verification HEAD; this document-only evidence update follows it. |
-
-CI on code HEAD `9a44f14` passed the Python job (backend/PostgreSQL and Simulator), Frontend job (tests/typecheck/build), and Compose smoke. Local frontend checks also passed on Node 22.13.0; the CI run used the repository workflow toolchain. Local Python/Compose commands remain unavailable on this workstation, so their successful evidence is from GitHub Actions.
-
-## Remaining blockers and next actions
-
-1. Keep the all-green CI evidence attached to code HEAD `9a44f14`; rerun CI if application code changes.
-2. Ask TV2 to confirm the real D1 runtime login/provisioning procedure; no persistent deployment DB has been touched.
-3. Obtain GPU-003/004/005 ACKs for the shared wiring and one independent human L1 review on the final pushed diff.
-4. Keep PR #39 Draft while Stages B–E are incomplete; do not merge.
+1. Make Docker CLI/runtime available, then run Compose validation and isolated Compose smoke, including real PostgreSQL Listing paths and role boundaries.
+2. Obtain disposable PostgreSQL evidence for Auth and Listings; keep persistent user databases untouched.
+3. Wait for an approved PostgreSQL JobReader and TX-SUBMIT adapter/reference-vector implementation before wiring Jobs stages.
+4. After owner authorization to push, update PR #39 on the same branch, wait for CI, request renewed TV2/TV4/TV5 compatibility ACKs, and obtain one independent human L1 review.
+5. Keep PR #39 Draft and do not merge while Stages B–E are blocked or required evidence/review gates are pending.

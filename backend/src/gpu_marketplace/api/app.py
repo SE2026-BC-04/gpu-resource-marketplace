@@ -18,7 +18,13 @@ from gpu_marketplace.identity.passwords import ScryptPasswordHasher
 from gpu_marketplace.identity.router import create_auth_router
 from gpu_marketplace.identity.service import AuthService
 from gpu_marketplace.identity.tokens import AccessTokenCodec
+from gpu_marketplace.listings.cursors import ListingCursorCodec
+from gpu_marketplace.listings.errors import ListingDependencyUnavailable
+from gpu_marketplace.listings.models import ListingRecord, WorkerProfile
+from gpu_marketplace.listings.router import create_listing_router
+from gpu_marketplace.listings.service import ListingService
 from gpu_marketplace.repositories.accounts import PostgresAccountReader
+from gpu_marketplace.repositories.listings import PostgresListingUnitOfWork
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +39,10 @@ def create_app(
     resolved_settings = settings or Settings()
     if resolved_settings.jwt_secret is None:
         raise ValueError("GPU_MARKETPLACE_JWT_SECRET must be configured for the API")
+    if resolved_settings.listing_cursor_secret is None:
+        raise ValueError(
+            "GPU_MARKETPLACE_LISTING_CURSOR_SECRET must be configured for Listings"
+        )
     configure_logging(resolved_settings.log_level)
 
     engine: Engine | None = None
@@ -56,6 +66,17 @@ def create_app(
         ScryptPasswordHasher(),
     )
     principal_dependency = create_principal_dependency(auth_service)
+    listing_service = ListingService(
+        lambda: PostgresListingUnitOfWork(
+            account_sessions,
+            worker_record=WorkerProfile,
+            listing_record=ListingRecord,
+            unavailable_error=ListingDependencyUnavailable,
+        ),
+        ListingCursorCodec(
+            resolved_settings.listing_cursor_secret.get_secret_value().encode("utf-8")
+        ),
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -78,13 +99,33 @@ def create_app(
     app.state.auth_service = auth_service
     app.state.require_authenticated_principal = principal_dependency
     app.include_router(create_auth_router(service=auth_service))
+    app.include_router(
+        create_listing_router(
+            service=listing_service,
+            principal_dependency=principal_dependency,
+        )
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=resolved_settings.cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PATCH"],
         allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Request-ID"],
+        expose_headers=["X-Request-ID"],
     )
+
+    @app.middleware("http")
+    async def restrict_cors_exposure_to_allowed_origins(request: Request, call_next):
+        # Starlette emits expose_headers even when the Origin is not allowlisted. The
+        # browser will still block that response, but remove the header as well so the
+        # response itself never advertises access to an untrusted origin.
+        response = await call_next(request)
+        if (
+            request.headers.get("origin") not in resolved_settings.cors_origins
+            and "Access-Control-Expose-Headers" in response.headers
+        ):
+            del response.headers["Access-Control-Expose-Headers"]
+        return response
 
     @app.get("/health/live", include_in_schema=False)
     def live() -> dict[str, str]:
@@ -119,6 +160,7 @@ def create_app(
             origin = request.headers.get("origin")
             if origin in resolved_settings.cors_origins:
                 headers["Access-Control-Allow-Origin"] = origin
+                headers["Access-Control-Expose-Headers"] = "X-Request-ID"
                 headers["Vary"] = "Origin"
             return JSONResponse(
                 status_code=500,

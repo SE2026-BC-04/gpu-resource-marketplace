@@ -101,12 +101,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: 3.12.15
-      - name: Generate disposable JWT secret for Compose checks
+      - name: Generate disposable API secrets for Compose checks
         shell: bash
         run: |
           jwt_secret="$(openssl rand -hex 32)"
+          listing_cursor_secret="$(openssl rand -hex 32)"
           echo "::add-mask::${jwt_secret}"
+          echo "::add-mask::${listing_cursor_secret}"
           echo "GPU_MARKETPLACE_JWT_SECRET=${jwt_secret}" >> "$GITHUB_ENV"
+          echo "GPU_MARKETPLACE_LISTING_CURSOR_SECRET=${listing_cursor_secret}" >> "$GITHUB_ENV"
       - run: uv sync --project backend --locked
       - run: docker compose --env-file .env.example config --quiet
       - name: Start a local stack to verify smoke cleanup isolation

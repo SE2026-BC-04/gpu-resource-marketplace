@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AuthApiError } from "../api/auth";
@@ -35,6 +35,7 @@ function fillAndSubmit(loginName: string, password = PASSWORD) {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
@@ -69,6 +70,29 @@ describe("App shell with Login", () => {
     expect(api.logout).toHaveBeenCalledWith(TOKEN);
     expect(screen.getByLabelText("Mật khẩu")).toHaveValue("");
     consoleSpies.forEach((spy) => expect(spy).not.toHaveBeenCalled());
+  });
+
+  it("mounts Listings with the same volatile SessionStore after sign-in", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ items: [], next_cursor: null }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Request-ID": "8bf66294-daf8-42fa-a167-50a3a43b7b66",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    const { user } = setup({}, "CLIENT");
+
+    fillAndSubmit(user.loginName);
+
+    expect(await screen.findByRole("heading", { name: "GPU Listings" })).toBeInTheDocument();
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    const request = fetcher.mock.calls[0];
+    const headers = new Headers(request?.[1]?.headers);
+    expect(headers.get("Authorization")).toBe(`Bearer ${TOKEN}`);
+    expect(String(request?.[0])).toContain("/api/v1/gpu-listings?");
   });
 
   it("asks for both fields without calling the API", () => {

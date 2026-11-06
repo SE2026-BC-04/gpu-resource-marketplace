@@ -8,10 +8,19 @@ from gpu_marketplace.api.app import create_app
 from gpu_marketplace.common.config import Settings
 
 JWT_SECRET = "api-mount-tests-only-secret-at-least-32-bytes"
+LISTING_CURSOR_SECRET = "api-mount-tests-listing-cursor-secret-32-bytes"
+
+
+def app_settings() -> Settings:
+    return Settings(
+        _env_file=None,
+        jwt_secret=JWT_SECRET,
+        listing_cursor_secret=LISTING_CURSOR_SECRET,
+    )
 
 
 def test_create_app_mounts_auth_and_returns_private_bearer_401() -> None:
-    app = create_app(Settings(_env_file=None, jwt_secret=JWT_SECRET), database_probe=lambda: True)
+    app = create_app(app_settings(), database_probe=lambda: True)
 
     with TestClient(app) as client:
         response = client.get(
@@ -33,10 +42,18 @@ def test_create_app_fails_closed_without_jwt_secret() -> None:
         create_app(Settings(_env_file=None), database_probe=lambda: True)
 
 
+def test_create_app_fails_closed_without_listing_cursor_secret() -> None:
+    with pytest.raises(ValueError, match="GPU_MARKETPLACE_LISTING_CURSOR_SECRET"):
+        create_app(
+            Settings(_env_file=None, jwt_secret=JWT_SECRET),
+            database_probe=lambda: True,
+        )
+
+
 def test_unexpected_auth_error_keeps_private_headers_and_contract_envelope(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    app = create_app(Settings(_env_file=None, jwt_secret=JWT_SECRET), database_probe=lambda: True)
+    app = create_app(app_settings(), database_probe=lambda: True)
 
     def fail_closed(_: str) -> None:
         raise RuntimeError("jwt-secret-sentinel-do-not-return-or-log")
@@ -55,6 +72,9 @@ def test_unexpected_auth_error_keeps_private_headers_and_contract_envelope(
     assert response.status_code == 500
     assert response.headers["Cache-Control"] == "no-store"
     assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    exposed = response.headers["ACCESS-CONTROL-EXPOSE-HEADERS"].lower()
+    assert exposed == "x-request-id"
+    assert "authorization" not in exposed
     assert response.headers["Vary"] == "Origin"
     request_id = response.headers["X-Request-ID"]
     assert UUID(request_id).version == 4 and request_id != "client-supplied-value"
@@ -68,12 +88,14 @@ def test_unexpected_auth_error_keeps_private_headers_and_contract_envelope(
     secret = "jwt-secret-sentinel-do-not-return-or-log"
     assert secret not in response.text
     assert secret not in caplog.text
+    assert "opaque-test-token" not in response.text
+    assert secret not in str(response.headers)
 
 
 def test_unexpected_auth_error_does_not_reflect_disallowed_origin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    app = create_app(Settings(_env_file=None, jwt_secret=JWT_SECRET), database_probe=lambda: True)
+    app = create_app(app_settings(), database_probe=lambda: True)
 
     def fail_closed(_: str) -> None:
         raise RuntimeError("test-only-failure")
@@ -87,3 +109,4 @@ def test_unexpected_auth_error_does_not_reflect_disallowed_origin(
 
     assert response.status_code == 500
     assert "Access-Control-Allow-Origin" not in response.headers
+    assert "Access-Control-Expose-Headers" not in response.headers

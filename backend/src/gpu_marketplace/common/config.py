@@ -23,6 +23,7 @@ class Settings(BaseSettings):
         "postgresql+psycopg://gpu_marketplace:local-dev-only-change-me@localhost:5432/gpu_marketplace"
     )
     jwt_secret: SecretStr | None = None
+    listing_cursor_secret: SecretStr | None = None
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     log_level: LogLevel = "INFO"
 
@@ -31,6 +32,17 @@ class Settings(BaseSettings):
     def validate_jwt_secret(cls, value: SecretStr | None) -> SecretStr | None:
         if value is not None and len(value.get_secret_value().encode("utf-8")) < 32:
             raise ValueError("JWT secret must contain at least 256 bits (32 UTF-8 bytes)")
+        return value
+
+    @field_validator("listing_cursor_secret")
+    @classmethod
+    def validate_listing_cursor_secret(
+        cls, value: SecretStr | None
+    ) -> SecretStr | None:
+        if value is not None and len(value.get_secret_value().encode("utf-8")) < 32:
+            raise ValueError(
+                "Listing cursor secret must contain at least 256 bits (32 UTF-8 bytes)"
+            )
         return value
 
     @field_validator("database_url")

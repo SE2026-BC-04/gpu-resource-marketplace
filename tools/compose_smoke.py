@@ -256,7 +256,12 @@ def main() -> int:
         # Inspect the normal local project first. It is never started, stopped, or cleaned here.
         # Compose validates required interpolation even for `ps`; this one-use key only
         # renders the existing project config and is never passed to a started service.
-        inspect_env = make_smoke_env_file({"GPU_MARKETPLACE_JWT_SECRET": secrets.token_hex(32)})
+        inspect_env = make_smoke_env_file(
+            {
+                "GPU_MARKETPLACE_JWT_SECRET": secrets.token_hex(32),
+                "GPU_MARKETPLACE_LISTING_CURSOR_SECRET": secrets.token_hex(32),
+            }
+        )
         local = compose(inspect_env, LOCAL_PROJECT, "ps", "--all", "--format", "json")
         if local.returncode:
             raise RuntimeError(f"Could not inspect the existing local Compose stack: {local.stderr.strip()}")
@@ -301,6 +306,7 @@ def main() -> int:
                 "GPU_MARKETPLACE_API_DATABASE_URL": api_database_url,
                 "GPU_MARKETPLACE_MANAGER_DATABASE_URL": manager_database_url,
                 "GPU_MARKETPLACE_JWT_SECRET": secrets.token_hex(32),
+                "GPU_MARKETPLACE_LISTING_CURSOR_SECRET": secrets.token_hex(32),
                 "GPU_MARKETPLACE_CORS_ORIGINS": f'["http://localhost:{ports["FRONTEND_HOST_PORT"]}"]',
             }
         )
@@ -322,6 +328,14 @@ def main() -> int:
                 f"API CORS origins {configured_origins!r} do not match isolated frontend origin {expected_origins!r}"
             )
         smoke_values = read_env_values(smoke_env)
+        api_environment = rendered_config["services"]["api"]["environment"]
+        if (
+            api_environment["GPU_MARKETPLACE_LISTING_CURSOR_SECRET"]
+            != smoke_values["GPU_MARKETPLACE_LISTING_CURSOR_SECRET"]
+            or smoke_values["GPU_MARKETPLACE_LISTING_CURSOR_SECRET"]
+            == smoke_values["GPU_MARKETPLACE_JWT_SECRET"]
+        ):
+            raise RuntimeError("API did not receive a separate Listing cursor secret")
         if (
             rendered_config["services"]["api"]["environment"]["GPU_MARKETPLACE_DATABASE_URL"]
             != smoke_values["GPU_MARKETPLACE_API_DATABASE_URL"]
