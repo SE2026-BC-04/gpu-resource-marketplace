@@ -1,23 +1,44 @@
-"""Composable read-only Jobs router; intentionally not registered in api/app.py."""
+"""Composable Jobs router; mounted with explicit production services by the app."""
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
+from starlette.concurrency import run_in_threadpool
+from starlette.requests import ClientDisconnect
 
 from gpu_marketplace.jobs.errors import (
     DependencyUnavailable,
     Forbidden,
+    IdempotencyKeyRequired,
+    InvalidJson,
     JobDomainError,
     Unauthenticated,
     ValidationFailed,
     job_error_response,
+    submit_request_from_mapping,
 )
-from gpu_marketplace.jobs.models import JobCollectionResponse, PublicJobResponse
+from gpu_marketplace.jobs.cancel_ports import CommitOutcomeUnknown
+from gpu_marketplace.jobs.models import JobCollectionResponse, JobRole, PublicJobResponse
 from gpu_marketplace.jobs.ports import JobPrincipal, PrincipalProvider
+from gpu_marketplace.jobs.cancel import JobCancelService
+from gpu_marketplace.jobs.projections import project_job
 from gpu_marketplace.jobs.service import JobsReadService
+from gpu_marketplace.jobs.submit import JobSubmitService
+from gpu_marketplace.identity.request_body import (
+    BodyTooLarge,
+    InvalidBody,
+    parse_json,
+    read_bounded_body,
+    require_json_media_type,
+)
+
+MAX_SUBMIT_BODY_BYTES = 16_384
+logger = logging.getLogger(__name__)
 
 
 class JobsAPIRoute(APIRoute):
@@ -55,17 +76,90 @@ class JobsAPIRoute(APIRoute):
                         DependencyUnavailable(), request_id=_request_id(request)
                     )
                 raise
+            except Exception as exc:  # noqa: BLE001 - sanitize unexpected adapter failures
+                request_id = _request_id(request)
+                logger.error(
+                    "unhandled_jobs_api_exception",
+                    extra={"exception_type": type(exc).__name__, "request_id": request_id},
+                )
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "error": {
+                            "code": "INTERNAL_ERROR",
+                            "message": "Internal server error.",
+                            "request_id": request_id,
+                        }
+                    },
+                    headers={"X-Request-ID": request_id, "Cache-Control": "no-store"},
+                )
 
         return route_handler
 
 
 def create_jobs_router(
-    *, service: JobsReadService, principal_provider: PrincipalProvider
+    *,
+    service: JobsReadService,
+    principal_provider: PrincipalProvider,
+    cancel_service: JobCancelService | None = None,
+    submit_service: JobSubmitService | None = None,
 ) -> APIRouter:
-    """Build GET routes only; submission/cancellation await their transaction gates."""
+    """Build role-scoped read routes and the approved QUEUED-only cancel route.
+
+    Submission is mounted only when a real TX-SUBMIT service is supplied.
+    """
     router = APIRouter(
         prefix="/api/v1/jobs", tags=["jobs"], route_class=JobsAPIRoute
     )
+
+    if submit_service is not None:
+
+        @router.post("", response_model=PublicJobResponse)
+        async def submit_job(
+            request: Request,
+            response: Response,
+            principal: JobPrincipal = Depends(principal_provider),
+        ) -> PublicJobResponse:
+            request_id = _request_id(request)
+            request.state.request_id = request_id
+            response.headers["X-Request-ID"] = request_id
+            response.headers["Cache-Control"] = "no-store"
+            try:
+                role = JobRole(principal.role)
+            except (TypeError, ValueError) as exc:
+                raise Unauthenticated() from exc
+            if role is not JobRole.CLIENT:
+                raise Forbidden()
+
+            keys = request.headers.getlist("Idempotency-Key")
+            if not keys:
+                raise IdempotencyKeyRequired()
+            if len(keys) != 1:
+                raise ValidationFailed()
+            try:
+                require_json_media_type(request.headers.get("content-type"))
+                body_bytes = await read_bounded_body(request, MAX_SUBMIT_BODY_BYTES)
+                payload = parse_json(body_bytes)
+            except (BodyTooLarge, InvalidBody, ClientDisconnect) as exc:
+                raise InvalidJson() from exc
+            body = submit_request_from_mapping(payload)
+            try:
+                result = await run_in_threadpool(
+                    submit_service.submit,
+                    principal=principal,
+                    idempotency_key=keys[0],
+                    request=body,
+                    correlation_id=UUID(request_id),
+                )
+            except CommitOutcomeUnknown:
+                # Never retry an uncertain transaction. The client reconciles by
+                # listing its Jobs and retries only with the same idempotency key.
+                return job_error_response(
+                    DependencyUnavailable(), request_id=request_id
+                )  # type: ignore[return-value]
+            response.status_code = 200 if result.replayed else 201
+            response.headers["Location"] = f"/api/v1/jobs/{result.job.id}"
+            return project_job(result.job, principal=principal)
 
     @router.get("", response_model=JobCollectionResponse)
     def list_jobs(
@@ -110,6 +204,34 @@ def create_jobs_router(
             return service.get_job(principal=principal, job_id=parsed_id)
         except JobDomainError as exc:
             return job_error_response(exc, request_id=request_id)  # type: ignore[return-value]
+
+    if cancel_service is not None:
+
+        @router.post("/{job_id}/cancel", response_model=PublicJobResponse)
+        def cancel_job(
+            job_id: str,
+            request: Request,
+            response: Response,
+            principal: JobPrincipal = Depends(principal_provider),
+        ) -> PublicJobResponse:
+            request_id = _request_id(request)
+            response.headers["X-Request-ID"] = request_id
+            response.headers["Cache-Control"] = "no-store"
+            try:
+                parsed_id = _parse_job_id(job_id)
+            except ValueError:
+                return job_error_response(ValidationFailed(), request_id=request_id)  # type: ignore[return-value]
+            try:
+                return cancel_service.cancel(principal=principal, job_id=parsed_id)
+            except JobDomainError as exc:
+                return job_error_response(exc, request_id=request_id)  # type: ignore[return-value]
+            except CommitOutcomeUnknown:
+                # The transaction adapter cannot prove whether COMMIT was durable.
+                # Return a controlled outage response; clients must reconcile with GET,
+                # never automatically replay the mutation.
+                return job_error_response(
+                    DependencyUnavailable(), request_id=request_id
+                )  # type: ignore[return-value]
 
     return router
 

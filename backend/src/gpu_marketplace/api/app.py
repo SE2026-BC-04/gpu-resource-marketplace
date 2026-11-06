@@ -18,12 +18,23 @@ from gpu_marketplace.identity.passwords import ScryptPasswordHasher
 from gpu_marketplace.identity.router import create_auth_router
 from gpu_marketplace.identity.service import AuthService
 from gpu_marketplace.identity.tokens import AccessTokenCodec
+from gpu_marketplace.jobs.cancel import JobCancelService
+from gpu_marketplace.jobs.cursor import HmacCursorCodec
+from gpu_marketplace.jobs.router import create_jobs_router
+from gpu_marketplace.jobs.service import JobsReadService
+from gpu_marketplace.jobs.submit import JobSubmitService
 from gpu_marketplace.listings.cursors import ListingCursorCodec
 from gpu_marketplace.listings.errors import ListingDependencyUnavailable
 from gpu_marketplace.listings.models import ListingRecord, WorkerProfile
 from gpu_marketplace.listings.router import create_listing_router
 from gpu_marketplace.listings.service import ListingService
 from gpu_marketplace.repositories.accounts import PostgresAccountReader
+from gpu_marketplace.repositories.jobs import (
+    PostgresJobCancelUnitOfWork,
+    PostgresJobLocatorReader,
+    PostgresJobReader,
+)
+from gpu_marketplace.repositories.job_submit import PostgresJobSubmissionStore
 from gpu_marketplace.repositories.listings import PostgresListingUnitOfWork
 
 logger = logging.getLogger(__name__)
@@ -43,6 +54,15 @@ def create_app(
         raise ValueError(
             "GPU_MARKETPLACE_LISTING_CURSOR_SECRET must be configured for Listings"
         )
+    if resolved_settings.jobs_cursor_secret is None:
+        raise ValueError("GPU_MARKETPLACE_JOBS_CURSOR_SECRET must be configured for Jobs")
+    signing_keys = {
+        resolved_settings.jwt_secret.get_secret_value(),
+        resolved_settings.listing_cursor_secret.get_secret_value(),
+        resolved_settings.jobs_cursor_secret.get_secret_value(),
+    }
+    if len(signing_keys) != 3:
+        raise ValueError("JWT, Listing cursor, and Jobs cursor secrets must be distinct")
     configure_logging(resolved_settings.log_level)
 
     engine: Engine | None = None
@@ -77,6 +97,19 @@ def create_app(
             resolved_settings.listing_cursor_secret.get_secret_value().encode("utf-8")
         ),
     )
+    jobs_read_service = JobsReadService(
+        reader=PostgresJobReader(account_sessions),
+        cursor_codec=HmacCursorCodec(
+            resolved_settings.jobs_cursor_secret.get_secret_value().encode("utf-8")
+        ),
+    )
+    jobs_cancel_service = JobCancelService(
+        locator_reader=PostgresJobLocatorReader(account_sessions),
+        uow=PostgresJobCancelUnitOfWork(account_sessions),
+    )
+    jobs_submit_service = JobSubmitService(
+        store=PostgresJobSubmissionStore(account_sessions)
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -98,11 +131,22 @@ def create_app(
     )
     app.state.auth_service = auth_service
     app.state.require_authenticated_principal = principal_dependency
+    app.state.jobs_read_service = jobs_read_service
+    app.state.jobs_cancel_service = jobs_cancel_service
+    app.state.jobs_submit_service = jobs_submit_service
     app.include_router(create_auth_router(service=auth_service))
     app.include_router(
         create_listing_router(
             service=listing_service,
             principal_dependency=principal_dependency,
+        )
+    )
+    app.include_router(
+        create_jobs_router(
+            service=jobs_read_service,
+            cancel_service=jobs_cancel_service,
+            submit_service=jobs_submit_service,
+            principal_provider=principal_dependency,
         )
     )
     app.add_middleware(

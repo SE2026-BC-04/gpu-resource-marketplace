@@ -266,6 +266,7 @@ def main() -> int:
             {
                 "GPU_MARKETPLACE_JWT_SECRET": secrets.token_hex(32),
                 "GPU_MARKETPLACE_LISTING_CURSOR_SECRET": secrets.token_hex(32),
+                "GPU_MARKETPLACE_JOBS_CURSOR_SECRET": secrets.token_hex(32),
             }
         )
         local = compose(inspect_env, LOCAL_PROJECT, "ps", "--all", "--format", "json")
@@ -313,6 +314,7 @@ def main() -> int:
                 "GPU_MARKETPLACE_MANAGER_DATABASE_URL": manager_database_url,
                 "GPU_MARKETPLACE_JWT_SECRET": secrets.token_hex(32),
                 "GPU_MARKETPLACE_LISTING_CURSOR_SECRET": secrets.token_hex(32),
+                "GPU_MARKETPLACE_JOBS_CURSOR_SECRET": secrets.token_hex(32),
                 "GPU_MARKETPLACE_CORS_ORIGINS": f'["http://localhost:{ports["FRONTEND_HOST_PORT"]}"]',
             }
         )
@@ -342,6 +344,16 @@ def main() -> int:
             == smoke_values["GPU_MARKETPLACE_JWT_SECRET"]
         ):
             raise RuntimeError("API did not receive a separate Listing cursor secret")
+        if (
+            api_environment["GPU_MARKETPLACE_JOBS_CURSOR_SECRET"]
+            != smoke_values["GPU_MARKETPLACE_JOBS_CURSOR_SECRET"]
+            or smoke_values["GPU_MARKETPLACE_JOBS_CURSOR_SECRET"]
+            in {
+                smoke_values["GPU_MARKETPLACE_JWT_SECRET"],
+                smoke_values["GPU_MARKETPLACE_LISTING_CURSOR_SECRET"],
+            }
+        ):
+            raise RuntimeError("API did not receive a separate Jobs cursor secret")
         if (
             rendered_config["services"]["api"]["environment"]["GPU_MARKETPLACE_DATABASE_URL"]
             != smoke_values["GPU_MARKETPLACE_API_DATABASE_URL"]

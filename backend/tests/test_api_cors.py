@@ -11,6 +11,7 @@ from gpu_marketplace.common.config import Settings
 ALLOWED_ORIGIN = "http://localhost:5173"
 JWT_SECRET = "api-cors-tests-only-secret-32-bytes-minimum"
 LISTING_CURSOR_SECRET = "api-cors-listing-cursor-key-at-least-32-bytes"
+JOBS_CURSOR_SECRET = "api-cors-jobs-cursor-key-at-least-32-bytes"
 
 
 def _client() -> TestClient:
@@ -20,6 +21,7 @@ def _client() -> TestClient:
             cors_origins=[ALLOWED_ORIGIN],
             jwt_secret=JWT_SECRET,
             listing_cursor_secret=LISTING_CURSOR_SECRET,
+            jobs_cursor_secret=JOBS_CURSOR_SECRET,
         ),
         database_probe=lambda: True,
     )

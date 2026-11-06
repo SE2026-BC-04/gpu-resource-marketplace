@@ -106,10 +106,13 @@ jobs:
         run: |
           jwt_secret="$(openssl rand -hex 32)"
           listing_cursor_secret="$(openssl rand -hex 32)"
+          jobs_cursor_secret="$(openssl rand -hex 32)"
           echo "::add-mask::${jwt_secret}"
           echo "::add-mask::${listing_cursor_secret}"
+          echo "::add-mask::${jobs_cursor_secret}"
           echo "GPU_MARKETPLACE_JWT_SECRET=${jwt_secret}" >> "$GITHUB_ENV"
           echo "GPU_MARKETPLACE_LISTING_CURSOR_SECRET=${listing_cursor_secret}" >> "$GITHUB_ENV"
+          echo "GPU_MARKETPLACE_JOBS_CURSOR_SECRET=${jobs_cursor_secret}" >> "$GITHUB_ENV"
       - run: uv sync --project backend --locked
       - run: docker compose --env-file .env.example config --quiet
       - name: Start a local stack to verify smoke cleanup isolation

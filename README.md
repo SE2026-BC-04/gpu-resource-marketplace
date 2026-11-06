@@ -35,14 +35,24 @@ if (-not $cursorSetting -or $cursorSetting.Line -eq 'GPU_MARKETPLACE_LISTING_CUR
     }
     Remove-Variable cursorSecret
 }
+$jobsCursorSetting = Select-String -Path .env -Pattern '^GPU_MARKETPLACE_JOBS_CURSOR_SECRET=.*$'
+if (-not $jobsCursorSetting -or $jobsCursorSetting.Line -eq 'GPU_MARKETPLACE_JOBS_CURSOR_SECRET=') {
+    $jobsCursorSecret = py -3.12 -c "import secrets; print(secrets.token_hex(32))"
+    if ($jobsCursorSetting) {
+        (Get-Content .env) -replace '^GPU_MARKETPLACE_JOBS_CURSOR_SECRET=.*$', "GPU_MARKETPLACE_JOBS_CURSOR_SECRET=$jobsCursorSecret" | Set-Content -Encoding Ascii .env
+    } else {
+        Add-Content -Encoding Ascii .env "GPU_MARKETPLACE_JOBS_CURSOR_SECRET=$jobsCursorSecret"
+    }
+    Remove-Variable jobsCursorSecret
+}
 docker compose --env-file .env up --build
 ```
 
-When upgrading an existing `.env`, keep both signing secrets unchanged and add `GPU_MARKETPLACE_LISTING_CURSOR_SECRET` plus the two database URL entries from `.env.example`; do not replace either key on each restart. The cursor key must be separate from the JWT secret and stable across API restarts so existing listing cursors remain valid.
+When upgrading an existing `.env`, keep the JWT and cursor secrets unchanged and add `GPU_MARKETPLACE_LISTING_CURSOR_SECRET`, `GPU_MARKETPLACE_JOBS_CURSOR_SECRET`, plus the two database URL entries from `.env.example`; do not replace them on each restart. Each cursor key is separate from the JWT secret and from the other cursor key, and stays stable across API restarts so existing cursors remain valid.
 
 The local UI is at `http://localhost:5173`, the operational API at `http://localhost:8000`, and PostgreSQL is bound to `127.0.0.1:5432`. The sample credentials are for local development only. Compose starts five services: `frontend`, `api`, `manager`, `simulator`, and `postgres`.
 
-The API exposes `/health/live`, `/health/ready`, the approved Auth routes, and the GPU Listings routes. Readiness requires PostgreSQL connectivity and query access to the Auth `users` and `user_roles` tables. A fresh database volume is not migrated automatically; the API remains unready and Auth requests fail with a sanitized `503` until an operator provisions the database using the procedure in [backend/migrations/README.md](backend/migrations/README.md). This repository change does not provision an existing persistent database. The API requires a dedicated `GPU_MARKETPLACE_JWT_SECRET` and a separate `GPU_MARKETPLACE_LISTING_CURSOR_SECRET`, each at least 32 UTF-8 bytes; generate both once for the local `.env` as shown above and keep them out of source control. Compose maps separate `GPU_MARKETPLACE_API_DATABASE_URL` and `GPU_MARKETPLACE_MANAGER_DATABASE_URL` values to the corresponding process configuration. The `.env.example` uses the local bootstrap/owner account for local development only; it is not evidence of D1 least-privilege runtime access. Nonlocal deployments must use the D1 `gpm_api_app` and `gpm_manager_app` logins respectively and keep owner/migration credentials separate. The Manager checks its database connection and shuts down on SIGINT/SIGTERM. The Simulator is an independent runtime with health endpoints only. It has no database package, credentials, host port, or database-network attachment.
+The API exposes `/health/live`, `/health/ready`, Auth, GPU Listings and Jobs submit/read/cancel routes. Job submission uses the approved `demo-v1-public1` protected reference generator and commits the Job and reference atomically; the reference is never returned in a public DTO or sent to the Simulator. Readiness requires PostgreSQL connectivity and query access to the Auth `users` and `user_roles` tables. A fresh database volume is not migrated automatically; the API remains unready and Auth requests fail with a sanitized `503` until an operator provisions the database using the procedure in [backend/migrations/README.md](backend/migrations/README.md). This repository change does not provision an existing persistent database. The API requires dedicated `GPU_MARKETPLACE_JWT_SECRET`, `GPU_MARKETPLACE_LISTING_CURSOR_SECRET`, and `GPU_MARKETPLACE_JOBS_CURSOR_SECRET` values, each at least 32 UTF-8 bytes; generate them once for the local `.env` as shown above and keep them out of source control. Compose maps separate `GPU_MARKETPLACE_API_DATABASE_URL` and `GPU_MARKETPLACE_MANAGER_DATABASE_URL` values to the corresponding process configuration. The `.env.example` uses the local bootstrap/owner account for local development only; it is not evidence of D1 least-privilege runtime access. Nonlocal deployments must use the D1 `gpm_api_app` and `gpm_manager_app` logins respectively and keep owner/migration credentials separate. The Manager checks its database connection and shuts down on SIGINT/SIGTERM. The Simulator is an independent runtime with health endpoints only. It has no database package, credentials, host port, or database-network attachment.
 
 Stop the stack with `docker compose --env-file .env down`. Add `--volumes` only when you intentionally want to delete the local PostgreSQL data.
 

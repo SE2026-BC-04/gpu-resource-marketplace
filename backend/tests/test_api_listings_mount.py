@@ -6,6 +6,7 @@ from gpu_marketplace.common.config import Settings
 
 JWT_SECRET = "api-listings-mount-jwt-secret-at-least-32-bytes"
 CURSOR_SECRET = "api-listings-mount-cursor-secret-32-bytes-minimum"
+JOBS_CURSOR_SECRET = "api-listings-mount-jobs-cursor-secret-32-bytes"
 PREFIX = "/api/v1/gpu-listings"
 
 
@@ -15,6 +16,7 @@ def test_create_app_mounts_listings_on_the_shared_principal_dependency() -> None
             _env_file=None,
             jwt_secret=JWT_SECRET,
             listing_cursor_secret=CURSOR_SECRET,
+            jobs_cursor_secret=JOBS_CURSOR_SECRET,
         ),
         database_probe=lambda: True,
         auth_schema_probe=lambda: True,

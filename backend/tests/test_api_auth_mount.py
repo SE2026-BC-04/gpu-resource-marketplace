@@ -9,6 +9,7 @@ from gpu_marketplace.common.config import Settings
 
 JWT_SECRET = "api-mount-tests-only-secret-at-least-32-bytes"
 LISTING_CURSOR_SECRET = "api-mount-tests-listing-cursor-secret-32-bytes"
+JOBS_CURSOR_SECRET = "api-mount-tests-jobs-cursor-secret-32-bytes"
 
 
 def app_settings() -> Settings:
@@ -16,6 +17,7 @@ def app_settings() -> Settings:
         _env_file=None,
         jwt_secret=JWT_SECRET,
         listing_cursor_secret=LISTING_CURSOR_SECRET,
+        jobs_cursor_secret=JOBS_CURSOR_SECRET,
     )
 
 
@@ -46,6 +48,31 @@ def test_create_app_fails_closed_without_listing_cursor_secret() -> None:
     with pytest.raises(ValueError, match="GPU_MARKETPLACE_LISTING_CURSOR_SECRET"):
         create_app(
             Settings(_env_file=None, jwt_secret=JWT_SECRET),
+            database_probe=lambda: True,
+        )
+
+
+def test_create_app_fails_closed_without_jobs_cursor_secret() -> None:
+    with pytest.raises(ValueError, match="GPU_MARKETPLACE_JOBS_CURSOR_SECRET"):
+        create_app(
+            Settings(
+                _env_file=None,
+                jwt_secret=JWT_SECRET,
+                listing_cursor_secret=LISTING_CURSOR_SECRET,
+            ),
+            database_probe=lambda: True,
+        )
+
+
+def test_create_app_rejects_reused_signing_secrets() -> None:
+    with pytest.raises(ValueError, match="secrets must be distinct"):
+        create_app(
+            Settings(
+                _env_file=None,
+                jwt_secret=JWT_SECRET,
+                listing_cursor_secret=LISTING_CURSOR_SECRET,
+                jobs_cursor_secret=JWT_SECRET,
+            ),
             database_probe=lambda: True,
         )
 

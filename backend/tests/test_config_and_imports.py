@@ -83,3 +83,21 @@ def test_jwt_secret_is_redacted_from_settings_repr() -> None:
 def test_listing_cursor_secret_is_redacted_from_settings_repr() -> None:
     secret = "listing-cursor-secret-must-not-appear-in-repr"
     assert secret not in repr(Settings(_env_file=None, listing_cursor_secret=secret))
+
+
+def test_jobs_cursor_secret_must_contain_at_least_256_bits() -> None:
+    secret = "jobs-cursor-test-secret-at-least-32-bytes"
+    settings = Settings(_env_file=None, jobs_cursor_secret=secret)
+    assert settings.jobs_cursor_secret is not None
+    assert settings.jobs_cursor_secret.get_secret_value() == secret
+
+    short_secret = "short-jobs-cursor-key"
+    with pytest.raises(ValidationError, match="Jobs cursor secret") as error:
+        Settings(_env_file=None, jobs_cursor_secret=short_secret)
+    assert short_secret not in str(error.value)
+    assert short_secret not in repr(error.value)
+
+
+def test_jobs_cursor_secret_is_redacted_from_settings_repr() -> None:
+    secret = "jobs-cursor-secret-must-not-appear-in-repr"
+    assert secret not in repr(Settings(_env_file=None, jobs_cursor_secret=secret))

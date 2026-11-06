@@ -675,7 +675,15 @@ def test_unexpected_dependency_error_is_not_misclassified_as_auth(
     )
 
     assert response.status_code == 500
-    assert response.text == "Internal Server Error"
+    request_id = response.headers["X-Request-ID"]
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.json() == {
+        "error": {
+            "code": "INTERNAL_ERROR",
+            "message": "Internal server error.",
+            "request_id": request_id,
+        }
+    }
     assert "private provider failure" not in response.text
     assert app.state.test_reader.list_calls == []
 

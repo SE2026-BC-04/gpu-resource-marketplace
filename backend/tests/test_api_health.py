@@ -5,6 +5,7 @@ from gpu_marketplace.common.config import Settings
 
 JWT_SECRET = "api-health-tests-only-secret-32-bytes-minimum"
 LISTING_CURSOR_SECRET = "api-health-listing-cursor-key-at-least-32-bytes"
+JOBS_CURSOR_SECRET = "api-health-jobs-cursor-key-at-least-32-bytes"
 
 
 def settings() -> Settings:
@@ -12,6 +13,7 @@ def settings() -> Settings:
         _env_file=None,
         jwt_secret=JWT_SECRET,
         listing_cursor_secret=LISTING_CURSOR_SECRET,
+        jobs_cursor_secret=JOBS_CURSOR_SECRET,
     )
 
 
