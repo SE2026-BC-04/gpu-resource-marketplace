@@ -9,14 +9,14 @@ This file records integration progress and evidence. It does not replace approve
 | Item | State |
 |---|---|
 | Local branch | `feat/gpu-int-01-runtime-integration` (existing shared integration branch; no additional branch created) |
-| Integration commits | `b457c0f` — backend/runtime wiring and tests; `ccdfce6` — Jobs frontend/shared-session integration; `a3f9d26` — initial progress snapshot; `deb352c` — fix random-Job-ID reference assertion; `ce6b821` — CI evidence snapshot |
-| Local HEAD before this progress update | `ce6b821` |
-| PR #39 remote head before this update | `ce6b8218031adf1962a50747618027a9cea76514` |
+| Key integration commits | `b457c0f` — backend/runtime wiring and tests; `ccdfce6` — Jobs frontend/shared-session integration; `a3f9d26` — initial progress snapshot; `deb352c` — fix random-Job-ID reference assertion; `ce6b821` — implementation CI evidence snapshot |
+| Implementation HEAD whose CI evidence is summarized here | `ce6b8218031adf1962a50747618027a9cea76514` |
+| PR #39 head when implementation CI evidence was collected | `ce6b8218031adf1962a50747618027a9cea76514` |
 | Local base before this work | `46e976356b83c2384f359f35b08262dfd2970f0b` |
 | Main baseline | `1d8b1b2c52b759d99a072c3d0d889b375083a8c4` |
 | PR #39 before the integration extension | Open, Draft, base `main`, head `46e976356b83c2384f359f35b08262dfd2970f0b`; rechecked through GitHub on 2026-11-07 |
-| PR #39 current state before this progress update | Open, Draft, base `main`, head `ce6b8218031adf1962a50747618027a9cea76514`; GitHub Actions run #42267396758 has all 3 jobs successful |
-| Working tree | Backend/frontend changes, test fix, and the prior progress snapshot are pushed. This post-CI progress update is not yet committed/pushed. |
+| PR #39 state verified for this record | Open, Draft, base `main`, head `6dff51853e64943321087c0b05200d0e2a5eca15`; GitHub Actions run #42268439328 has all 3 jobs successful |
+| Working tree / report maintenance | Implementation and progress evidence are committed on the shared branch; consult PR Actions for status on the latest SHA. |
 | Git gate | Owner authorized work on this branch and PR #39. Do not push `main`, force-push, approve, mark Ready, or merge. |
 
 ## Upstream dependencies
@@ -69,6 +69,7 @@ Commands used existing local venvs directly because `uv` is not on PATH. Docker 
 | `git diff --check` | **PASS** | Exit 0; Git only warns that an existing test file with LF will convert to CRLF on a future checkout write. |
 | Secret scan | **PASS** | Changed-file scan found no private-key block, GitHub token, or AWS access-key pattern. `.env.example` contains blank signing keys and local-only sample DB credentials. |
 | GitHub Actions on pushed `ce6b821` | **PASS — all 3 jobs** | Run [#42267396758](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42267396758): Python **PASS** (backend 1,153 passed; Simulator 2 passed), Frontend **PASS** (Vitest/typecheck/build), Compose **PASS** (config/smoke). PostgreSQL submit/cancel adapter tests and the real HTTP + disposable PostgreSQL E2E test passed. |
+| GitHub Actions on pushed `6dff518` | **PASS — all 3 jobs** | Run [#42268439328](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42268439328): Python, Frontend, and Compose jobs all completed successfully after the progress-documentation update. |
 | Earlier GitHub Actions on `a3f9d26` | **FAIL — corrected and rerun** | Run [#42266303614](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42266303614): 1,152 passed / 1 failed in Python; Frontend and Compose passed. The failed adapter assertion assumed a fixed seed for a DB-generated random Job ID; corrected in `deb352c`. Run #42267396758 on `ce6b821` then passed all jobs. |
 | Earlier CI on `46e9763` | **PASS, older HEAD only** | Run [#42252304145](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42252304145) passed Python, Frontend, and Compose before this integration diff; it is not evidence for new changes. |
 
