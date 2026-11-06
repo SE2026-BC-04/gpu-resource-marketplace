@@ -1,0 +1,62 @@
+.jobs-page {
+  width: min(100%, 1080px);
+  margin: 0 auto;
+  padding: clamp(20px, 4vw, 48px);
+  color: #e8eef9;
+}
+
+.jobs-page-header, .jobs-section-heading, .job-detail-heading, .jobs-list-item, .jobs-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.jobs-page-header { margin-bottom: 28px; }
+.jobs-page h1 { margin: 8px 0 0; font-size: clamp(2rem, 5vw, 3rem); }
+.jobs-page h2 { margin: 0; font-size: 1.4rem; }
+.jobs-page h3 { margin: 0; }
+.jobs-page p { color: #adbbcf; line-height: 1.6; }
+.jobs-eyebrow { margin: 0; color: #88b7ff !important; font-size: .8rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.jobs-role { padding: 7px 12px; border: 1px solid #40536d; border-radius: 999px; color: #c8d7ed; font-size: .8rem; }
+.submit-job, .jobs-browser, .job-detail { margin: 20px 0; padding: clamp(18px, 3vw, 28px); border: 1px solid #33445d; border-radius: 16px; background: #162235; }
+.submit-job > p { max-width: 720px; }
+.submit-job form { display: grid; gap: 16px; max-width: 760px; }
+.submit-job label, .jobs-section-heading label { display: grid; gap: 7px; color: #c8d7ed; font-size: .92rem; }
+.submit-job-numbers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.jobs-page input, .jobs-page select { min-width: 0; padding: 10px 12px; border: 1px solid #465a75; border-radius: 8px; background: #0f1928; color: #e8eef9; font: inherit; }
+.jobs-page button { padding: 9px 13px; border: 1px solid #5274a0; border-radius: 8px; background: #203958; color: #f0f5ff; font: inherit; cursor: pointer; }
+.jobs-page button:hover:not(:disabled) { background: #2a4a70; }
+.jobs-page button:disabled { cursor: not-allowed; opacity: .55; }
+.jobs-page .jobs-danger { border-color: #a95b68; background: #542832; }
+.jobs-list { display: grid; gap: 9px; margin: 18px 0; padding: 0; list-style: none; }
+.jobs-list-item { width: 100%; text-align: left; border-color: #344862 !important; background: #111d2d !important; }
+.jobs-list-item[aria-current="true"] { outline: 2px solid #79a9eb; }
+.jobs-list-item > span { display: grid; justify-items: start; gap: 7px; }
+.jobs-list-item small { color: #9eafc7; }
+.jobs-list code, .job-detail code, .jobs-error code { overflow-wrap: anywhere; font-size: .84em; }
+.job-status { display: inline-flex; width: max-content; padding: 5px 9px; border: 1px solid #56708e; border-radius: 999px; color: #d6e4f7; font-size: .78rem; white-space: nowrap; }
+.job-status--queued { border-color: #bd9451; color: #ffe0a2; }
+.job-status--running { border-color: #668cc5; color: #b9d5ff; }
+.job-status--completed { border-color: #438568; color: #b5efd1; }
+.job-status--failed, .job-status--cancelled { border-color: #a95b68; color: #ffc0c7; }
+.jobs-pagination { justify-content: flex-start; margin-top: 16px; }
+.jobs-detail-panel { min-height: 1px; }
+.job-detail dl { display: grid; grid-template-columns: minmax(100px, 150px) minmax(0, 1fr); gap: 10px 16px; margin: 20px 0; }
+.job-detail dt { color: #9eafc7; }
+.job-detail dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.jobs-action { display: grid; justify-items: start; gap: 12px; }
+.jobs-error, .jobs-uncertain { display: grid; justify-items: start; gap: 9px; margin: 14px 0; padding: 13px; border: 1px solid #a95b68; border-radius: 9px; color: #ffd0d4; background: #3c2028; }
+.jobs-error small { color: #ffc0c7; }
+.jobs-success { padding: 12px; border: 1px solid #438568; border-radius: 9px; color: #b5efd1 !important; background: #142d25; }
+.jobs-uncertain { border-color: #bd9451; color: #ffe0a2; background: #30291c; }
+.jobs-empty { padding: 18px 0; }
+.jobs-section-heading { align-items: end; }
+
+@media (max-width: 620px) {
+  .jobs-page-header, .jobs-section-heading { align-items: flex-start; flex-direction: column; }
+  .submit-job-numbers { grid-template-columns: 1fr; }
+  .jobs-list-item { align-items: flex-start; flex-direction: column; }
+  .job-detail dl { grid-template-columns: 1fr; gap: 5px; }
+  .job-detail dd { margin-bottom: 8px; }
+}
