@@ -1,11 +1,16 @@
+import importlib.util
 from pathlib import Path
 import subprocess
 
 import yaml
 
-from tools import compose_smoke
-
 ROOT = Path(__file__).resolve().parents[1]
+_SMOKE_SPEC = importlib.util.spec_from_file_location(
+    "gpu_marketplace_compose_smoke", ROOT / "tools" / "compose_smoke.py"
+)
+assert _SMOKE_SPEC is not None and _SMOKE_SPEC.loader is not None
+compose_smoke = importlib.util.module_from_spec(_SMOKE_SPEC)
+_SMOKE_SPEC.loader.exec_module(compose_smoke)
 
 
 def test_compose_has_exactly_five_expected_services_and_isolated_networks() -> None:
