@@ -9,15 +9,15 @@ This file records integration progress and evidence. It does not replace approve
 | Item | State |
 |---|---|
 | Local branch | `feat/gpu-int-01-runtime-integration` (existing shared integration branch; no additional branch created) |
-| Key integration commits | `b457c0f` — runtime wiring; `ccdfce6` — Jobs frontend; `deb352c` — adapter assertion fix; `ce6b821` — first green implementation CI; `1255831` — Playwright browser E2E and CI setup |
-| Latest implementation HEAD with browser E2E evidence | `125583170829421d5ea5be5022465f715a5b3d2a` |
-| CI run for the browser E2E HEAD | [#42274038230](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42274038230) — all 3 jobs passed |
+| Key integration commits | `b457c0f` — runtime wiring; `ccdfce6` — Jobs frontend; `deb352c` — adapter assertion fix; `ce6b821` — first green implementation CI; `1255831` — Playwright browser E2E and CI setup; `0f48b4d` — final remediation; `b6b851e` — local database URL hardening |
+| Latest implementation HEAD with browser E2E evidence | `b6b851eebbdb31ddd552eb692480ef59dcb936d1` |
+| CI run for the latest implementation HEAD | [#42346424133](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42346424133) — all 3 jobs passed, including disposable PostgreSQL and browser E2E |
 | Local base before this work | `46e976356b83c2384f359f35b08262dfd2970f0b` |
 | Main baseline | `1d8b1b2c52b759d99a072c3d0d889b375083a8c4` |
 | PR #39 before the integration extension | Open, Draft, base `main`, head `46e976356b83c2384f359f35b08262dfd2970f0b`; rechecked through GitHub on 2026-11-07 |
-| Latest pushed HEAD before this progress update | `125583170829421d5ea5be5022465f715a5b3d2a`; Actions run #42274038230 passed all 3 jobs |
-| PR #39 state verified before this progress update | Open, Draft, base `main`, head `125583170829421d5ea5be5022465f715a5b3d2a`; not merged |
-| Worktree before this progress update | Clean at `125583170829421d5ea5be5022465f715a5b3d2a`; this evidence update is being added to the same branch |
+| Latest pushed HEAD before this progress update | `b6b851eebbdb31ddd552eb692480ef59dcb936d1`; Actions run #42346424133 passed all 3 jobs |
+| PR #39 state verified before this progress update | Open, Draft, base `main`, head `b6b851eebbdb31ddd552eb692480ef59dcb936d1`; not merged |
+| Worktree before this progress update | Clean at `b6b851eebbdb31ddd552eb692480ef59dcb936d1`; this evidence update is being added to the same branch |
 | Git gate | Owner authorized work on this branch and PR #39. Do not push `main`, force-push, approve, mark Ready, or merge. |
 
 ## Upstream dependencies
@@ -103,8 +103,28 @@ Before editing, `git fetch origin` succeeded. The shared branch and PR #39 were 
 
 This remediation was tested locally with Python 3.12.15 from the repository venv. `uv` and Docker are unavailable in the local PATH; Node 22.13.0 is available, but `npm`'s global shim is broken, so previously installed frontend dependencies were used. Full backend regression passed at **821 passed, 358 skipped, 0 failed**; the skipped PostgreSQL tests require a safety-marked disposable database. Simulator, frontend Vitest, TypeScript, and production build checks previously passed on the unchanged implementation; Compose, local PostgreSQL, and local browser E2E remain **NOT_RUN**. GitHub Actions run [#42343339313](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42343339313) on implementation commit `0f48b4d67573cb32a01f88a4a4ba7dd0a40ea7f4` passed all three CI jobs, including full disposable PostgreSQL/browser E2E and isolated Compose smoke.
 
+## Final local-database security remediation — 2026-11-07
+
+Before editing, local `HEAD` and the PR #39 branch were `142eac332cd15c33aa312cf456261ad849ca90fc`; the worktree contained no pre-existing changes. A direct `git fetch origin` was blocked by this workstation's network, so the connected GitHub integration was used to confirm PR #39 was still open and Draft at that exact head, with no new owner decision. Commit `b6b851eebbdb31ddd552eb692480ef59dcb936d1` was pushed as a fast-forward to the existing branch. No branch or PR was created.
+
+| Finding / check | Result | Evidence |
+|---|---|---|
+| P2 — local demo database URL bypass | **FIXED** | `validate_local_owner_url()` rejects every query parameter, accepts only the explicit PostgreSQL psycopg driver, loopback host, explicit username and valid TCP port, and the exact `gpu_marketplace` database. Before engine creation, the CLI rejects ambient `PGHOST`, `PGHOSTADDR`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGSERVICE`, and `PGSERVICEFILE`. Errors report names/types only and do not expose URL credentials, routing values, SQL, or exception details. |
+| LOCAL-01..12 regressions | **PASS** | Tests cover accepted loopback forms, remote/wrong-database/wrong-driver/malformed/no-port/no-user URLs, `host`, `hostaddr`, `service` and other query overrides, non-owner rejection, environment overrides, and that an override is rejected before `create_engine`; no test connects to a remote host. |
+| P3 — demo account PostgreSQL integration tests | **PASS in CI; locally guarded** | Four disposable-database tests cover Worker/Client provisioning, roles/profile, Scrypt hashes, actual `AuthService` logins, duplicate no-mutation, transaction rollback, and database/owner mismatch with no insert. They skipped locally under the repository safety guard and all ran in CI's disposable PostgreSQL job. |
+| Cancel / COMMIT / Auth-CORS regressions | **PASS** | Targeted local suite and the full CI Python suite passed. CI also passed `test_phase1_runtime_http_postgres_e2e.py` against disposable PostgreSQL. |
+| Readiness decision CR-GPU-INT-01-READY-01 | **NEEDS_OWNER_DECISION** | The latest PR comments still contain only the proposal. No Option B or readiness-contract change was implemented. |
+| C1 Scrypt decision | **Option A — integration only** | Benchmark/load evidence remains `NOT_RUN / PENDING`; no production deployment claim is made. |
+
+Local verification used Python 3.12.15 from the repository venv because `uv` is unavailable. The focused command for `test_local_demo_accounts.py`, `test_jobs_auth_integration.py`, and `test_api_cors.py` passed **46 tests**, skipped **4** guarded PostgreSQL tests, and exited 0 in 2.41s. Full backend regression passed **839**, skipped **362**, failed **0**, with 2 warnings; exit 0 in 27.94s. Simulator passed **2** (exit 0). Frontend Vitest passed **158 / 10 files**; TypeScript checks and production build passed. Local `npm ci` could not run because the global npm shim points to a missing `npm-cli.js`; existing `node_modules` were used for Vitest, `tsc`, and build. Docker/Compose and local PostgreSQL/browser E2E were `NOT_RUN` because Docker is unavailable and no guarded disposable database is configured.
+
+GitHub Actions run [#42346424133](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42346424133) on `b6b851e` passed all 3 jobs. Python: **1,201 passed** in backend/topology tests, including `test_phase1_runtime_http_postgres_e2e.py`; Simulator: **2 passed**. Frontend: **158 passed**, typecheck and production build passed. Compose smoke verified five healthy services, production frontend and SPA fallback, the runtime API URL with a dynamically reserved port, host-to-PostgreSQL `SELECT 1`, API/Manager database access, Auth fail-closed before disposable migrations and available after, Simulator PostgreSQL isolation, and cleanup that left the pre-existing local stack unchanged.
+
+`git diff --check`, changed-file secret-pattern scan, README relative-link check, and the PowerShell cryptographic secret-generation helper check passed locally. Independent human review, renewed TV2/TV3/TV4/TV5 ACKs for the latest head, and the owner L2 readiness decision remain pending; prior ACKs and reviews do not count as confirmation on this new head. Existing Auth-schema and CORS review threads remain open. PR #39 stays Draft; no self-approval, Ready conversion, or merge was performed.
+
 ## Next actions
 
-1. Keep PR #39 Draft and obtain renewed TV2/TV3/TV4 compatibility ACKs plus one independent human review on the latest head.
-2. Address any review findings on this same branch and rerun CI; approvals for older SHAs do not carry over.
-3. Do not mark Ready or merge until the required review confirmations and applicable gates are complete.
+1. Keep PR #39 Draft and obtain renewed TV2/TV3/TV4/TV5 compatibility ACKs plus one independent human review on the latest head.
+2. Obtain the owner's L2 decision for CR-GPU-INT-01-READY-01 before implementing any readiness expansion.
+3. Address any review findings on this same branch and rerun CI; approvals for older SHAs do not carry over.
+4. Do not mark Ready or merge until the required review confirmations and applicable gates are complete.
