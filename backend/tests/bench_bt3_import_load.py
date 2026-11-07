@@ -30,7 +30,7 @@ from sqlalchemy.engine import Engine
 
 from bt3_account_writer import PostgresAccountWriter
 from gpu_marketplace.identity.account_import import FailReason, import_accounts
-from gpu_marketplace.identity.passwords import DEFAULT_PROFILE, ScryptPasswordHasher
+from gpu_marketplace.identity.passwords import ScryptPasswordHasher
 
 TASKS = 40
 ROUNDS = 3
@@ -97,7 +97,10 @@ def test_bt3_load_40_concurrent_import_tasks(migrated_database_with_teardown: En
 
     rounds = [run_round(engine, hasher, n) for n in range(1, ROUNDS + 1)]
     result = {
-        "scenario": f"{TASKS} concurrent tasks x 1 record, shared ScryptPasswordHasher(DEFAULT_PROFILE n=2^15 r=8 p=3, max_concurrent=4, timeout=2s)",
+        "scenario": (
+            f"{TASKS} concurrent tasks x 1 record, shared ScryptPasswordHasher"
+            "(DEFAULT_PROFILE n=2^15 r=8 p=3, max_concurrent=4, timeout=2s)"
+        ),
         "machine": {"platform": platform.platform(), "processor": platform.processor(), "cpu_count": os.cpu_count()},
         "single_hash_median_s": round(statistics.median(single), 3),
         "p95_target_s": P95_TARGET_SECONDS,

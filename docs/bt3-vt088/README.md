@@ -2,6 +2,8 @@
 
 > Coursework experiment by Nông Gia Khánh (23001892). **Not** the project's provisioning tool and **not for merge** without team review. Account provisioning belongs to GPU-002 + GPU-003 and is not designed yet.
 
+> **AI assistance disclosure:** the implementation plan was produced by Claude Code in an isolated session that saw only the identity module; code, tests, harness and documentation were written with Claude Code and reviewed against the repository. Details: AI Usage Log in the report and `evidence/ai_plan_*`.
+
 **Change request:** import accounts in bulk; an invalid record must never lose a valid record.
 **Invariant:** a record is reported `created` if and only if its account was committed.
 **Baseline:** `main` @ `1d8b1b2`.

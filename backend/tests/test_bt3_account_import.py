@@ -200,7 +200,8 @@ def test_tc06_failure_path_persistence_error_is_never_reported_as_created() -> N
 
 def test_tc07_store_unavailable_stops_the_batch_and_saves_nothing_after_it() -> None:
     writer = FakeWriter(fail=lambda account: AccountStoreUnavailable() if account.login_name == "down" else None)
-    report = import_accounts([record("a"), record("down"), record("b"), record("bad", role="x"), record("c")], writer, FakeHasher())
+    batch = [record("a"), record("down"), record("b"), record("bad", role="x"), record("c")]
+    report = import_accounts(batch, writer, FakeHasher())
     assert [c.index for c in report.created] == [0]
     assert reasons(report.failed) == {1: FailReason.DB_UNAVAILABLE, 2: FailReason.DB_UNAVAILABLE, 4: FailReason.DB_UNAVAILABLE}
     assert reasons(report.rejected) == {3: RejectReason.INVALID_ROLE}
@@ -222,7 +223,8 @@ def test_tc09_report_and_logs_never_contain_passwords_or_hashes(caplog: pytest.L
     caplog.set_level(logging.DEBUG)
     secret = "s3cret-password-value"
     writer = FakeWriter()
-    report = import_accounts([record("alice", password=secret), record("x", role="bad", password=secret + "2")], writer, FakeHasher())
+    batch = [record("alice", password=secret), record("x", role="bad", password=secret + "2")]
+    report = import_accounts(batch, writer, FakeHasher())
     stored_hash = next(iter(writer.rows.values())).password_hash
     text = repr(report) + caplog.text + repr(next(iter(writer.rows.values())))
     assert secret not in text and stored_hash not in text
@@ -262,7 +264,10 @@ def invalid_records(draw: st.DrawFn) -> Generated:
     good = draw(valid_records()).record
     corruption = draw(
         st.sampled_from(
-            ["not_mapping", "empty_name", "long_name", "nul_name", "no_password", "surrogate_password", "bad_role", "bad_status", "bad_id"]
+            [
+                "not_mapping", "empty_name", "long_name", "nul_name", "no_password",
+                "surrogate_password", "bad_role", "bad_status", "bad_id",
+            ]
         )
     )
     bad: object = dict(good)
