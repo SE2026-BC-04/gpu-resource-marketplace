@@ -70,6 +70,8 @@ if (-not $jobsCursorSetting -or $jobsCursorSetting.Line -eq 'GPU_MARKETPLACE_JOB
 
 The Compose file does not run migrations or create user accounts. On a fresh local database, provision runtime roles, apply the reviewed migrations, and create demo accounts before starting the full stack. The following PowerShell commands use the existing `.env`; keep it local and ignored by Git.
 
+Run the entire provisioning block in one PowerShell window. It waits for PostgreSQL health and stops on any non-zero bootstrap or migration exit code. The helper suppresses native command output on failure so an error cannot print a credential-bearing DSN.
+
 ```powershell
 # Load the simple KEY=value entries from .env into this PowerShell process.
 foreach ($envLine in Get-Content -LiteralPath .env) {
@@ -78,68 +80,106 @@ foreach ($envLine in Get-Content -LiteralPath .env) {
     }
 }
 
-# Start only PostgreSQL while provisioning.
-docker compose --env-file .env up --detach postgres
+. .\tools\local_setup.ps1
+$ErrorActionPreference = 'Stop'
 
-function New-LocalRolePassword {
-    $randomBytes = New-Object byte[] 32
-    $randomGenerator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    try {
-        $randomGenerator.GetBytes($randomBytes)
-        return [BitConverter]::ToString($randomBytes).Replace('-', '').ToLowerInvariant()
-    } finally {
-        $randomGenerator.Dispose()
+try {
+    Assert-LocalSetupEnvironment
+
+    # Start only PostgreSQL and wait for its Compose healthcheck before role bootstrap.
+    Invoke-LocalSetupNativeCommand -Step 'PostgreSQL healthy' -Command {
+        docker compose --env-file .env up --detach --wait --wait-timeout 120 postgres
     }
-}
 
-function Set-LocalEnvValue([string]$Key, [string]$Value) {
-    $envLines = @(Get-Content -LiteralPath .env)
-    $keyPattern = '^' + [regex]::Escape($Key) + '='
-    $found = $false
-    for ($index = 0; $index -lt $envLines.Count; $index++) {
-        if ($envLines[$index] -match $keyPattern) {
-            $envLines[$index] = "$Key=$Value"
-            $found = $true
+    function New-LocalRolePassword {
+        $randomBytes = New-Object byte[] 32
+        $randomGenerator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        try {
+            $randomGenerator.GetBytes($randomBytes)
+            return [BitConverter]::ToString($randomBytes).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $randomGenerator.Dispose()
         }
     }
-    if (-not $found) { $envLines += "$Key=$Value" }
-    Set-Content -LiteralPath .env -Value $envLines -Encoding Ascii
+
+    # Create role passwords only when missing. Persist them before bootstrap so a
+    # later retry reuses the same values. Existing PostgreSQL roles are never rotated.
+    if (-not $env:GPU_MARKETPLACE_API_DB_PASSWORD) {
+        $env:GPU_MARKETPLACE_API_DB_PASSWORD = New-LocalRolePassword
+    }
+    if (-not $env:GPU_MARKETPLACE_MANAGER_DB_PASSWORD) {
+        $env:GPU_MARKETPLACE_MANAGER_DB_PASSWORD = New-LocalRolePassword
+    }
+    Set-LocalEnvValue -Key 'GPU_MARKETPLACE_API_DB_PASSWORD' -Value $env:GPU_MARKETPLACE_API_DB_PASSWORD -EnvPath .env
+    Set-LocalEnvValue -Key 'GPU_MARKETPLACE_MANAGER_DB_PASSWORD' -Value $env:GPU_MARKETPLACE_MANAGER_DB_PASSWORD -EnvPath .env
+
+    $databasePort = if ($env:POSTGRES_HOST_PORT) { $env:POSTGRES_HOST_PORT } else { '5432' }
+    $escapedOwnerUsername = [uri]::EscapeDataString($env:POSTGRES_USER)
+    $escapedOwnerPassword = [uri]::EscapeDataString($env:POSTGRES_PASSWORD)
+    $escapedDatabase = [uri]::EscapeDataString($env:POSTGRES_DB)
+    $ownerDatabaseUrl = "postgresql+psycopg://$escapedOwnerUsername`:$escapedOwnerPassword@127.0.0.1`:$databasePort/$escapedDatabase"
+    $env:GPU_MARKETPLACE_MIGRATION_DATABASE_URL = $ownerDatabaseUrl
+    Set-LocalEnvValue -Key 'GPU_MARKETPLACE_MIGRATION_DATABASE_URL' -Value $ownerDatabaseUrl -EnvPath .env
+
+    # The bootstrap is create-only. It never rotates an existing role password.
+    Invoke-LocalSetupNativeCommand -Step 'Runtime role bootstrap' -Command {
+        uv run --project backend --locked python -m gpu_marketplace.common.db_roles
+    }
+
+    # Replace owner DSNs in both this shell and .env before Compose can read either one.
+    Set-LocalRuntimeDatabaseUrls -EnvPath .env
+
+    # Migrations use the owner URL, separately from both restricted runtime URLs.
+    $env:GPU_MARKETPLACE_DATABASE_URL = $ownerDatabaseUrl
+    Invoke-LocalSetupNativeCommand -Step 'Alembic migration to head' -Command {
+        uv run --project backend --locked alembic -c backend/alembic.ini upgrade head
+    }
+    Invoke-LocalSetupNativeCommand -Step 'Alembic current revision' -Command {
+        uv run --project backend --locked alembic -c backend/alembic.ini current
+    }
+    Invoke-LocalSetupNativeCommand -Step 'Database revision matches repository head' -Command {
+        uv run --project backend --locked python tools/verify_alembic_head.py
+    }
+
+    # Validate the effective Compose config without printing the resolved secrets.
+    $composeConfigText = docker compose --env-file .env config --format json 2>$null
+    if ($LASTEXITCODE -ne 0) { throw 'Compose configuration validation failed; output was suppressed.' }
+    try {
+        $composeConfig = $composeConfigText | ConvertFrom-Json
+    } catch {
+        throw 'Compose configuration could not be parsed; output was suppressed.'
+    }
+    $apiComposeDsn = [string]$composeConfig.services.api.environment.GPU_MARKETPLACE_DATABASE_URL
+    $managerComposeDsn = [string]$composeConfig.services.manager.environment.GPU_MARKETPLACE_DATABASE_URL
+    $apiComposeUser = [regex]::Match($apiComposeDsn, '^postgresql\+psycopg://(?<user>[^:@/]+):').Groups['user'].Value
+    $managerComposeUser = [regex]::Match($managerComposeDsn, '^postgresql\+psycopg://(?<user>[^:@/]+):').Groups['user'].Value
+    if ($apiComposeDsn -ne $env:GPU_MARKETPLACE_API_DATABASE_URL -or $apiComposeUser -ne 'gpm_api_app') {
+        throw 'Compose API configuration does not use the restricted API login; DSN details were suppressed.'
+    }
+    if ($managerComposeDsn -ne $env:GPU_MARKETPLACE_MANAGER_DATABASE_URL -or $managerComposeUser -ne 'gpm_manager_app') {
+        throw 'Compose Manager configuration does not use the restricted Manager login; DSN details were suppressed.'
+    }
+    Remove-Variable composeConfigText, composeConfig, apiComposeDsn, managerComposeDsn, apiComposeUser, managerComposeUser
+
+    # Test API/Manager native logins after grants exist. This detects stale passwords
+    # without rotating roles. A mismatch stops before demo accounts or V1 startup.
+    Invoke-LocalSetupNativeCommand -Step 'Restricted runtime role verification' -Command {
+        uv run --project backend --locked python tools/verify_runtime_roles.py
+    }
+
+    # Interactive prompts do not echo passwords. This CLI refuses remote hosts,
+    # databases other than gpu_marketplace, and non-owner connections.
+    uv run --project backend --locked python -m gpu_marketplace.common.local_demo_accounts --allow-local-dev-db
+    if ($LASTEXITCODE -ne 0) {
+        throw "Demo-account provisioning failed (exit code $LASTEXITCODE). Setup stopped."
+    }
+} catch {
+    Write-Error 'Local provisioning stopped. Review the failed step and exit code; sensitive command output was suppressed.'
+    throw
 }
-
-# Create random role passwords once. On later runs, reuse the values already in .env.
-if (-not $env:GPU_MARKETPLACE_API_DB_PASSWORD) {
-    $env:GPU_MARKETPLACE_API_DB_PASSWORD = New-LocalRolePassword
-}
-if (-not $env:GPU_MARKETPLACE_MANAGER_DB_PASSWORD) {
-    $env:GPU_MARKETPLACE_MANAGER_DB_PASSWORD = New-LocalRolePassword
-}
-$databasePort = if ($env:POSTGRES_HOST_PORT) { $env:POSTGRES_HOST_PORT } else { '5432' }
-$escapedOwnerPassword = [uri]::EscapeDataString($env:POSTGRES_PASSWORD)
-$ownerDatabaseUrl = "postgresql+psycopg://$($env:POSTGRES_USER):$escapedOwnerPassword@127.0.0.1:$databasePort/$($env:POSTGRES_DB)"
-$env:GPU_MARKETPLACE_MIGRATION_DATABASE_URL = $ownerDatabaseUrl
-
-# The bootstrap is create-only. Do not pass passwords as command-line arguments.
-uv run --project backend --locked python -m gpu_marketplace.common.db_roles
-
-# Run Alembic as the owner/migration connection, never as the API runtime role.
-$env:GPU_MARKETPLACE_DATABASE_URL = $ownerDatabaseUrl
-uv run --project backend --locked alembic upgrade head
-
-# Persist local-only credentials/DSNs so API and Manager use their restricted login roles.
-$apiPasswordForUrl = [uri]::EscapeDataString($env:GPU_MARKETPLACE_API_DB_PASSWORD)
-$managerPasswordForUrl = [uri]::EscapeDataString($env:GPU_MARKETPLACE_MANAGER_DB_PASSWORD)
-Set-LocalEnvValue 'GPU_MARKETPLACE_API_DB_PASSWORD' $env:GPU_MARKETPLACE_API_DB_PASSWORD
-Set-LocalEnvValue 'GPU_MARKETPLACE_MANAGER_DB_PASSWORD' $env:GPU_MARKETPLACE_MANAGER_DB_PASSWORD
-Set-LocalEnvValue 'GPU_MARKETPLACE_MIGRATION_DATABASE_URL' $ownerDatabaseUrl
-Set-LocalEnvValue 'GPU_MARKETPLACE_API_DATABASE_URL' "postgresql+psycopg://gpm_api_app:$apiPasswordForUrl@postgres:5432/$($env:POSTGRES_DB)"
-Set-LocalEnvValue 'GPU_MARKETPLACE_MANAGER_DATABASE_URL' "postgresql+psycopg://gpm_manager_app:$managerPasswordForUrl@postgres:5432/$($env:POSTGRES_DB)"
-
-# Interactive prompts do not echo passwords. The command refuses remote hosts,
-# databases other than gpu_marketplace, and non-owner connections.
-uv run --project backend --locked python -m gpu_marketplace.common.local_demo_accounts --allow-local-dev-db
 ```
 
-The account tool inserts one active `WORKER` and one active `CLIENT`, hashes their passwords with the configured Scrypt implementation, and refuses to overwrite existing login names. It changes no schema or roles and stores no plaintext password. This bootstrap sequence is for a fresh local development database. If a reused volume contains runtime roles whose passwords are unknown, stop and resolve those credentials with its operator; do not regenerate passwords or use `--rotate-password`.
+The account tool inserts one active `WORKER` and one active `CLIENT`, hashes their passwords with the configured Scrypt implementation, and refuses to overwrite existing login names. It changes no schema or roles and stores no plaintext password. This bootstrap sequence is for a fresh local development database. Existing PostgreSQL roles are create-only: if a reused volume has unknown or mismatched runtime passwords, native login verification stops setup without changing them. Resolve credentials with the database operator; do not regenerate passwords or use `--rotate-password`.
 
 The demo-account tool accepts only a PostgreSQL URL with an explicit loopback host, TCP port, username, and the `gpu_marketplace` database; it rejects every URL query parameter. It also refuses to connect if `PGHOST`, `PGHOSTADDR`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGSERVICE`, or `PGSERVICEFILE` is set in the current PowerShell environment. Inspect and clear any such routing overrides before running the tool.
 

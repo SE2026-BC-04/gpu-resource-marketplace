@@ -63,6 +63,32 @@ def test_frontend_compose_builds_production_bundle_for_selected_api_host_port() 
     assert "file = indexFile;" in production_server
 
 
+def test_readme_local_setup_fails_fast_uses_root_alembic_config_and_syncs_runtime_dsns() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert ". .\\tools\\local_setup.ps1" in readme
+    assert "Invoke-LocalSetupNativeCommand -Step 'Runtime role bootstrap'" in readme
+    assert "Invoke-LocalSetupNativeCommand -Step 'Alembic migration to head'" in readme
+    assert "alembic -c backend/alembic.ini upgrade head" in readme
+    migration_readme = (ROOT / "backend" / "migrations" / "README.md").read_text(encoding="utf-8")
+    assert "--project backend --locked alembic -c backend/alembic.ini upgrade head" in migration_readme
+    assert "Set-LocalRuntimeDatabaseUrls -EnvPath .env" in readme
+    assert "docker compose --env-file .env config --format json" in readme
+    assert "gpm_api_app" in readme and "gpm_manager_app" in readme
+
+
+def test_compose_smoke_verifies_native_session_users_owner_and_restart_persistence() -> None:
+    smoke = (ROOT / "tools" / "compose_smoke.py").read_text(encoding="utf-8")
+
+    assert "SELECT current_user, session_user" in smoke
+    assert "pg_get_userbyid(datdba)" in smoke
+    assert "has_database_privilege(current_user,current_database(),'CREATE')" in smoke
+    assert "has_schema_privilege(current_user,'public','CREATE')" in smoke
+    assert "verify_runtime_roles_from_host" in smoke
+    assert '"down", "--remove-orphans"' in smoke
+    assert "verify_restart_persistence" in smoke
+
+
 def test_smoke_env_file_is_not_overridden_by_ambient_process_values(
     tmp_path: Path, monkeypatch
 ) -> None:

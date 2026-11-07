@@ -77,6 +77,21 @@ jobs:
         env:
           GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS: "1"
         run: uv run --project backend --locked --group dev pytest backend/tests tests -rs
+      - name: Verify README Alembic setup from repository root on the disposable database
+        shell: bash
+        run: |
+          api_password="$(openssl rand -hex 32)"
+          manager_password="$(openssl rand -hex 32)"
+          echo "::add-mask::${api_password}"
+          echo "::add-mask::${manager_password}"
+          export GPU_MARKETPLACE_MIGRATION_DATABASE_URL="${GPU_MARKETPLACE_TEST_DATABASE_URL}"
+          export GPU_MARKETPLACE_API_DB_PASSWORD="${api_password}"
+          export GPU_MARKETPLACE_MANAGER_DB_PASSWORD="${manager_password}"
+          uv run --project backend --locked python -m gpu_marketplace.common.db_roles
+          export GPU_MARKETPLACE_DATABASE_URL="${GPU_MARKETPLACE_MIGRATION_DATABASE_URL}"
+          uv run --project backend --locked alembic -c backend/alembic.ini upgrade head
+          uv run --project backend --locked alembic -c backend/alembic.ini current
+          uv run --project backend --locked python tools/verify_alembic_head.py
       - run: uv sync --project simulator --locked --group dev
       - run: uv run --project simulator --locked --group dev pytest simulator/tests
 
@@ -137,3 +152,11 @@ jobs:
       - name: Stop the CI local stack
         if: always()
         run: docker compose --env-file .env.example -p gpu-resource-marketplace down
+
+  local-setup-powershell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test stale owner DSN replacement and setup fail-fast behavior
+        shell: pwsh
+        run: ./tools/test_local_setup.ps1

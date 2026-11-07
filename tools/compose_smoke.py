@@ -180,15 +180,103 @@ def verify_runtime_role(env_file: Path, service: str, expected_role: str) -> Non
         "import os; from sqlalchemy import create_engine, text; "
         "engine=create_engine(os.environ['GPU_MARKETPLACE_DATABASE_URL']); "
         "connection=engine.connect(); "
-        "row=connection.execute(text(\"SELECT current_user, "
+        "row=connection.execute(text(\"SELECT current_user, session_user, "
+        "(SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=current_database()), "
+        "(SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls "
+        " FROM pg_roles WHERE rolname=current_user), "
         "has_database_privilege(current_user,current_database(),'CREATE'), "
         "has_schema_privilege(current_user,'public','CREATE')\")).one(); "
         "connection.close(); engine.dispose(); "
-        f"assert row == ('{expected_role}', False, False), row; print('runtime_role_ok')"
+        f"assert row[0] == '{expected_role}' and row[1] == '{expected_role}' and "
+        "row[2] != row[0] and not any(row[3:]), 'runtime role privilege check failed'; "
+        "print('runtime_role_ok')"
     )
     result = compose(env_file, PROJECT, "exec", "--no-TTY", service, "python", "-c", probe)
     if result.returncode or result.stdout.strip() != "runtime_role_ok":
         raise RuntimeError(f"{service} runtime database-role verification failed")
+
+
+def verify_runtime_roles_from_host(port: int, env_file: Path) -> None:
+    """Run the README's native-login verifier through the isolated loopback host port."""
+    values = read_env_values(env_file)
+    process_env = os.environ.copy()
+    process_env.update(
+        {
+            "POSTGRES_DB": values["POSTGRES_DB"],
+            "POSTGRES_HOST_PORT": str(port),
+            "GPU_MARKETPLACE_API_DATABASE_URL": values["GPU_MARKETPLACE_API_DATABASE_URL"],
+            "GPU_MARKETPLACE_MANAGER_DATABASE_URL": values["GPU_MARKETPLACE_MANAGER_DATABASE_URL"],
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "verify_runtime_roles.py")],
+        cwd=ROOT,
+        env=process_env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    expected = (
+        "PASS: API native session_user and restricted privileges verified\n"
+        "PASS: Manager native session_user and restricted privileges verified"
+    )
+    if result.returncode or result.stdout.strip() != expected:
+        raise RuntimeError("Host native API/Manager runtime-role verification failed")
+
+
+def create_restart_persistence_marker(port: int, env_file: Path) -> str:
+    """Commit a synthetic Client row to the isolated smoke DB before Compose recreation."""
+    values = read_env_values(env_file)
+    login_name = f"restart-smoke-{uuid.uuid4().hex}"
+    try:
+        with psycopg.connect(
+            host="127.0.0.1",
+            port=port,
+            dbname=values["POSTGRES_DB"],
+            user=values["POSTGRES_USER"],
+            password=values["POSTGRES_PASSWORD"],
+            connect_timeout=5,
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO users (login_name, password_hash, status) "
+                    "VALUES (%s, %s, 'ACTIVE') RETURNING id",
+                    (login_name, "scrypt$compose-restart-smoke-marker"),
+                )
+                user_id = cursor.fetchone()[0]
+                cursor.execute(
+                    "INSERT INTO user_roles (user_id, role_code) VALUES (%s, 'CLIENT')",
+                    (user_id,),
+                )
+    except Exception as exc:
+        raise RuntimeError(f"Could not commit Compose restart marker ({type(exc).__name__})") from None
+    return login_name
+
+
+def verify_restart_persistence(port: int, env_file: Path, login_name: str) -> None:
+    """Read the committed marker after Compose down/up without deleting the named volume."""
+    values = read_env_values(env_file)
+    try:
+        with psycopg.connect(
+            host="127.0.0.1",
+            port=port,
+            dbname=values["POSTGRES_DB"],
+            user=values["POSTGRES_USER"],
+            password=values["POSTGRES_PASSWORD"],
+            connect_timeout=5,
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT count(*) FROM users AS u "
+                    "JOIN user_roles AS ur ON ur.user_id = u.id "
+                    "WHERE u.login_name = %s AND ur.role_code = 'CLIENT'",
+                    (login_name,),
+                )
+                count = cursor.fetchone()[0]
+    except Exception as exc:
+        raise RuntimeError(f"Could not verify Compose restart marker ({type(exc).__name__})") from None
+    if count != 1:
+        raise RuntimeError("Committed smoke data was not preserved after Compose recreation")
 
 
 def published_host_port(
@@ -547,6 +635,7 @@ def main() -> int:
 
         verify_runtime_role(smoke_env, "api", "gpm_api_app")
         verify_runtime_role(smoke_env, "manager", "gpm_manager_app")
+        verify_runtime_roles_from_host(postgres_port, smoke_env)
 
         manager_db = compose(
             smoke_env, PROJECT, "exec", "--no-TTY", "manager",
@@ -569,6 +658,45 @@ def main() -> int:
         if probe.returncode or "db_network_isolated" not in probe.stdout:
             raise RuntimeError(f"Simulator database-isolation check failed: {probe.stderr.strip()}")
 
+        restart_marker = create_restart_persistence_marker(postgres_port, smoke_env)
+        require_compose_success(
+            compose(smoke_env, PROJECT, "down", "--remove-orphans"),
+            "smoke stack shutdown before persistence verification",
+        )
+        require_compose_success(
+            compose(
+                smoke_env,
+                PROJECT,
+                "up",
+                "--build",
+                "--detach",
+                "--wait",
+                "--wait-timeout",
+                "240",
+            ),
+            "smoke stack recreation with its existing PostgreSQL volume",
+        )
+        restarted_state_result = compose(smoke_env, PROJECT, "ps", "--format", "json")
+        if restarted_state_result.returncode:
+            raise RuntimeError("Could not read service health after Compose recreation")
+        restarted_state = parse_services(restarted_state_result.stdout)
+        restarted_services = {
+            str(service.get("Service") or str(service.get("Name", "")).removeprefix(f"{PROJECT}-"))
+            for service in restarted_state
+        }
+        if restarted_services != EXPECTED_SERVICES or any(
+            service.get("State") != "running" or service.get("Health") != "healthy"
+            for service in restarted_state
+        ):
+            raise RuntimeError("Compose services did not become healthy after recreation")
+        verify_runtime_role(smoke_env, "api", "gpm_api_app")
+        verify_runtime_role(smoke_env, "manager", "gpm_manager_app")
+        verify_runtime_roles_from_host(postgres_port, smoke_env)
+        check_postgres_from_host(postgres_port, smoke_env)
+        verify_restart_persistence(postgres_port, smoke_env, restart_marker)
+        if json.loads(check_http(f"{api_url}/health/live")) != {"status": "ok"}:
+            raise RuntimeError("Backend API was not available after Compose recreation")
+
         print("PASS: exactly five Compose services are running and healthy")
         print("PASS: host can fetch the production frontend index and built JavaScript bundle")
         print("PASS: frontend SPA route falls back to the production index")
@@ -578,8 +706,11 @@ def main() -> int:
         print("PASS: fresh Compose API remains unready and Auth fails closed before schema provisioning")
         print("PASS: disposable migrations enable the mounted Auth route with the approved generic 401")
         print("PASS: API and Manager connect as gpm_api_app and gpm_manager_app without CREATE privileges")
+        print("PASS: host verifies native API/Manager session_user values through the loopback PostgreSQL port")
         print("PASS: host can access Backend API /health/live")
         print("PASS: Simulator can reach API but cannot resolve/connect to PostgreSQL")
+        print("PASS: native API/Manager session_user values remain restricted after restart")
+        print("PASS: committed Client data survives Compose down/up with its PostgreSQL volume")
         exit_code = 0
     except (OSError, subprocess.SubprocessError, RuntimeError, json.JSONDecodeError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)

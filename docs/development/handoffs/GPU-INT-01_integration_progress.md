@@ -122,6 +122,25 @@ GitHub Actions run [#42346424133](https://github.com/SE2026-BC-04/gpu-resource-m
 
 `git diff --check`, changed-file secret-pattern scan, README relative-link check, and the PowerShell cryptographic secret-generation helper check passed locally. Independent human review, renewed TV2/TV3/TV4/TV5 ACKs for the latest head, and the owner L2 readiness decision remain pending; prior ACKs and reviews do not count as confirmation on this new head. Existing Auth-schema and CORS review threads remain open. PR #39 stays Draft; no self-approval, Ready conversion, or merge was performed.
 
+## Local V1 setup remediation — 2026-11-07
+
+The owner-authorized setup remediation started from reviewed HEAD `2431aa9752863f9da1620be0fede676e0f9f7a5e`. The local branch and `origin/feat/gpu-int-01-runtime-integration` were aligned and clean before edits. `git fetch origin` could not reach GitHub from this workstation; PR #39 was rechecked through the connected GitHub account and remained open, Draft, unmerged, and at the reviewed HEAD with no newer owner decision.
+
+| Finding / check | Result | Evidence |
+|---|---|---|
+| FIX-01 — stale owner DSN in PowerShell process | **FIXED** | `tools/local_setup.ps1` builds role-specific API/Manager DSNs and synchronizes each to both process environment and `.env`. The README parses the effective Compose JSON in memory, checks the configured usernames, and does not print resolved DSNs. |
+| FIX-02 — Alembic config path from repository root | **FIXED** | Root README and `backend/migrations/README.md` now use `alembic -c backend/alembic.ini`; `tools/verify_alembic_head.py` requires one repository head and checks the database `alembic_version` matches it. Local Alembic discovery reports one head: `0005_listing_d7`. A disposable PostgreSQL execution is pending CI. |
+| FIX-03 — fail-fast local setup | **IMPLEMENTED** | Setup waits for PostgreSQL health, uses create-only role bootstrap, keeps owner credentials for migrations, verifies migration current/head and native runtime logins before demo accounts, and stops safely on failed bootstrap/migration. Secrets and full DSNs are suppressed from command output. |
+| FIX-04 — runtime role proof | **IMPLEMENTED** | `tools/verify_runtime_roles.py` checks native `current_user = session_user`, role/database identity, database owner separation, restricted role flags and no database/schema CREATE. Compose smoke runs this from the host through its dynamically reserved loopback port and repeats checks after stack recreation. |
+| FIX-05 — full V1 E2E regression | **PENDING CI** | Compose smoke now writes a synthetic marker row, runs `down --remove-orphans` without deleting its named volume, starts the same five-service smoke project again, verifies health and roles, then confirms the committed row persists. The existing HTTP/browser PostgreSQL E2E remains in CI. |
+| Schema, grants, contracts, readiness and C1 | **UNCHANGED** | No migration, database schema/grant, API contract, business rule, readiness L2, Phase 2 or C1 Option A change is included. `CR-GPU-INT-01-READY-01` remains `PROPOSED — NEEDS_OWNER_DECISION`. |
+
+Local verification for this remediation used the checked-in backend and simulator virtual environments because `uv` is not installed. Backend: **841 passed, 362 skipped, 0 failed**, 2 warnings, exit 0; skipped tests require a safety-marked disposable PostgreSQL database. Simulator: **2 passed**, exit 0. The PowerShell setup regression passed, including stale owner DSN replacement in the process and `.env`, URI escaping, ambient PostgreSQL routing rejection, fail-fast bootstrap/migration errors and redaction. Compose topology tests: **6 passed**, exit 0. Python compile checks passed and Alembic reports exactly one head. Local Docker/Compose, PostgreSQL and HTTP/browser E2E are **NOT_RUN** because Docker and a safety-marked disposable database are unavailable.
+
+Local frontend `npm ci` was rerun through the npm CLI installed on D: with cache `D:\gpu-marketplace-npm-cache`; **115 packages installed, 0 vulnerabilities**, exit 0. Vitest: **158 passed / 10 files**; TypeScript typecheck and production build both passed, exit 0. Playwright discovery found the single Worker → Client flow after setting `PHASE1_E2E_BASE_URL`; the browser E2E itself is **NOT_RUN locally** because no Compose/PostgreSQL runtime is available. The initial sandbox-only package download attempt was denied (`EACCES`); the D: install above completed successfully.
+
+The setup remediation, PowerShell regression, repository-root Alembic check, native runtime role verification, and restart persistence check are included in this branch. GitHub Actions and disposable PostgreSQL/Compose runtime evidence remain pending until the remediation commit is pushed. PR #39 must remain Draft; independent human review, renewed TV2/TV3/TV4/TV5 compatibility ACKs, C1 performance evidence, and the owner decision for readiness expansion remain separate gates.
+
 ## Next actions
 
 1. Keep PR #39 Draft and obtain renewed TV2/TV3/TV4/TV5 compatibility ACKs plus one independent human review on the latest head.
