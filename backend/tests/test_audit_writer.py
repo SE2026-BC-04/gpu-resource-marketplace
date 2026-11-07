@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.dialects.postgresql import dialect
 
 from gpu_marketplace.domain.audit import AuditEvent
 from gpu_marketplace.repositories.audit import append_audit_event
@@ -50,6 +51,7 @@ def test_success_insert_uses_allowlisted_redacted_fields_and_database_defaults()
         "metadata_redacted",
     }
     assert "id" not in inserted_columns and "created_at" not in inserted_columns
+    assert "RETURNING" not in str(session.statement.compile(dialect=dialect()))
 
 
 @pytest.mark.parametrize(

@@ -94,7 +94,7 @@ def append_audit_event(
             raise ValueError("invalid redacted Job submission metadata")
 
     session.execute(
-        insert(AuditEvent).values(
+        insert(AuditEvent).inline().values(
             actor_kind="USER",
             actor_ref=actor_ref,
             correlation_id=correlation_id,
