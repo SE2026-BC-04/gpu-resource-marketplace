@@ -102,3 +102,7 @@ try {
     }
     Remove-Item -LiteralPath $temporaryDirectory -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# The intentional failure probes leave their native exit code in this process.
+# GitHub Actions invokes pwsh through -Command and propagates that stale value.
+$global:LASTEXITCODE = 0
