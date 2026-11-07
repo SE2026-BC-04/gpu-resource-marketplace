@@ -119,6 +119,7 @@ def test_tc01_valid_batch_is_saved_with_normalized_names_and_one_role() -> None:
         (["not", "a", "mapping"], RejectReason.INVALID_RECORD),
         (None, RejectReason.INVALID_RECORD),
         (record(id="not-a-uuid"), RejectReason.INVALID_ID),
+        (record(id=12345), RejectReason.INVALID_ID),
         (record(login_name=" \t\r\n"), RejectReason.INVALID_LOGIN_NAME),
         (record(login_name="a" * 129), RejectReason.INVALID_LOGIN_NAME),
         (record(login_name="bad" + chr(0) + "name"), RejectReason.INVALID_LOGIN_NAME),
@@ -155,9 +156,27 @@ def test_tc03_duplicate_after_normalization_first_valid_record_wins() -> None:
 def test_tc04_supplied_uuid_is_kept() -> None:
     wanted = UUID("6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f")
     writer = FakeWriter()
-    report = import_accounts([record(id=str(wanted)), record("bob", id=None)], writer, FakeHasher())
+    other = UUID("7a2d3e4f-5b6c-4d7e-8f90-a1b2c3d4e5f6")
+    report = import_accounts([record(id=str(wanted)), record("bob", id=None), record("carol", id=other)], writer, FakeHasher())
     assert report.created[0] == Created(0, wanted)
-    assert len(report.created) == 2 and report.created[1].user_id != wanted
+    assert report.created[2] == Created(2, other)
+    assert len(report.created) == 3 and report.created[1].user_id not in {wanted, other}
+
+
+def test_tc11_failure_path_hash_failure_is_failed_not_created() -> None:
+    """Added after the coverage run: a hasher that fails (resource limit) must not yield 'created'."""
+
+    class FailingHasher(FakeHasher):
+        def hash_password(self, password: str) -> str:
+            if password == "explode":
+                raise ValueError("password hashing failed")
+            return super().hash_password(password)
+
+    writer = FakeWriter()
+    report = import_accounts([record("a"), record("b", password="explode"), record("c")], writer, FailingHasher())
+    assert reasons(report.failed) == {1: FailReason.HASHING_FAILED}
+    assert [c.index for c in report.created] == [0, 2]
+    assert writer.names() == {"a", "c"}
 
 
 def test_tc05_existing_name_fails_and_rerun_creates_nothing() -> None:
