@@ -1,0 +1,345 @@
+﻿FFFFFFFFFFFFFFFFFFFFFF.FFFF.F.FFFFF                                      [100%]
+================================== FAILURES ===================================
+E   assert [] == [0, 1, 2]
+      
+      Right contains 3 more items, first extra item: 0
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:109: assert [] == [0, 1, 2]
+E   AssertionError: assert {} == {1: <RejectRe...ALID_RECORD'>}
+      
+      Right contains 1 more item:
+      {1: <RejectReason.INVALID_RECORD: 'INVALID_RECORD'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:139: AssertionError: assert {} == {1: <RejectRe...ALID_RECORD'>}
+E   AssertionError: assert {} == {1: <RejectRe...ALID_RECORD'>}
+      
+      Right contains 1 more item:
+      {1: <RejectReason.INVALID_RECORD: 'INVALID_RECORD'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:139: AssertionError: assert {} == {1: <RejectRe...ALID_RECORD'>}
+E   AssertionError: assert {} == {1: <RejectRe...'INVALID_ID'>}
+      
+      Right contains 1 more item:
+      {1: <RejectReason.INVALID_ID: 'INVALID_ID'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:139: AssertionError: assert {} == {1: <RejectRe...'INVALID_ID'>}
+E   AssertionError: assert {} == {1: <RejectRe..._LOGIN_NAME'>}
+      
+      Right contains 1 more item:
+      {1: <RejectReason.INVALID_LOGIN_NAME: 'INVALID_LOGIN_NAME'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:139: AssertionError: assert {} == {1: <RejectRe..._LOGIN_NAME'>}
+E   AssertionError: assert {} == {1: <RejectRe..._LOGIN_NAME'>}
+      
+      Right contains 1 more item:
+      {1: <RejectReason.INVALID_LOGIN_NAME: 'INVALID_LOGIN_NAME'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:139: AssertionError: assert {} == {1: <RejectRe..._LOGIN_NAME'>}
+E   AssertionError: assert {} == {1: <RejectRe..._LOGIN_NAME'>}
+      
+      Right contains 1 more item:
+      {1: <RejectReason.INVALID_LOGIN_NAME: 'INVALID_LOGIN_NAME'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:139: AssertionError: assert {} == {1: <RejectRe..._LOGIN_NAME'>}
+E   AssertionError: assert {} == {1: <RejectRe..._LOGIN_NAME'>}
+      
+      Right contains 1 more item:
+      {1: <RejectReason.INVALID_LOGIN_NAME: 'INVALID_LOGIN_NAME'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:139: AssertionError: assert {} == {1: <RejectRe..._LOGIN_NAME'>}
+E   AssertionError: assert {} == {1: <RejectRe..._LOGIN_NAME'>}
+      
+      Right contains 1 more item:
+      {1: <RejectReason.INVALID_LOGIN_NAME: 'INVALID_LOGIN_NAME'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:139: AssertionError: assert {} == {1: <RejectRe..._LOGIN_NAME'>}
+E   AssertionError: assert {} == {1: <RejectRe...ID_PASSWORD'>}
+      
+      Right contains 1 more item:
+      {1: <RejectReason.INVALID_PASSWORD: 'INVALID_PASSWORD'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:139: AssertionError: assert {} == {1: <RejectRe...ID_PASSWORD'>}
+E   AssertionError: assert {} == {1: <RejectRe...ID_PASSWORD'>}
+      
+      Right contains 1 more item:
+      {1: <RejectReason.INVALID_PASSWORD: 'INVALID_PASSWORD'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:139: AssertionError: assert {} == {1: <RejectRe...ID_PASSWORD'>}
+E   AssertionError: assert {} == {1: <RejectRe...ID_PASSWORD'>}
+      
+      Right contains 1 more item:
+      {1: <RejectReason.INVALID_PASSWORD: 'INVALID_PASSWORD'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:139: AssertionError: assert {} == {1: <RejectRe...ID_PASSWORD'>}
+E   AssertionError: assert {} == {1: <RejectRe...NVALID_ROLE'>}
+      
+      Right contains 1 more item:
+      {1: <RejectReason.INVALID_ROLE: 'INVALID_ROLE'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:139: AssertionError: assert {} == {1: <RejectRe...NVALID_ROLE'>}
+E   AssertionError: assert {} == {1: <RejectRe...NVALID_ROLE'>}
+      
+      Right contains 1 more item:
+      {1: <RejectReason.INVALID_ROLE: 'INVALID_ROLE'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:139: AssertionError: assert {} == {1: <RejectRe...NVALID_ROLE'>}
+E   AssertionError: assert {} == {1: <RejectRe...ALID_STATUS'>}
+      
+      Right contains 1 more item:
+      {1: <RejectReason.INVALID_STATUS: 'INVALID_STATUS'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:139: AssertionError: assert {} == {1: <RejectRe...ALID_STATUS'>}
+E   AssertionError: assert {} == {0: <RejectRe...TE_IN_BATCH'>}
+      
+      Right contains 2 more items:
+      {0: <RejectReason.INVALID_ROLE: 'INVALID_ROLE'>,
+       2: <RejectReason.DUPLICATE_IN_BATCH: 'DUPLICATE_IN_BATCH'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:150: AssertionError: assert {} == {0: <RejectRe...TE_IN_BATCH'>}
+E   IndexError: tuple index out of range
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:159: IndexError: tuple index out of range
+E   AssertionError: assert {} == {0: <FailReas..._NAME_TAKEN'>}
+      
+      Right contains 2 more items:
+      {0: <FailReason.LOGIN_NAME_TAKEN: 'LOGIN_NAME_TAKEN'>,
+       1: <FailReason.LOGIN_NAME_TAKEN: 'LOGIN_NAME_TAKEN'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:169: AssertionError: assert {} == {0: <FailReas..._NAME_TAKEN'>}
+E   AssertionError: assert {} == {1: <FailReas...TENCE_ERROR'>}
+      
+      Right contains 1 more item:
+      {1: <FailReason.PERSISTENCE_ERROR: 'PERSISTENCE_ERROR'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:177: AssertionError: assert {} == {1: <FailReas...TENCE_ERROR'>}
+E   assert [] == [0]
+      
+      Right contains one more item: 0
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:185: assert [] == [0]
+E   AssertionError: assert {} == {0: <FailReas...HASHER_BUSY'>}
+      
+      Right contains 1 more item:
+      {0: <FailReason.HASHER_BUSY: 'HASHER_BUSY'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:198: AssertionError: assert {} == {0: <FailReas...HASHER_BUSY'>}
+E   StopIteration
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:207: StopIteration
+E   assert [] == [0]
+      
+      Right contains one more item: 0
+      Use -v to get more diff
+    Failing test case: test_p1_report_is_a_partition_of_the_input_positions(
+        batch=[Generated(record={'login_name': 'alice',
+           'password': '0',
+           'role_code': 'CLIENT'},
+          valid=True,
+          base='alice')],
+    )
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:289: assert [] == [0]
+  + Exception Group Traceback (most recent call last):
+  |   File "D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py", line 293, in test_p2_every_valid_record_is_saved_wherever_the_bad_records_are
+  |     @given(BATCHES)
+  |                    ^
+  |   File "D:\SE\SE_project\wt-bt3\backend\.venv\Lib\site-packages\hypothesis\core.py", line 2334, in wrapped_test
+  |     raise the_error_hypothesis_found
+  | ExceptionGroup: Hypothesis found 2 distinct failures. (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py", line 301, in test_p2_every_valid_record_is_saved_wherever_the_bad_records_are
+    |     assert invalid <= {r.index for r in report.rejected}
+    | AssertionError: assert {0} <= set()
+    |   
+    |   Extra items in the left set:
+    |   0
+    | Failing test case: test_p2_every_valid_record_is_saved_wherever_the_bad_records_are(
+    |     batch=[Generated(record={'login_name': 'a\x00b',
+    |        'password': '0',
+    |        'role_code': 'CLIENT'},
+    |       valid=False,
+    |       base=None)],
+    | )
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py", line 298, in test_p2_every_valid_record_is_saved_wherever_the_bad_records_are
+    |     assert {c.index for c in report.created} == set(expected)
+    | AssertionError: assert set() == {0}
+    |   
+    |   Extra items in the right set:
+    |   0
+    |   Use -v to get more diff
+    | Failing test case: test_p2_every_valid_record_is_saved_wherever_the_bad_records_are(
+    |     batch=[Generated(record={'login_name': 'alice',
+    |        'password': '0',
+    |        'role_code': 'CLIENT'},
+    |       valid=True,
+    |       base='alice')],
+    | )
+    +------------------------------------
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:293: ExceptionGroup: Hypothesis found 2 distinct failures. (2 sub-exceptions)
+  + Exception Group Traceback (most recent call last):
+  |   File "D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py", line 305, in test_p3_created_if_and_only_if_committed
+  |     @given(BATCHES, st.sets(BASES), st.sampled_from([RuntimeError, LoginNameTaken, ValueError]))
+  |                    ^^^
+  |   File "D:\SE\SE_project\wt-bt3\backend\.venv\Lib\site-packages\hypothesis\core.py", line 2334, in wrapped_test
+  |     raise the_error_hypothesis_found
+  | ExceptionGroup: Hypothesis found 2 distinct failures. (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py", line 315, in test_p3_created_if_and_only_if_committed
+    |     assert {f.index for f in report.failed} == {i for i, name in expected.items() if name in failing}
+    | AssertionError: assert set() == {0}
+    |   
+    |   Extra items in the right set:
+    |   0
+    |   Use -v to get more diff
+    | Failing test case: test_p3_created_if_and_only_if_committed(
+    |     # The test always failed when commented parts were varied together.
+    |     batch=[Generated(record={'login_name': 'alice',
+    |        'password': '0',
+    |        'role_code': 'CLIENT'},
+    |       valid=True,
+    |       base='alice')],
+    |     failing={'alice'},  # or any other generated value
+    |     error=RuntimeError,  # or any other generated value
+    | )
+    | Explanation:
+    |     These lines were always and only run by failing test cases:
+    |         D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:280
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py", line 314, in test_p3_created_if_and_only_if_committed
+    |     assert {c.index for c in report.created} == {i for i, name in expected.items() if name not in failing}
+    | AssertionError: assert set() == {0}
+    |   
+    |   Extra items in the right set:
+    |   0
+    |   Use -v to get more diff
+    | Failing test case: test_p3_created_if_and_only_if_committed(
+    |     batch=[Generated(record={'login_name': 'alice',
+    |        'password': '0',
+    |        'role_code': 'CLIENT'},
+    |       valid=True,
+    |       base='alice')],
+    |     failing=set(),
+    |     error=RuntimeError,  # or any other generated value
+    | )
+    | Explanation:
+    |     These lines were always and only run by failing test cases:
+    |         D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:280
+    +------------------------------------
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:305: ExceptionGroup: Hypothesis found 2 distinct failures. (2 sub-exceptions)
+E   assert set() >= {0}
+      
+      Extra items in the right set:
+      0
+    Failing test case: test_p4_adding_bad_records_anywhere_does_not_change_what_is_saved(
+        valid=[],
+        invalid=[Generated(record={'login_name': 'a\x00b',
+           'password': ')çC8s\U0006ac90𑑎',
+           'role_code': 'WORKER'},
+          valid=False,
+          base=None)],
+        rnd=HypothesisRandom(generated data),
+    )
+    Explanation:
+        These lines were always and only run by failing test cases:
+            D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:243
+            D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:244
+            D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:249
+            D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:268
+            D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:326
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:330: assert set() >= {0}
+  + Exception Group Traceback (most recent call last):
+  |   File "D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py", line 351, in test_p6_store_outage_stops_writing_and_nothing_after_it_is_created
+  |     @given(st.lists(valid_records(), min_size=1, max_size=15), st.data())
+  |                    ^^^
+  |   File "D:\SE\SE_project\wt-bt3\backend\.venv\Lib\site-packages\hypothesis\core.py", line 2334, in wrapped_test
+  |     raise the_error_hypothesis_found
+  | ExceptionGroup: Hypothesis found 2 distinct failures. (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py", line 361, in test_p6_store_outage_stops_writing_and_nothing_after_it_is_created
+    |     assert [c.index for c in report.created] == writes_before
+    | AssertionError: assert [] == [0]
+    |   
+    |   Right contains one more item: 0
+    |   Use -v to get more diff
+    | Failing test case: test_p6_store_outage_stops_writing_and_nothing_after_it_is_created(
+    |     # The test always failed when commented parts were varied together.
+    |     valid=[Generated(record={'login_name': 'alice',
+    |        'password': '0',
+    |        'role_code': 'CLIENT'},
+    |       valid=True,
+    |       base='alice'),
+    |      Generated(record={'login_name': 'bob',
+    |        'password': '0',
+    |        'role_code': 'CLIENT'},
+    |       valid=True,
+    |       base='bob')],  # or any other generated value
+    |     data=data(...),
+    | )
+    | Draw 1: 1  # or any other generated value
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py", line 362, in test_p6_store_outage_stops_writing_and_nothing_after_it_is_created
+    |     assert {f.index for f in report.failed} == {i for i in expected if i >= down_at}
+    | AssertionError: assert set() == {0}
+    |   
+    |   Extra items in the right set:
+    |   0
+    |   Use -v to get more diff
+    | Failing test case: test_p6_store_outage_stops_writing_and_nothing_after_it_is_created(
+    |     valid=[Generated(record={'login_name': 'alice',
+    |        'password': '0',
+    |        'role_code': 'CLIENT'},
+    |       valid=True,
+    |       base='alice')],  # or any other generated value
+    |     data=data(...),
+    | )
+    | Draw 1: 0
+    +------------------------------------
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:351: ExceptionGroup: Hypothesis found 2 distinct failures. (2 sub-exceptions)
+E   assert [] == [0, 2, 4, 7]
+      
+      Right contains 4 more items, first extra item: 0
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import_postgres.py:67: assert [] == [0, 2, 4, 7]
+E   AssertionError: assert {} == {0: <FailReas..._NAME_TAKEN'>}
+      
+      Right contains 4 more items:
+      {0: <FailReason.LOGIN_NAME_TAKEN: 'LOGIN_NAME_TAKEN'>,
+       2: <FailReason.LOGIN_NAME_TAKEN: 'LOGIN_NAME_TAKEN'>,
+       4: <FailReason.LOGIN_NAME_TAKEN: 'LOGIN_NAME_TAKEN'>,
+       7: <FailReason.LOGIN_NAME_TAKEN: 'LOGIN_NAME_TAKEN'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import_postgres.py:99: AssertionError: assert {} == {0: <FailReas..._NAME_TAKEN'>}
+E   assert [] == [0, 2]
+      
+      Right contains 2 more items, first extra item: 0
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import_postgres.py:131: assert [] == [0, 2]
+E   AssertionError: assert {} == {0: <FailReas...UNAVAILABLE'>}
+      
+      Right contains 4 more items:
+      {0: <FailReason.DB_UNAVAILABLE: 'DB_UNAVAILABLE'>,
+       2: <FailReason.DB_UNAVAILABLE: 'DB_UNAVAILABLE'>,
+       4: <FailReason.DB_UNAVAILABLE: 'DB_UNAVAILABLE'>,
+       7: <FailReason.DB_UNAVAILABLE: 'DB_UNAVAILABLE'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import_postgres.py:146: AssertionError: assert {} == {0: <FailReas...UNAVAILABLE'>}
+E   assert [0, 0] == [0, 1]
+      
+      At index 1 diff: 0 != 1
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import_postgres.py:165: assert [0, 0] == [0, 1]
+============================== warnings summary ===============================
+tests/test_bt3_account_import_postgres.py::test_it01_valid_records_are_committed_and_can_log_in
+tests/test_bt3_account_import_postgres.py::test_it02_reimporting_the_same_batch_creates_nothing_new
+tests/test_bt3_account_import_postgres.py::test_it03_failure_path_commit_failure_is_reported_failed_and_leaves_nothing
+tests/test_bt3_account_import_postgres.py::test_it04_unreachable_database_saves_nothing_and_reports_every_valid_record_failed
+tests/test_bt3_account_import_postgres.py::test_it05_two_concurrent_imports_of_the_same_name_create_exactly_one_account
+  D:\SE\SE_project\wt-bt3\backend\.venv\Lib\site-packages\alembic\config.py:604: DeprecationWarning: No path_separator found in configuration; falling back to legacy splitting on spaces, commas, and colons for prepend_sys_path.  Consider adding path_separator=os to Alembic config.
+    util.warn_deprecated(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+32 failed, 3 passed, 5 warnings in 12.09s

@@ -45,6 +45,10 @@ uv run --project backend --locked --group dev pytest backend/tests/bench_bt3_imp
 uv run --project backend --locked --group dev pytest backend/tests tests
 ```
 
+## Evidence
+
+`docs/bt3-vt088/evidence/` holds the raw outputs of the local runs (disposable PostgreSQL 16.15 cluster, Windows): `run1` red before the patch, `run2` green, `run3` full regression, `run4`/`run5` mutations, `run6`/`run7` coverage, `run8`/`run9` flaky checks, `run10` + `load_result.json` load check, and the AI plan (`ai_plan_raw.md`, `ai_plan_run.json`) with its review (`ai_plan_review.md`).
+
 ## Mutation experiment
 
 The required deliberate bug ("return success although persistence failed") lives only on local temporary branches, never on this branch:

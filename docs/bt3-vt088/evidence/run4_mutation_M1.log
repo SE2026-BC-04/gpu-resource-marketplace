@@ -1,0 +1,44 @@
+﻿..................F......F......F..                                      [100%]
+================================== FAILURES ===================================
+E   AssertionError: assert {} == {1: <FailReas...TENCE_ERROR'>}
+      
+      Right contains 1 more item:
+      {1: <FailReason.PERSISTENCE_ERROR: 'PERSISTENCE_ERROR'>}
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:177: AssertionError: assert {} == {1: <FailReas...TENCE_ERROR'>}
+E   AssertionError: assert {UUID('6f40bb...71c5a16bc25')} == set()
+      
+      Extra items in the left set:
+      UUID('6f40bbf8-5cb4-40ec-9b93-671c5a16bc25')
+      Use -v to get more diff
+    Failing test case: test_p3_created_if_and_only_if_committed(
+        batch=[Generated(record={'login_name': 'alice',
+           'password': '0',
+           'role_code': 'CLIENT'},
+          valid=True,
+          base='alice')],
+        failing={'alice'},
+        error=RuntimeError,
+    )
+    Explanation:
+        These lines were always and only run by failing test cases:
+            D:\SE\SE_project\wt-bt3\backend\src\gpu_marketplace\identity\account_import.py:155
+            D:\SE\SE_project\wt-bt3\backend\src\gpu_marketplace\identity\account_import.py:161
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import.py:310: AssertionError: assert {UUID('6f40bb...71c5a16bc25')} == set()
+E   assert [0, 1, 2] == [0, 2]
+      
+      At index 1 diff: 1 != 2
+      Left contains one more item: 2
+      Use -v to get more diff
+D:\SE\SE_project\wt-bt3\backend\tests\test_bt3_account_import_postgres.py:131: assert [0, 1, 2] == [0, 2]
+============================== warnings summary ===============================
+tests/test_bt3_account_import_postgres.py::test_it01_valid_records_are_committed_and_can_log_in
+tests/test_bt3_account_import_postgres.py::test_it02_reimporting_the_same_batch_creates_nothing_new
+tests/test_bt3_account_import_postgres.py::test_it03_failure_path_commit_failure_is_reported_failed_and_leaves_nothing
+tests/test_bt3_account_import_postgres.py::test_it04_unreachable_database_saves_nothing_and_reports_every_valid_record_failed
+tests/test_bt3_account_import_postgres.py::test_it05_two_concurrent_imports_of_the_same_name_create_exactly_one_account
+  D:\SE\SE_project\wt-bt3\backend\.venv\Lib\site-packages\alembic\config.py:604: DeprecationWarning: No path_separator found in configuration; falling back to legacy splitting on spaces, commas, and colons for prepend_sys_path.  Consider adding path_separator=os to Alembic config.
+    util.warn_deprecated(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+3 failed, 32 passed, 5 warnings in 9.32s

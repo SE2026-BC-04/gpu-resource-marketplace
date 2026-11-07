@@ -1,0 +1,38 @@
+﻿........................................................................ [  6%]
+........................................................................ [ 12%]
+........................................................................ [ 18%]
+........................................................................ [ 25%]
+........................................................................ [ 31%]
+........................................................................ [ 37%]
+........................................................................ [ 44%]
+........................................................................ [ 50%]
+........................................................................ [ 56%]
+........................................................................ [ 63%]
+........................................................................ [ 69%]
+........................................................................ [ 75%]
+........................................................................ [ 81%]
+........................................................................ [ 88%]
+........................................................................ [ 94%]
+..............................................................           [100%]
+============================== warnings summary ===============================
+backend\.venv\Lib\site-packages\fastapi\testclient.py:1
+  D:\SE\SE_project\wt-bt3\backend\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/test_account_reader_postgres.py: 1 warning
+tests/test_auth_http_postgres.py: 1 warning
+tests/test_bt3_account_import_postgres.py: 5 warnings
+tests/test_grants.py: 68 warnings
+tests/test_jobs_cancel_adapter_postgres.py: 27 warnings
+tests/test_jobs_cancel_d2_postgres.py: 6 warnings
+tests/test_jobs_guard_delete.py: 3 warnings
+tests/test_jobs_guard_update.py: 3 warnings
+tests/test_listing_d7_postgres.py: 4 warnings
+tests/test_listing_repository_postgres.py: 1 warning
+tests/test_migration_baseline.py: 8 warnings
+tests/test_schema_constraints.py: 1 warning
+  D:\SE\SE_project\wt-bt3\backend\.venv\Lib\site-packages\alembic\config.py:604: DeprecationWarning: No path_separator found in configuration; falling back to legacy splitting on spaces, commas, and colons for prepend_sys_path.  Consider adding path_separator=os to Alembic config.
+    util.warn_deprecated(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1142 passed, 129 warnings in 88.29s (0:01:28)
