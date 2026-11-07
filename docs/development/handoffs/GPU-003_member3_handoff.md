@@ -165,7 +165,7 @@ backend/src/gpu_marketplace/repositories/     # Thuộc GPU-002; không viết O
 
 ### 10.1 E2 — P1C-AC-07 (browser)
 
-**Test:** `backend/tests/test_auth_session_browser_e2e.py` dựng cluster PostgreSQL tạm (hàng rào `db_safety`) → bootstrap role → Alembic head → 3 tài khoản tạm (CLIENT, WORKER có hồ sơ Worker, CLIENT không phụ thuộc để khóa giữa phiên) → API production chạy bằng login native `gpm_api_app` → build + preview frontend production → `frontend/e2e/auth-session.spec.ts` trên Chromium (config `frontend/e2e/auth-session.config.ts`). Mật khẩu, secret và DSN sinh mới mỗi lần chạy; output lỗi được che. Env của mọi tiến trình con được dựng tường minh: bỏ toàn bộ biến kế thừa `GPU_MARKETPLACE_*`, `GPM_*`, `PG*`, `DATABASE_URL` và mọi biến có giá trị chứa credential bị cấm, rồi chỉ cấp lại đúng biến cần thiết. Chỉ API nhận DSN runtime `gpm_api_app`; build, preview và Playwright không nhận DSN nào, không tiến trình con nào nhận DSN/mật khẩu owner (`test_child_environments_never_receive_owner_credentials`). Luồng chung Worker → Listing → Client → Job thuộc `test_phase1_runtime_http_postgres_e2e.py`, không lặp lại ở đây.
+**Test:** `backend/tests/test_auth_session_browser_e2e.py` dựng cluster PostgreSQL tạm (hàng rào `db_safety`) → bootstrap role → Alembic head → 3 tài khoản tạm (CLIENT, WORKER có hồ sơ Worker, CLIENT không phụ thuộc để khóa giữa phiên) → API production chạy bằng login native `gpm_api_app` → build + preview frontend production → `frontend/e2e/auth-session.spec.ts` trên Chromium (config `frontend/e2e/auth-session.config.ts`). Mật khẩu, secret và DSN sinh mới mỗi lần chạy; output lỗi được che. Env của mọi tiến trình con được dựng tường minh: bỏ toàn bộ biến kế thừa `GPU_MARKETPLACE_*`, `GPM_*`, `PG*`, `DATABASE_URL` và mọi biến có giá trị chứa credential bị cấm, rồi chỉ cấp lại đúng biến cần thiết. Chỉ API nhận DSN runtime `gpm_api_app`; build, preview và Playwright không nhận DSN nào, không tiến trình con nào nhận DSN/mật khẩu owner (`test_child_environments_never_receive_owner_credentials`). Mật khẩu của `gpm_api_app`/`gpm_manager_app` là trạng thái toàn cluster, schema reset không trả lại được: fixture `owner_engine_with_restored_roles` dùng `backend/tests/role_credentials.py` chụp đúng verifier cũ trong `pg_authid` trước khi đổi, khôi phục và đọc lại ở teardown dù test PASS hay FAIL; khôi phục lỗi → teardown ERROR, không in verifier (`test_role_credentials_restore.py`). Luồng chung Worker → Listing → Client → Job thuộc `test_phase1_runtime_http_postgres_e2e.py`, không lặp lại ở đây.
 
 | ID | Kiểm | Oracle |
 |---|---|---|
@@ -198,8 +198,9 @@ backend/src/gpu_marketplace/repositories/     # Thuộc GPU-002; không viết O
 | Bỏ qua 401 của Listings/Jobs | KILLED | E2-10 |
 | Lưu token vào một record IndexedDB (review #42 P2-02) | KILLED | E2-06 (`indexedDB: true`, cả khi đăng nhập và sau reload) |
 | Harness trả `_child_environment` về cách cũ (copy `os.environ`, chỉ bỏ 4 biến) (review #42 P2-01) | KILLED | `test_child_environments_never_receive_owner_credentials` |
+| Bỏ bước khôi phục mật khẩu role trong `restored_login_role_credentials` (re-review #42 P2) | KILLED | 4/5 test `test_role_credentials_restore.py` (output chỉ có boolean) |
 
-**Kết quả local** (Windows 11, PostgreSQL 16.15 cluster tạm, Python 3.12.15, Node 24.21.0, Playwright 1.64.1 / Chromium build 1248): 6/6 check PASS; chạy 4 lần liên tiếp trên cùng HEAD, cả 4 PASS (19–22 s mỗi lần); 6/6 mutation KILLED. Sau review #42 (rev 2): 7/7 test Playwright PASS, test env PASS, thêm 2 mutation KILLED (8/8). Evidence CI: chờ CI của PR #39 sau khi PR này vào nhánh.
+**Kết quả local** (Windows 11, PostgreSQL 16.15 cluster tạm, Python 3.12.15, Node 24.21.0, Playwright 1.64.1 / Chromium build 1248): 6/6 check PASS; chạy 4 lần liên tiếp trên cùng HEAD, cả 4 PASS (19–22 s mỗi lần); 6/6 mutation KILLED. Sau review #42 (rev 2): 7/7 test Playwright PASS, test env PASS, thêm 2 mutation KILLED (8/8). Rev 3: khôi phục mật khẩu role, 5 test mới PASS, mutation thứ 9 KILLED (9/9). Evidence CI: chờ CI của PR #39 sau khi PR này vào nhánh.
 
 ### 10.2 E3 — P1C-AC-08 (DB mới + hồi quy)
 
@@ -208,7 +209,7 @@ Hai việc giao cho E3 sau review PR #35 đã có trên nhánh tích hợp: API 
 | ID | Kiểm | Kết quả | Evidence |
 |---|---|---|---|
 | E3-01 | DB mới → bootstrap role → Alembic | PASS | `alembic heads` = `0005_listing_d7`; fixture `migrated_database_with_teardown`; CI dùng `tools/verify_alembic_head.py`, `tools/verify_runtime_roles.py` |
-| E3-02 | `pytest backend/tests tests` | PASS | Cluster tạm local; CI run [#42350954394](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42350954394) trên `44579ed`: 1.203 passed. Local trên HEAD này (thêm test E2 và test env): **1.205 passed, 0 failed, 0 skipped**, gồm cả hai test browser |
+| E3-02 | `pytest backend/tests tests` | PASS | Cluster tạm local; CI run [#42350954394](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42350954394) trên `44579ed`: 1.203 passed. Local trên HEAD này (thêm test E2, test env và test khôi phục role): **1.210 passed, 0 failed, 0 skipped**, gồm cả hai test browser |
 | E3-03 | Vitest / typecheck | PASS | Local: 158 passed (10 file), `npm run typecheck` sạch (gồm `e2e/`) |
 | E3-04 | Compose smoke, gồm Auth fail-closed trước migrate và 401 chung sau migrate | PASS (CI) | Job `compose` của run trên; local `NOT_RUN` (máy không có Docker) |
 | E3-05 | Provisioning dùng chung `normalize_login_name` + `ScryptPasswordHasher` | PASS | `test_local_demo_accounts.py` (insert + login thật, trùng tên không đổi dòng cũ, rollback giữa chừng) |

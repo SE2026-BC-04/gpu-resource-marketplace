@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -32,6 +32,7 @@ from sqlalchemy.engine import Engine, make_url
 
 from gpu_marketplace.common.db_roles import bootstrap_roles
 from gpu_marketplace.identity.passwords import ScryptPasswordHasher
+from role_credentials import restored_login_role_credentials
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_ROOT = BACKEND_ROOT.parent / "frontend"
@@ -162,11 +163,20 @@ def _insert_account(connection, user_id: UUID, login_name: str, password_hash: s
     )
 
 
+@pytest.fixture
+def owner_engine_with_restored_roles(migrated_database_with_teardown: Engine) -> Iterator[Engine]:
+    """The test sets the cluster-wide gpm_api_app/gpm_manager_app passwords so the API can log in
+    natively. Schema reset cannot undo that, so the exact prior verifiers are restored (and read
+    back) at teardown, after a PASS or a FAIL. A restore failure is reported as a teardown ERROR."""
+    with restored_login_role_credentials(migrated_database_with_teardown):
+        yield migrated_database_with_teardown
+
+
 def test_auth_session_in_a_real_browser_against_postgres_and_native_runtime_role(
-    migrated_database_with_teardown: Engine,
+    owner_engine_with_restored_roles: Engine,
     test_database,
 ) -> None:
-    owner_engine = migrated_database_with_teardown
+    owner_engine = owner_engine_with_restored_roles
     api_password = secrets.token_hex(32)
     manager_password = secrets.token_hex(32)
     jwt_secret = secrets.token_hex(32)
@@ -174,7 +184,8 @@ def test_auth_session_in_a_real_browser_against_postgres_and_native_runtime_role
     jobs_cursor_secret = secrets.token_hex(32)
     account_password = secrets.token_urlsafe(24)
     with owner_engine.begin() as connection:
-        # db_safety has already vetted this URL and cluster as disposable.
+        # db_safety has already vetted this URL and cluster as disposable; the fixture restores
+        # the previous passwords of both roles afterwards.
         bootstrap_roles(connection, api_password, manager_password, rotate_password=True)
 
     run = uuid4().hex[:12]
