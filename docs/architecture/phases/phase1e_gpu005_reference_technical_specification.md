@@ -3,7 +3,7 @@
 **Phase 1 protected-reference status:** `OWNER-APPROVED` on 2026-11-07; see [PR #39 decision comment #6690901724](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39#issuecomment-6690901724).
 **Phase 2 Simulator/output compatibility:** `NOT APPROVED`.
 **Owner-approved source:** the exact draft at blob `cac731d192e2527fa2561e417849c0f2357e205f`.
-**Runtime tests:** `RECHECK REQUIRED ON PR #39 REMEDIATION HEAD`.
+**Runtime tests:** `PASS` on implementation commit `0f48b4d67573cb32a01f88a4a4ba7dd0a40ea7f4`; GitHub Actions [run #42343339313](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42343339313) passed the Python, Frontend, and Compose jobs. The Python job ran 1,179 tests plus 2 Simulator tests and included the disposable PostgreSQL submit/reference/E2E suites. Local PostgreSQL tests remain unrun because no safety-marked disposable database is configured on this machine.
 **Cross-phase ACK:** renewed checks on the current PR head remain pending.
 **Owner:** Thành viên 5 — GPU-005
 
