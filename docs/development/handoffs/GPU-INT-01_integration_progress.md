@@ -177,4 +177,42 @@ Local checks on Python 3.12.15 used the repository virtual environments because 
 - GitHub Actions run [#42384516429](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42384516429) on `9b7ffa06feca60a593eda24db561e9deb16992e8`: **Python FAIL**, while Frontend, Compose, and PowerShell **PASS**. The disposable PostgreSQL HTTP E2E returned 503 on Listing create because the ORM-generated INSERT included `RETURNING audit_events.id`, which requires a SELECT privilege excluded by the accepted column-scoped audit grants. The fix uses an inline INSERT with no `RETURNING`; a regression assertion compiles the statement and verifies that no RETURNING clause is emitted. Local audit/Listing tests pass **317**, exit 0. Push the fix on this same branch and rerun all CI before changing this disposition.
 - Follow-up Actions run [#42384916449](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42384916449) on `a9d294eb277ca6ed32d7acbbae18ecd2ede0ee76`: Frontend, Compose, and PowerShell **PASS**; Python **FAIL** in `test_postgres_same_key_same_body_replays_after_listing_is_paused` because its new audit assertion referenced an undefined local `key`. The disposable HTTP/browser E2E progressed beyond the previous Listing INSERT failure. The fixture now binds and reuses the replay key explicitly; all CI must complete again on the next pushed SHA.
 
-**Provisional disposition: `BLOCKED_TECHNICAL` pending the safety-guarded PostgreSQL/browser/Compose jobs and final GitHub Actions on the pushed SHA.** After successful CI, request renewed scoped human review from `@TranVu2005`, `@giakhanh-hub`, `@VietNguyen865`, and `@NguyenDucThang-tb`. Keep PR #39 Draft and leave its review threads open until reviewers confirm. Existing `CR-GPU-INT-01-READY-01`, C1 Scrypt evidence, independent human review, and compatibility ACKs remain separate gates.
+**Provisional disposition at push time: `BLOCKED_TECHNICAL`.** The final CI result on the pushed implementation SHA is recorded below.
+
+## PR #39 final finding remediation — CI verified final head — 2026-11-07
+
+**Current implementation HEAD:** `16a6d5e41a8b3c8075163b4b7dce01cb95a26a38` on `feat/gpu-int-01-runtime-integration`; this history retains the already-merged PR #42 commit `6788505cbb68e09ad08ea2b96728bc6c69e8a32e`. PR #39 remains open and Draft. No review thread was resolved.
+
+GitHub Actions run [#42385429862](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42385429862) completed successfully on this implementation HEAD:
+
+| Job | Result | Actual evidence |
+|---|---|---|
+| Python | **PASS** | Python 3.12.15; **1,223 passed**, 37.69s. Four deterministic Submit↔Pause/Resize PostgreSQL cases passed in `test_listing_submit_concurrency_postgres.py`; the HTTP/browser/PostgreSQL E2E passed; all five role-credential restoration tests passed. Simulator suite: **2 passed**. |
+| Frontend | **PASS** | Vitest **158 passed / 10 files**; app and E2E TypeScript checks passed; production build passed. |
+| Compose | **PASS** | Exactly five services healthy; production frontend and SPA route served; host PostgreSQL `SELECT 1`, API and Manager DB checks passed; Auth fail-closed/schema checks passed; Simulator could not resolve/connect to PostgreSQL; isolated cleanup left the detected local stack unchanged. |
+| Windows PowerShell local setup | **PASS** | Stale DSN replacement, fail-fast setup behavior, and output redaction check passed. |
+
+Local verification on the same implementation HEAD:
+
+- Full backend/topology regression: **851 passed, 372 skipped, 0 failed**, 2 warnings, 45.25s. PostgreSQL tests skipped under the safety guard because this workstation has no configured disposable-cluster marker; they were exercised by the successful CI disposable PostgreSQL job above.
+- Simulator: **2 passed**, 1 warning. Frontend Vitest: **158 passed / 10 files**; application/E2E TypeScript checks and production build passed. PowerShell setup regression passed.
+- Local Docker/Compose, PostgreSQL and HTTP/browser E2E: **NOT_RUN** because the Docker CLI is unavailable in this environment. The corresponding real disposable PostgreSQL/browser and Compose checks ran successfully in Actions.
+- `git diff --check`: **PASS**. This docs-only handoff update is followed by a fresh CI run on the resulting PR head; renew reviewer requests only after that run completes successfully.
+
+| Finding | Final status on implementation HEAD |
+|---|---|
+| P2-PGROLE | **FIXED; verified in disposable PostgreSQL/browser CI** using PR #42's existing helper across the full E2E lifetime, including restoration and exact NULL-safe comparison. |
+| P2-LISTING-AUDIT | **FIXED; regression suite and real PostgreSQL E2E passed** with redacted, correlated mutation outcomes and no false success on rollback/unknown COMMIT. |
+| P2-JOBS-AUDIT | **FIXED; regression suite and real PostgreSQL E2E passed** for Submit/Cancel, replay and rejected/error outcomes. |
+| R3 Submit↔Pause/Resize | **VERIFIED in CI**; all four barrier-synchronized independent-connection cases passed, both lock orders, without sleep-based winner selection. |
+
+**Disposition on implementation HEAD: `READY_FOR_FINAL_HUMAN_REVIEW`.** This records technical remediation and CI only. Human reviews/approvals remain pending. `CR-GPU-INT-01-READY-01` still needs the owner's L2 decision; C1 Scrypt production evidence remains pending; P3 observations and cross-phase ACKs remain separate gates. Do not mark Ready for merge or merge this PR based on this disposition.
+
+### Renewed scoped review requests after CI on the handoff commit
+
+- `@TranVu2005`: PostgreSQL role restoration, transaction/audit persistence, and Submit↔Pause/Resize concurrency tests.
+- `@giakhanh-hub`: Auth/session regression, secret safety, and CORS.
+- `@VietNguyen865`: Listing audit, Pause/Resize, and Submit race.
+- `@NguyenDucThang-tb`: Jobs Submit/Cancel audit, protected reference, idempotency, and PGROLE.
+
+All current review threads remain open. These requested reviews are not approvals. No merge or self-approval is authorized.
