@@ -103,36 +103,95 @@ async function signIn(page: Page, loginName: string, secret: string): Promise<st
   return body.access_token as string;
 }
 
-/** Everything the page could persist or expose, gathered from inside the page (E2-06). */
-async function persistedState(page: Page): Promise<string> {
-  return page.evaluate(async () => {
-    const entries = (storage: Storage) =>
+type StorageLeaks = Record<
+  "local" | "session" | "documentCookie" | "cookieJar" | "indexedDB" | "caches" | "serviceWorkers" | "location",
+  boolean
+>;
+
+const NO_LEAKS: StorageLeaks = {
+  local: false,
+  session: false,
+  documentCookie: false,
+  cookieJar: false,
+  indexedDB: false,
+  caches: false,
+  serviceWorkers: false,
+  location: false,
+};
+
+/**
+ * E2-06: does anything the page can persist contain one of `needles`? Searched inside the page,
+ * so only booleans come back and a failure report never prints a credential. Covers Web Storage,
+ * every IndexedDB object store (keys and values), Cache Storage, service workers, URL/history
+ * and the context cookie jar, which also holds HttpOnly cookies that document.cookie hides.
+ */
+async function storageLeaks(context: BrowserContext, page: Page, needles: string[]): Promise<StorageLeaks> {
+  const inPage = await page.evaluate(async (secrets) => {
+    const has = (text: string) => secrets.some((secret) => text.includes(secret));
+    const serialize = (value: unknown): string => {
+      try {
+        return JSON.stringify(value) ?? String(value);
+      } catch {
+        return String(value);
+      }
+    };
+    const webStorage = (storage: Storage) =>
       Array.from({ length: storage.length }, (_, index) => {
         const key = storage.key(index) ?? "";
         return `${key}=${storage.getItem(key) ?? ""}`;
+      }).some(has);
+
+    const request = <T>(operation: IDBRequest<T>) =>
+      new Promise<T>((resolve, reject) => {
+        operation.onsuccess = () => resolve(operation.result);
+        operation.onerror = () => reject(operation.error);
       });
+    let indexed = false;
     const databases = typeof indexedDB.databases === "function" ? await indexedDB.databases() : [];
-    const cacheNames = "caches" in window ? await caches.keys() : [];
-    const cached: string[] = [];
-    for (const name of cacheNames) {
+    for (const info of databases) {
+      if (!info.name) continue;
+      indexed ||= has(info.name);
+      // Opening without a version never upgrades or creates stores in an existing database.
+      const database = await request(indexedDB.open(info.name));
+      try {
+        for (const storeName of Array.from(database.objectStoreNames)) {
+          const store = database.transaction(storeName, "readonly").objectStore(storeName);
+          const [keys, values] = await Promise.all([request(store.getAllKeys()), request(store.getAll())]);
+          indexed ||= has(storeName) || has(serialize(keys)) || has(serialize(values));
+        }
+      } finally {
+        database.close();
+      }
+    }
+
+    let cached = false;
+    for (const name of "caches" in window ? await caches.keys() : []) {
       const cache = await caches.open(name);
-      for (const request of await cache.keys()) {
-        const response = await cache.match(request);
-        cached.push(request.url, response ? await response.text() : "");
+      for (const entry of await cache.keys()) {
+        const response = await cache.match(entry);
+        cached ||= has(name) || has(entry.url) || has(response ? await response.text() : "");
       }
     }
     const workers = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistrations() : [];
-    return JSON.stringify({
-      local: entries(localStorage),
-      session: entries(sessionStorage),
-      cookie: document.cookie,
-      indexedDB: databases.map((database) => database.name),
+
+    return {
+      local: webStorage(localStorage),
+      session: webStorage(sessionStorage),
+      documentCookie: has(document.cookie),
+      indexedDB: indexed,
       caches: cached,
-      serviceWorkers: workers.map((worker) => worker.scope),
-      url: location.href,
-      history: JSON.stringify(history.state),
-    });
-  });
+      serviceWorkers: workers.some((worker) => has(worker.scope)),
+      location: has(location.href) || has(serialize(history.state)),
+    };
+  }, needles);
+  const cookieJar = (await context.cookies()).some((cookie) =>
+    needles.some((secret) => cookie.name.includes(secret) || cookie.value.includes(secret)),
+  );
+  return { ...inPage, cookieJar };
+}
+
+async function expectNothingPersisted(context: BrowserContext, page: Page, token: string, where: string) {
+  expect(await storageLeaks(context, page, [token, password]), `${where}: token or password persisted`).toEqual(NO_LEAKS);
 }
 
 function expectNoSecret(haystack: string, token: string, where: string): void {
@@ -171,7 +230,7 @@ test("E2-01/03/06/07/08/14: Login, Bearer use, storage, console and Logout", asy
   expect(protectedCalls.every((r) => r.authorization === bearer), "every protected call uses the Login token").toBe(true);
 
   // E2-06 while signed in.
-  expectNoSecret(await persistedState(page), token, "browser storage while signed in");
+  await expectNothingPersisted(context, page, token, "while signed in");
 
   // E2-14 on /me.
   const meResponse = await page.request.get(`${apiUrl}/api/v1/auth/me`, { headers: { Authorization: bearer } });
@@ -191,11 +250,15 @@ test("E2-01/03/06/07/08/14: Login, Bearer use, storage, console and Logout", asy
   await expect(page.getByRole("status").filter({ hasText: SIGNED_OUT_NOTICE })).toBeVisible();
   await expect(page.getByRole("heading", { name: "My Jobs" })).toHaveCount(0);
   const afterLogout = await recorder.after(beforeLogout);
-  expect(authOf(afterLogout, "POST", "/api/v1/auth/logout").every((value) => value === bearer)).toBe(true);
+  // Exactly one Logout request, carrying this session's Bearer. Compared as booleans so a
+  // failure never prints the token.
+  const logoutAuthorizations = authOf(afterLogout, "POST", "/api/v1/auth/logout");
+  expect(logoutAuthorizations).toHaveLength(1);
+  expect(logoutAuthorizations[0] === bearer, "the Logout request carries the session Bearer").toBe(true);
   expect(afterLogout.filter((r) => r.path !== "/api/v1/auth/logout").every((r) => r.authorization === undefined)).toBe(true);
 
   // E2-06 after Logout.
-  expectNoSecret(await persistedState(page), token, "browser storage after Logout");
+  await expectNothingPersisted(context, page, token, "after Logout");
 
   // E2-08 (contract §4.4): Logout does not revoke server-side; the copied token still works until exp.
   const stillValid = await page.request.get(`${apiUrl}/api/v1/auth/me`, { headers: { Authorization: bearer } });
@@ -226,8 +289,38 @@ test("E2-04/05: reload and a new tab do not restore the session", async ({ conte
   await page.waitForLoadState("networkidle");
   const afterReload = await recorder.after(beforeReload);
   expect(afterReload.every((r) => r.authorization === undefined), "no request carries a token after reload").toBe(true);
-  expectNoSecret(await persistedState(page), token, "browser storage after reload");
+  await expectNothingPersisted(context, page, token, "after reload");
   expectNoSecret(recorder.consoleTexts.join("\n"), token, "console and page errors");
+});
+
+test("E2-06 detector self-check: IndexedDB records and HttpOnly cookies are found", async ({ context, page, baseURL }) => {
+  // Positive control: plant a random canary where the app must never put a token, and require
+  // the same detector used above to report each place. The canary is not a credential.
+  const canary = `canary-${crypto.randomUUID()}`;
+  await page.goto("/");
+  expect(await storageLeaks(context, page, [canary])).toEqual(NO_LEAKS);
+
+  await context.addCookies([{ name: "e2_probe", value: canary, url: baseURL ?? page.url(), httpOnly: true }]);
+  expect(await page.evaluate(() => document.cookie.includes("e2_probe"))).toBe(false); // really HttpOnly
+  await page.evaluate(async (value) => {
+    await new Promise<void>((resolve, reject) => {
+      const open = indexedDB.open("e2-probe", 1);
+      open.onupgradeneeded = () => open.result.createObjectStore("records");
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const database = open.result;
+        const transaction = database.transaction("records", "readwrite");
+        transaction.objectStore("records").put({ nested: { session: value } }, "probe");
+        transaction.oncomplete = () => {
+          database.close();
+          resolve();
+        };
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+  }, canary);
+
+  expect(await storageLeaks(context, page, [canary])).toEqual({ ...NO_LEAKS, cookieJar: true, indexedDB: true });
 });
 
 test("E2-09/14: the request ID is readable by the frontend origin through browser CORS", async ({ page }) => {

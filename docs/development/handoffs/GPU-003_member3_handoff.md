@@ -165,7 +165,7 @@ backend/src/gpu_marketplace/repositories/     # Thuộc GPU-002; không viết O
 
 ### 10.1 E2 — P1C-AC-07 (browser)
 
-**Test:** `backend/tests/test_auth_session_browser_e2e.py` dựng cluster PostgreSQL tạm (hàng rào `db_safety`) → bootstrap role → Alembic head → 3 tài khoản tạm (CLIENT, WORKER có hồ sơ Worker, CLIENT không phụ thuộc để khóa giữa phiên) → API production chạy bằng login native `gpm_api_app` → build + preview frontend production → `frontend/e2e/auth-session.spec.ts` trên Chromium (config `frontend/e2e/auth-session.config.ts`). Mật khẩu, secret và DSN sinh mới mỗi lần chạy, chỉ đi qua env của tiến trình con; output lỗi được che. Luồng chung Worker → Listing → Client → Job thuộc `test_phase1_runtime_http_postgres_e2e.py`, không lặp lại ở đây.
+**Test:** `backend/tests/test_auth_session_browser_e2e.py` dựng cluster PostgreSQL tạm (hàng rào `db_safety`) → bootstrap role → Alembic head → 3 tài khoản tạm (CLIENT, WORKER có hồ sơ Worker, CLIENT không phụ thuộc để khóa giữa phiên) → API production chạy bằng login native `gpm_api_app` → build + preview frontend production → `frontend/e2e/auth-session.spec.ts` trên Chromium (config `frontend/e2e/auth-session.config.ts`). Mật khẩu, secret và DSN sinh mới mỗi lần chạy; output lỗi được che. Env của mọi tiến trình con được dựng tường minh: bỏ toàn bộ biến kế thừa `GPU_MARKETPLACE_*`, `GPM_*`, `PG*`, `DATABASE_URL` và mọi biến có giá trị chứa credential bị cấm, rồi chỉ cấp lại đúng biến cần thiết. Chỉ API nhận DSN runtime `gpm_api_app`; build, preview và Playwright không nhận DSN nào, không tiến trình con nào nhận DSN/mật khẩu owner (`test_child_environments_never_receive_owner_credentials`). Luồng chung Worker → Listing → Client → Job thuộc `test_phase1_runtime_http_postgres_e2e.py`, không lặp lại ở đây.
 
 | ID | Kiểm | Oracle |
 |---|---|---|
@@ -174,14 +174,15 @@ backend/src/gpu_marketplace/repositories/     # Thuộc GPU-002; không viết O
 | E2-03 | Bearer | Login không có `Authorization`; `/me`, `/gpu-listings`, `/jobs` đều mang đúng token của response Login |
 | E2-04 | Reload | Về form; không request nào mang token sau reload |
 | E2-05 | Tab mới | Chưa đăng nhập |
-| E2-06 | Storage khi đăng nhập, sau Logout, sau reload | Token và mật khẩu không có trong Web Storage, cookie, IndexedDB, CacheStorage, service worker, URL, history state |
+| E2-06 | Storage khi đăng nhập, sau Logout, sau reload | Token và mật khẩu không có trong Web Storage, `document.cookie`, cookie jar của context (gồm cookie HttpOnly), key/value của mọi object store IndexedDB, CacheStorage, service worker, URL, history state. Chỉ trả boolean, không in credential |
+| E2-06b | Tự kiểm bộ dò E2-06 | Canary ngẫu nhiên đặt vào cookie HttpOnly và một record IndexedDB lồng nhau phải bị phát hiện đúng hai chỗ đó |
 | E2-07 | Console + pageerror | Không chứa token hay mật khẩu |
-| E2-08 | Logout | 204 có Bearer; UI về form; token đã sao chép vẫn dùng được tới `exp` (section 4.4, không revoke) |
+| E2-08 | Logout | Đúng 1 request Logout, mang đúng Bearer của phiên; 204; UI về form; token đã sao chép vẫn dùng được tới `exp` (section 4.4, không revoke) |
 | E2-09 | Request ID qua CORS thật của Chromium | `X-Request-ID` đọc được, là UUID, trùng `error.request_id` |
 | E2-10 | Khóa tài khoản giữa phiên rồi bấm "Tải lại" | 401; UI về form với lý do `unauthorized`; không lộ trạng thái tài khoản |
 | E2-11 | `page.clock` tua quá 900 s | UI về form với lý do `expired`; không request nào gửi token cũ |
 | E2-12 | Đổi WORKER → CLIENT | Sau khi đổi, không request nào mang token cũ; không còn hiện tài khoản cũ |
-| E2-13 | Build có secret server trong env | Không giá trị nào lọt vào `frontend/dist` |
+| E2-13 | Build có biến secret server trong env (giá trị canary ngẫu nhiên, không phải credential thật) | Không canary hay secret nào lọt vào `frontend/dist` |
 | E2-14 | `Cache-Control` | `no-store` trên Login 200/401, `/me`, Logout |
 | — | Log API | Không chứa secret, mật khẩu hay chuỗi dạng JWT |
 
@@ -195,8 +196,10 @@ backend/src/gpu_marketplace/repositories/     # Thuộc GPU-002; không viết O
 | Bỏ `expose_headers` khỏi CORS | KILLED | E2-09 |
 | Bỏ timer hết hạn phía client | KILLED | E2-11 |
 | Bỏ qua 401 của Listings/Jobs | KILLED | E2-10 |
+| Lưu token vào một record IndexedDB (review #42 P2-02) | KILLED | E2-06 (`indexedDB: true`, cả khi đăng nhập và sau reload) |
+| Harness trả `_child_environment` về cách cũ (copy `os.environ`, chỉ bỏ 4 biến) (review #42 P2-01) | KILLED | `test_child_environments_never_receive_owner_credentials` |
 
-**Kết quả local** (Windows 11, PostgreSQL 16.15 cluster tạm, Python 3.12.15, Node 24.21.0, Playwright 1.64.1 / Chromium build 1248): 6/6 check PASS; chạy 4 lần liên tiếp trên cùng HEAD, cả 4 PASS (19–22 s mỗi lần); 6/6 mutation KILLED. Evidence CI: chờ CI của PR này.
+**Kết quả local** (Windows 11, PostgreSQL 16.15 cluster tạm, Python 3.12.15, Node 24.21.0, Playwright 1.64.1 / Chromium build 1248): 6/6 check PASS; chạy 4 lần liên tiếp trên cùng HEAD, cả 4 PASS (19–22 s mỗi lần); 6/6 mutation KILLED. Sau review #42 (rev 2): 7/7 test Playwright PASS, test env PASS, thêm 2 mutation KILLED (8/8). Evidence CI: chờ CI của PR #39 sau khi PR này vào nhánh.
 
 ### 10.2 E3 — P1C-AC-08 (DB mới + hồi quy)
 
@@ -205,7 +208,7 @@ Hai việc giao cho E3 sau review PR #35 đã có trên nhánh tích hợp: API 
 | ID | Kiểm | Kết quả | Evidence |
 |---|---|---|---|
 | E3-01 | DB mới → bootstrap role → Alembic | PASS | `alembic heads` = `0005_listing_d7`; fixture `migrated_database_with_teardown`; CI dùng `tools/verify_alembic_head.py`, `tools/verify_runtime_roles.py` |
-| E3-02 | `pytest backend/tests tests` | PASS | Cluster tạm local; CI run [#42350954394](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42350954394) trên `44579ed`: 1.203 passed. Local trên HEAD này (thêm test E2): **1.204 passed, 0 failed, 0 skipped**, gồm cả hai test browser |
+| E3-02 | `pytest backend/tests tests` | PASS | Cluster tạm local; CI run [#42350954394](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42350954394) trên `44579ed`: 1.203 passed. Local trên HEAD này (thêm test E2 và test env): **1.205 passed, 0 failed, 0 skipped**, gồm cả hai test browser |
 | E3-03 | Vitest / typecheck | PASS | Local: 158 passed (10 file), `npm run typecheck` sạch (gồm `e2e/`) |
 | E3-04 | Compose smoke, gồm Auth fail-closed trước migrate và 401 chung sau migrate | PASS (CI) | Job `compose` của run trên; local `NOT_RUN` (máy không có Docker) |
 | E3-05 | Provisioning dùng chung `normalize_login_name` + `ScryptPasswordHasher` | PASS | `test_local_demo_accounts.py` (insert + login thật, trùng tên không đổi dòng cũ, rollback giữa chừng) |

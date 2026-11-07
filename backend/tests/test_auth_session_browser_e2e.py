@@ -36,16 +36,15 @@ from gpu_marketplace.identity.passwords import ScryptPasswordHasher
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_ROOT = BACKEND_ROOT.parent / "frontend"
 API_LOGIN = "gpm_api_app"
-# Never handed to child processes: the API and the browser must not see the test cluster's owner.
-TEST_DATABASE_ENV_KEYS = (
-    "GPU_MARKETPLACE_TEST_DATABASE_URL",
-    "GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS",
-    "GPU_MARKETPLACE_TEST_CLUSTER_TOKEN",
-    "GPM_CI_PGPASSWORD",
-)
+# Inherited variables with these prefixes are never passed to a child process. They cover the
+# application settings (including the owner DSN that conftest's ``alembic_config`` sets in
+# GPU_MARKETPLACE_DATABASE_URL), the test-cluster markers and libpq routing/credentials (PG*).
+# Each child gets back only the settings it needs, explicitly.
+INHERITED_ENV_PREFIXES = ("GPU_MARKETPLACE_", "GPM_", "PG")
+INHERITED_ENV_NAMES = ("DATABASE_URL",)
 STARTUP_SECONDS = 30
 BROWSER_SECONDS = 300
-EXPECTED_BROWSER_TESTS = 6
+EXPECTED_BROWSER_TESTS = 7
 
 
 def _free_loopback_port() -> int:
@@ -54,12 +53,63 @@ def _free_loopback_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _child_environment(extra: dict[str, str]) -> dict[str, str]:
-    environment = os.environ.copy()
-    for name in TEST_DATABASE_ENV_KEYS:
-        environment.pop(name, None)
+def _child_environment(extra: dict[str, str], forbidden: Iterable[str]) -> dict[str, str]:
+    """Builds a child environment that cannot contain any ``forbidden`` value.
+
+    Inherited database/application variables are dropped by name, and any other inherited
+    variable whose value contains a forbidden value is dropped too. ``extra`` is then checked
+    the same way, so a mistake in the caller fails the test instead of reaching the child.
+    """
+    blocked = [value for value in forbidden if value]
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.upper().startswith(INHERITED_ENV_PREFIXES)
+        and name.upper() not in INHERITED_ENV_NAMES
+        and not any(secret in value for secret in blocked)
+    }
     environment.update(extra)
+    leaking = sorted(name for name, value in environment.items() if any(secret in value for secret in blocked))
+    assert leaking == [], f"Forbidden credentials would reach a child process through: {leaking}"
     return environment
+
+
+def _owner_credentials(owner_url: str) -> list[str]:
+    """The owner URL and password, plus the values of the test-cluster variables."""
+    values = [owner_url, make_url(owner_url).password or ""]
+    values += [value for name, value in os.environ.items() if name.upper().startswith(("GPM_", "GPU_MARKETPLACE_TEST_"))]
+    # Short flag values such as "1" are not credentials and would match unrelated variables.
+    return [value for value in values if len(value) >= 8]
+
+
+def test_child_environments_never_receive_owner_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Regression for the #42 review: conftest puts the owner DSN in GPU_MARKETPLACE_DATABASE_URL.
+    owner_password = secrets.token_hex(16)
+    owner_url = f"postgresql+psycopg://postgres:{owner_password}@127.0.0.1:55432/gpu_marketplace_test"
+    runtime_url = f"postgresql+psycopg://{API_LOGIN}:{secrets.token_hex(16)}@127.0.0.1:55432/gpu_marketplace_test"
+    monkeypatch.setenv("GPU_MARKETPLACE_DATABASE_URL", owner_url)
+    monkeypatch.setenv("GPU_MARKETPLACE_TEST_DATABASE_URL", owner_url)
+    monkeypatch.setenv("GPM_CI_PGPASSWORD", owner_password)
+    monkeypatch.setenv("PGPASSWORD", owner_password)
+    monkeypatch.setenv("PGHOST", "127.0.0.1")
+    monkeypatch.setenv("DATABASE_URL", owner_url)
+    monkeypatch.setenv("UNRELATED_TOOL_SETTING", f"dsn={owner_url}")
+    owner = _owner_credentials(owner_url)
+
+    browser = _child_environment({"AUTH_E2E_BASE_URL": "http://127.0.0.1:1"}, owner + [runtime_url])
+    api = _child_environment({"GPU_MARKETPLACE_DATABASE_URL": runtime_url}, owner)
+
+    for environment in (browser, api):
+        assert not any(owner_password in value for value in environment.values())
+        assert not any(name.upper().startswith("PG") or name.upper() == "DATABASE_URL" for name in environment)
+        assert "UNRELATED_TOOL_SETTING" not in environment
+    assert not any(name.upper().startswith(("GPU_MARKETPLACE_", "GPM_")) for name in browser)
+    assert [name for name in api if name.upper().startswith(("GPU_MARKETPLACE_", "GPM_"))] == [
+        "GPU_MARKETPLACE_DATABASE_URL"
+    ]
+    assert api["GPU_MARKETPLACE_DATABASE_URL"] == runtime_url
+    with pytest.raises(AssertionError, match="GPU_MARKETPLACE_DATABASE_URL"):
+        _child_environment({"GPU_MARKETPLACE_DATABASE_URL": owner_url}, owner)
 
 
 def _redact(output: str, values: Iterable[str]) -> str:
@@ -148,15 +198,18 @@ def test_auth_session_in_a_real_browser_against_postgres_and_native_runtime_role
         .set(username=API_LOGIN, password=api_password)
         .render_as_string(hide_password=False)
     )
-    hidden = [
+    owner = _owner_credentials(test_database.url)
+    # Server-side values: only the API process may receive them.
+    server_only = [
         api_password,
         manager_password,
         jwt_secret,
         listing_cursor_secret,
         jobs_cursor_secret,
-        account_password,
         runtime_url,
     ]
+    # The browser needs the account password; the API, the build and the preview do not.
+    hidden = [*owner, *server_only, account_password]
 
     node = shutil.which("node")
     assert node is not None, "Node.js is required for the browser E2E test."
@@ -176,12 +229,21 @@ def test_auth_session_in_a_real_browser_against_postgres_and_native_runtime_role
         "GPU_MARKETPLACE_JOBS_CURSOR_SECRET": jobs_cursor_secret,
     }
 
-    # E2-13: build with the server secrets present in the environment. Vite may only inline
-    # VITE_* variables, so none of these values may appear in the shipped bundle.
+    # E2-13: build with server-secret variables present in the environment. Vite may only inline
+    # VITE_* variables, so none of these values may appear in the shipped bundle. The build gets
+    # random canaries under the same names, never a real credential.
+    canaries = {
+        "GPU_MARKETPLACE_DATABASE_URL": (
+            f"postgresql+psycopg://canary:{secrets.token_hex(32)}@127.0.0.1:1/canary"
+        ),
+        "GPU_MARKETPLACE_JWT_SECRET": secrets.token_hex(32),
+        "GPU_MARKETPLACE_LISTING_CURSOR_SECRET": secrets.token_hex(32),
+        "GPU_MARKETPLACE_JOBS_CURSOR_SECRET": secrets.token_hex(32),
+    }
     build = subprocess.run(
         [node, str(vite_cli), "build"],
         cwd=FRONTEND_ROOT,
-        env=_child_environment({**server_secrets, "VITE_API_BASE_URL": api_url}),
+        env=_child_environment({**canaries, "VITE_API_BASE_URL": api_url}, hidden),
         capture_output=True,
         text=True,
         timeout=180,
@@ -193,7 +255,7 @@ def test_auth_session_in_a_real_browser_against_postgres_and_native_runtime_role
     leaked = [
         path.relative_to(FRONTEND_ROOT).as_posix()
         for path in (FRONTEND_ROOT / "dist").rglob("*")
-        if path.is_file() and any(value.encode() in path.read_bytes() for value in hidden)
+        if path.is_file() and any(value.encode() in path.read_bytes() for value in [*canaries.values(), *hidden])
     ]
     assert leaked == [], f"Server secrets leaked into the frontend build: {leaked}"
 
@@ -215,7 +277,9 @@ def test_auth_session_in_a_real_browser_against_postgres_and_native_runtime_role
                         "GPU_MARKETPLACE_API_HOST": "127.0.0.1",
                         "GPU_MARKETPLACE_API_PORT": str(api_port),
                         "GPU_MARKETPLACE_CORS_ORIGINS": json.dumps([frontend_origin]),
-                    }
+                    },
+                    # The API connects as gpm_api_app only; it never needs the owner or Manager.
+                    [*owner, manager_password, account_password],
                 ),
                 stdout=api_log,
                 stderr=api_log,
@@ -225,7 +289,7 @@ def test_auth_session_in_a_real_browser_against_postgres_and_native_runtime_role
             frontend_process = subprocess.Popen(
                 [node, str(vite_cli), "preview", "--host", "127.0.0.1", "--port", str(frontend_port), "--strictPort"],
                 cwd=FRONTEND_ROOT,
-                env=_child_environment({"VITE_API_BASE_URL": api_url}),
+                env=_child_environment({"VITE_API_BASE_URL": api_url}, hidden),
                 stdout=frontend_log,
                 stderr=frontend_log,
             )
@@ -245,7 +309,8 @@ def test_auth_session_in_a_real_browser_against_postgres_and_native_runtime_role
                             "AUTH_E2E_DISABLE_LOGIN": disabled_login,
                             "AUTH_E2E_PASSWORD": account_password,
                             "AUTH_E2E_CONTROL_DIR": str(control_dir),
-                        }
+                        },
+                        [*owner, *server_only],
                     ),
                     stdout=browser_log,
                     stderr=browser_log,
