@@ -151,3 +151,29 @@ PR #39 remains Draft. Independent human review, renewed TV2/TV3/TV4/TV5 compatib
 2. Obtain the owner's L2 decision for CR-GPU-INT-01-READY-01 before implementing any readiness expansion.
 3. Address any review findings on this same branch and rerun CI; approvals for older SHAs do not carry over.
 4. Do not mark Ready or merge until the required review confirmations and applicable gates are complete.
+
+## PR #39 final finding remediation — 2026-11-07 (pre-push verification)
+
+PR #42 is included in the integration branch. `git fetch origin` succeeded before final validation; local HEAD and `origin/feat/gpu-int-01-runtime-integration` both remain at baseline `6788505cbb68e09ad08ea2b96728bc6c69e8a32e` (main: `1d8b1b2c52b759d99a072c3d0d889b375083a8c4`). The PR remains open and Draft. The latest GitHub review-thread read found the three in-scope P2 threads still open: Listing mutation audit (TV4), Jobs mutation audit (TV5), and PostgreSQL role credential restoration (TV5). No review thread was resolved by this work.
+
+| Finding | Implementation status | Local evidence / remaining gate |
+|---|---|---|
+| P2-PGROLE | **FIXED in code** | The HTTP/browser/PostgreSQL E2E uses PR #42's `restored_login_role_credentials` fixture around the whole test. It snapshots both login verifiers before rotation and restores/verifies exact values, including `NULL`, after runtime engines and API/frontend processes have closed. Failure/restore tests are in `test_role_credentials_restore.py`. The disposable PostgreSQL tests were skipped locally; CI must execute them on a safety-marked disposable cluster. |
+| P2-LISTING-AUDIT | **IMPLEMENTED** | Create/update/pause/resume success events use the existing `audit_events` table/grants in the Listing mutation transaction. Rejections are distinct; dependency failures are recorded as `ERROR` when outcome is known. Unknown COMMIT is not followed by a contradictory side-channel failure row. Guarded PostgreSQL adapter tests assert the success audit persists with a durable lost-ack COMMIT and leaves no audit row after rollback; the HTTP E2E also checks correlated outcomes. These PostgreSQL tests await CI. |
+| P2-JOBS-AUDIT | **IMPLEMENTED** | Submit and Cancel success events are atomic with their Job mutation; rejected/error outcomes use redacted reason codes. Replay does not add duplicate success events. Adapter regression assertions cover rollback, durable lost-ack, rejected replay, and cancellation conflict; PostgreSQL cases are guarded and await CI. |
+| R3 Submit ↔ Pause/Resize | **TESTS ADDED; runtime proof pending** | Four PostgreSQL concurrency cases use independent sessions and `threading.Event` barriers for both lock/commit orders, then check Job/reference/audit counts and fresh capacity. The suite contains no `sleep` to select a winner. All four tests skip locally until a disposable PostgreSQL cluster is configured; GitHub Actions must provide the actual race evidence. |
+
+Implementation changes touch the API composition, Listing and Jobs services/routes/adapters, the shared audit writer, the E2E and PostgreSQL race tests, and their focused unit/fake tests. No API contract, database schema/migration/grant, JWT, approved reference algorithm, lock order, idempotency rule, or Phase 2 behavior was changed.
+
+Local checks on Python 3.12.15 used the repository virtual environments because `uv` is unavailable:
+
+- Targeted audit/Listing/Submit/Cancel/E2E/race selection: **356 passed, 40 skipped**, 1 warning, exit 0. The skips are PostgreSQL tests blocked by the missing safety-marked disposable database.
+- Full backend/topology regression: **851 passed, 372 skipped, 0 failed**, 2 warnings, exit 0 in 42.47s. PostgreSQL tests, including the HTTP/browser E2E and four races, are included among the guarded skips.
+- Simulator: **2 passed**, 1 warning, exit 0.
+- Frontend Vitest: **158 passed / 10 files**, exit 0; TypeScript typecheck (including E2E config) and production Vite build passed.
+- PowerShell local setup regression: **PASS**, exit 0.
+- Python compile check: **PASS**, exit 0.
+- Local Docker/Compose smoke and real HTTP/browser/PostgreSQL E2E: **NOT_RUN** because Docker and a configured disposable PostgreSQL cluster are unavailable. `npm`'s global shim and `uv` are also unavailable; frontend checks used the installed Node 22.13 dependencies directly.
+- GitHub Actions on the remediation commit: **PENDING** until push; no CI result is claimed here.
+
+**Provisional disposition: `BLOCKED_TECHNICAL` pending the safety-guarded PostgreSQL/browser/Compose jobs and final GitHub Actions on the pushed SHA.** After successful CI, request renewed scoped human review from `@TranVu2005`, `@giakhanh-hub`, `@VietNguyen865`, and `@NguyenDucThang-tb`. Keep PR #39 Draft and leave its review threads open until reviewers confirm. Existing `CR-GPU-INT-01-READY-01`, C1 Scrypt evidence, independent human review, and compatibility ACKs remain separate gates.

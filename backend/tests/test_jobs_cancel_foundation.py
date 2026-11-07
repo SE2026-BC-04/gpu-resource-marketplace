@@ -210,6 +210,7 @@ class FakeTransaction:
         job_id: UUID,
         listing_id: UUID,
         client_id: UUID,
+        correlation_id: UUID,
     ) -> JobRecord:
         assert self.resource_open
         self.events.append("update")

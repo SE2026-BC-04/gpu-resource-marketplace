@@ -77,5 +77,16 @@ class ListingUnitOfWork(Protocol):
 
     def commit(self) -> None: ...
 
+    def record_audit_event(
+        self,
+        *,
+        actor_ref: str,
+        correlation_id: UUID,
+        subject_type: str,
+        subject_id: UUID,
+        event_type: str,
+        metadata_redacted: dict[str, object],
+    ) -> None: ...
+
 
 UnitOfWorkFactory = Callable[[], ListingUnitOfWork]

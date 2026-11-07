@@ -41,6 +41,7 @@ from gpu_marketplace.jobs.ports import (
     JobRecord,
 )
 from gpu_marketplace.repositories.commit_outcome import is_definite_commit_rollback
+from gpu_marketplace.repositories.audit import append_audit_event
 
 logger = logging.getLogger(__name__)
 
@@ -431,13 +432,39 @@ class PostgresJobCancelTransaction:
         self._locked_job = job_id
         return None if row is None else _to_record(row)
 
-    def cancel_queued(self, *, job_id: UUID, listing_id: UUID, client_id: UUID) -> JobRecord:
+    def cancel_queued(
+        self,
+        *,
+        job_id: UUID,
+        listing_id: UUID,
+        client_id: UUID,
+        correlation_id: UUID,
+    ) -> JobRecord:
         if self._locked_listing != listing_id or self._locked_job != job_id:
             raise RuntimeError("Listing and Job locks are required before cancelling")
         params = {"job_id": job_id, "listing_id": listing_id, "client_id": client_id}
         row = self._execute(_CANCEL_SQL, params).one_or_none()
         if row is not None:
-            return _to_record(row)
+            record = _to_record(row)
+            try:
+                append_audit_event(
+                    self._active(),
+                    actor_ref=str(client_id),
+                    correlation_id=correlation_id,
+                    subject_type="JOB",
+                    subject_id=job_id,
+                    event_type="JOB_CANCEL",
+                    outcome="SUCCESS",
+                    metadata_redacted={
+                        "from_status": "QUEUED",
+                        "to_status": "CANCELLED",
+                    },
+                )
+            except SQLAlchemyError as error:
+                self._failed = True
+                _log_store_failure("job_cancel_audit_insert_failed", error, self._outcome)
+                raise DependencyUnavailable() from None
+            return record
         # Zero rows: classify from the row still locked by this transaction.
         current = self._execute(_CLASSIFY_SQL, {"job_id": job_id}).one_or_none()
         if current is None:

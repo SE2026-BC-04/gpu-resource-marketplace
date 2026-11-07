@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
+from gpu_marketplace.common.audit import AuditOutcomeWriter
 from gpu_marketplace.jobs.cancel_ports import (
     CancelGuardReason,
     CancelGuardRejected,
@@ -12,6 +13,8 @@ from gpu_marketplace.jobs.cancel_ports import (
 )
 from gpu_marketplace.jobs.errors import (
     Forbidden,
+    JobDomainError,
+    JobErrorCode,
     JobNotCancellable,
     JobNotFound,
     Unauthenticated,
@@ -24,11 +27,51 @@ from gpu_marketplace.jobs.projections import project_job
 class JobCancelService:
     """Coordinate the TX-CANCEL policy; persistence owns locks and DB time."""
 
-    def __init__(self, *, locator_reader: JobLocatorReader, uow: JobCancelUnitOfWork) -> None:
+    def __init__(
+        self,
+        *,
+        locator_reader: JobLocatorReader,
+        uow: JobCancelUnitOfWork,
+        audit_writer: AuditOutcomeWriter | None = None,
+    ) -> None:
         self._locator_reader = locator_reader
         self._uow = uow
+        self._audit_writer = audit_writer
 
-    def cancel(self, *, principal: JobPrincipal, job_id: UUID) -> PublicJobResponse:
+    def cancel(
+        self,
+        *,
+        principal: JobPrincipal,
+        job_id: UUID,
+        correlation_id: UUID | None = None,
+    ) -> PublicJobResponse:
+        correlation_id = correlation_id or uuid4()
+        try:
+            return self._cancel(
+                principal=principal, job_id=job_id, correlation_id=correlation_id
+            )
+        except JobDomainError as error:
+            if self._audit_writer is not None:
+                user_id = getattr(principal, "user_id", None)
+                if isinstance(user_id, UUID) and user_id.version == 4:
+                    self._audit_writer.record_outcome(
+                        actor_ref=str(user_id),
+                        correlation_id=correlation_id,
+                        subject_type="JOB",
+                        subject_id=job_id,
+                        event_type="JOB_CANCEL",
+                        outcome=(
+                            "ERROR"
+                            if error.code is JobErrorCode.DEPENDENCY_UNAVAILABLE
+                            else "REJECTED"
+                        ),
+                        reason_code=error.code.value,
+                    )
+            raise
+
+    def _cancel(
+        self, *, principal: JobPrincipal, job_id: UUID, correlation_id: UUID
+    ) -> PublicJobResponse:
         try:
             role = JobRole(principal.role)
         except (ValueError, TypeError) as exc:
@@ -59,6 +102,7 @@ class JobCancelService:
                     job_id=job_id,
                     listing_id=locator.listing_id,
                     client_id=principal.user_id,
+                    correlation_id=correlation_id,
                 )
                 self._validate_cancelled_row(
                     updated,

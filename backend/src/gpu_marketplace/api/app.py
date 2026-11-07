@@ -29,6 +29,7 @@ from gpu_marketplace.listings.models import ListingRecord, WorkerProfile
 from gpu_marketplace.listings.router import create_listing_router
 from gpu_marketplace.listings.service import ListingService
 from gpu_marketplace.repositories.accounts import PostgresAccountReader
+from gpu_marketplace.repositories.audit import PostgresAuditWriter
 from gpu_marketplace.repositories.jobs import (
     PostgresJobCancelUnitOfWork,
     PostgresJobLocatorReader,
@@ -86,6 +87,7 @@ def create_app(
         ScryptPasswordHasher(),
     )
     principal_dependency = create_principal_dependency(auth_service)
+    audit_writer = PostgresAuditWriter(account_sessions)
     listing_service = ListingService(
         lambda: PostgresListingUnitOfWork(
             account_sessions,
@@ -96,6 +98,7 @@ def create_app(
         ListingCursorCodec(
             resolved_settings.listing_cursor_secret.get_secret_value().encode("utf-8")
         ),
+        audit_writer=audit_writer,
     )
     jobs_read_service = JobsReadService(
         reader=PostgresJobReader(account_sessions),
@@ -106,9 +109,10 @@ def create_app(
     jobs_cancel_service = JobCancelService(
         locator_reader=PostgresJobLocatorReader(account_sessions),
         uow=PostgresJobCancelUnitOfWork(account_sessions),
+        audit_writer=audit_writer,
     )
     jobs_submit_service = JobSubmitService(
-        store=PostgresJobSubmissionStore(account_sessions)
+        store=PostgresJobSubmissionStore(account_sessions), audit_writer=audit_writer
     )
 
     @asynccontextmanager

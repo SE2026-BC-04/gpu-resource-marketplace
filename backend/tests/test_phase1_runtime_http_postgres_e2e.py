@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -27,6 +28,7 @@ from sqlalchemy.exc import DBAPIError
 
 from gpu_marketplace.common.db_roles import bootstrap_roles
 from gpu_marketplace.identity.passwords import ScryptPasswordHasher
+from role_credentials import restored_login_role_credentials
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_ROOT = BACKEND_ROOT.parent / "frontend"
@@ -60,11 +62,20 @@ def _login(client: httpx.Client, name: str) -> tuple[str, dict[str, object]]:
     return body["access_token"], body["user"]
 
 
-def test_worker_client_job_lifecycle_over_http_browser_and_native_runtime_role(
+@pytest.fixture
+def restored_e2e_role_credentials(
     migrated_database_with_teardown: Engine,
+) -> Iterator[Engine]:
+    """Restore both cluster-wide native login verifiers after all E2E processes stop."""
+    with restored_login_role_credentials(migrated_database_with_teardown):
+        yield migrated_database_with_teardown
+
+
+def test_worker_client_job_lifecycle_over_http_browser_and_native_runtime_role(
+    restored_e2e_role_credentials: Engine,
     test_database,
 ) -> None:
-    owner_engine = migrated_database_with_teardown
+    owner_engine = restored_e2e_role_credentials
     api_password = secrets.token_hex(32)
     manager_password = secrets.token_hex(32)
     with owner_engine.begin() as connection:
@@ -114,19 +125,23 @@ def test_worker_client_job_lifecycle_over_http_browser_and_native_runtime_role(
         hide_password=False
     )
     runtime_engine = create_engine(runtime_url, pool_pre_ping=True)
-    with runtime_engine.connect() as connection:
-        identity = connection.execute(text("SELECT current_user, session_user")).one()
-        privileges = connection.execute(
-            text(
-                "SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls "
-                "FROM pg_roles WHERE rolname = current_user"
-            )
-        ).one()
-    assert tuple(identity) == (API_LOGIN, API_LOGIN)
-    assert not any(privileges)
-    with runtime_engine.connect() as connection:
-        with pytest.raises(DBAPIError):
-            connection.execute(text("SELECT seed_value FROM simulation_references LIMIT 1"))
+    try:
+        with runtime_engine.connect() as connection:
+            identity = connection.execute(text("SELECT current_user, session_user")).one()
+            privileges = connection.execute(
+                text(
+                    "SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls "
+                    "FROM pg_roles WHERE rolname = current_user"
+                )
+            ).one()
+        assert tuple(identity) == (API_LOGIN, API_LOGIN)
+        assert not any(privileges)
+        with runtime_engine.connect() as connection:
+            with pytest.raises(DBAPIError):
+                connection.execute(text("SELECT seed_value FROM simulation_references LIMIT 1"))
+    finally:
+        # The runtime test engine is closed well before the role-restore fixture exits.
+        runtime_engine.dispose()
 
     port = _free_loopback_port()
     frontend_port = _free_loopback_port()
@@ -220,6 +235,13 @@ def test_worker_client_job_lifecycle_over_http_browser_and_native_runtime_role(
                 listing = listing_response.json()
                 assert listing["status"] == "ACTIVE"
                 assert listing["worker"]["id"] == str(worker_profile_id)
+                listing_updated_response = client.patch(
+                    f"/api/v1/gpu-listings/{listing['id']}",
+                    headers=worker_headers,
+                    json={"gpu_model": "E2E Test GPU Updated"},
+                )
+                assert listing_updated_response.status_code == 200
+                assert listing_updated_response.json()["gpu_model"] == "E2E Test GPU Updated"
                 assert client.post("/api/v1/auth/logout", headers=worker_headers).status_code == 204
 
                 client_token, client_user = _login(client, client_name)
@@ -248,9 +270,49 @@ def test_worker_client_job_lifecycle_over_http_browser_and_native_runtime_role(
                     for secret in ("seed_value", "expected_digest", "simulation_references")
                 )
 
+                rejected_listing_update = client.patch(
+                    f"/api/v1/gpu-listings/{listing['id']}",
+                    headers=worker_headers,
+                    json={"total_gpu_count": 1},
+                )
+                assert rejected_listing_update.status_code == 409
+
                 replay = client.post("/api/v1/jobs", headers=submit_headers, json=request)
                 assert replay.status_code == 200, replay.text
                 assert replay.json()["id"] == job["id"]
+
+                paused = client.post(
+                    f"/api/v1/gpu-listings/{listing['id']}/pause",
+                    headers=worker_headers,
+                )
+                assert paused.status_code == 200, paused.text
+                retained_replay = client.post(
+                    "/api/v1/jobs", headers=submit_headers, json=request
+                )
+                assert retained_replay.status_code == 200, retained_replay.text
+                assert retained_replay.json()["id"] == job["id"]
+                changed_replay = client.post(
+                    "/api/v1/jobs",
+                    headers=submit_headers,
+                    json={**request, "duration_seconds": 61},
+                )
+                assert changed_replay.status_code == 409
+                new_paused_submit = client.post(
+                    "/api/v1/jobs",
+                    headers={**client_headers, "Idempotency-Key": f"phase1-{uuid4()}"},
+                    json=request,
+                )
+                assert new_paused_submit.status_code == 409
+                resumed = client.post(
+                    f"/api/v1/gpu-listings/{listing['id']}/resume",
+                    headers=worker_headers,
+                )
+                assert resumed.status_code == 200, resumed.text
+                paused_again = client.post(
+                    f"/api/v1/gpu-listings/{listing['id']}/pause",
+                    headers=worker_headers,
+                )
+                assert paused_again.status_code == 200, paused_again.text
                 jobs = client.get("/api/v1/jobs", headers=client_headers)
                 assert jobs.status_code == 200, jobs.text
                 assert [item["id"] for item in jobs.json()["items"]] == [job["id"]]
@@ -266,6 +328,10 @@ def test_worker_client_job_lifecycle_over_http_browser_and_native_runtime_role(
                 final = client.get(f"/api/v1/jobs/{job['id']}", headers=client_headers)
                 assert final.status_code == 200
                 assert final.json()["status"] == "CANCELLED"
+                cancel_rejected = client.post(
+                    f"/api/v1/jobs/{job['id']}/cancel", headers=client_headers
+                )
+                assert cancel_rejected.status_code == 409
 
                 frontend_url = frontend_origin
                 frontend_process = subprocess.Popen(
@@ -363,6 +429,87 @@ def test_worker_client_job_lifecycle_over_http_browser_and_native_runtime_role(
             assert all(row["status"] == "CANCELLED" for row in rows)
             assert all(row["terminal_at"] is not None for row in rows)
             assert all(row["reference_count"] == 1 for row in rows)
+            with owner_engine.connect() as connection:
+                audit_rows = connection.execute(
+                    text(
+                        "SELECT actor_kind, actor_ref, correlation_id, subject_type, subject_id, "
+                        "event_type, outcome, created_at, metadata_redacted "
+                        "FROM audit_events WHERE subject_id = ANY(CAST(:subject_ids AS uuid[])) "
+                        "ORDER BY created_at, id"
+                    ),
+                    {
+                        "subject_ids": [
+                            UUID(listing["id"]),
+                            UUID(job["id"]),
+                            UUID(browser_result["jobId"]),
+                        ]
+                    },
+                ).mappings().all()
+            def events(subject_id: str, event_type: str, outcome: str) -> list[object]:
+                return [
+                    row
+                    for row in audit_rows
+                    if str(row["subject_id"]) == subject_id
+                    and row["event_type"] == event_type
+                    and row["outcome"] == outcome
+                ]
+
+            listing_created = events(listing["id"], "LISTING_CREATE", "SUCCESS")
+            listing_updated = events(listing["id"], "LISTING_UPDATE", "SUCCESS")
+            rejected_listing_updates = events(listing["id"], "LISTING_UPDATE", "REJECTED")
+            listing_paused = events(listing["id"], "LISTING_PAUSE", "SUCCESS")
+            listing_resumed = events(listing["id"], "LISTING_RESUME", "SUCCESS")
+            assert len(listing_created) == 1
+            assert len(listing_updated) == 1
+            assert len(rejected_listing_updates) == 1
+            assert len(listing_paused) == 2
+            assert len(listing_resumed) == 1
+            assert str(listing_created[0]["correlation_id"]) == (
+                listing_response.headers["X-Request-ID"]
+            )
+            assert str(listing_updated[0]["correlation_id"]) == (
+                listing_updated_response.headers["X-Request-ID"]
+            )
+            assert str(rejected_listing_updates[0]["correlation_id"]) == (
+                rejected_listing_update.headers["X-Request-ID"]
+            )
+            assert {str(row["correlation_id"]) for row in listing_paused} == {
+                paused.headers["X-Request-ID"], paused_again.headers["X-Request-ID"]
+            }
+            assert str(listing_resumed[0]["correlation_id"]) == resumed.headers["X-Request-ID"]
+            assert rejected_listing_updates[0]["metadata_redacted"] == {
+                "reason_code": "LISTING_CAPACITY_BELOW_QUEUED_MAX"
+            }
+            assert len(events(job["id"], "JOB_SUBMIT", "SUCCESS")) == 1
+            rejected_submits = events(listing["id"], "JOB_SUBMIT", "REJECTED")
+            job_cancelled = events(job["id"], "JOB_CANCEL", "SUCCESS")
+            rejected_cancels = events(job["id"], "JOB_CANCEL", "REJECTED")
+            browser_submitted = events(browser_result["jobId"], "JOB_SUBMIT", "SUCCESS")
+            browser_cancelled = events(browser_result["jobId"], "JOB_CANCEL", "SUCCESS")
+            assert len(rejected_submits) == 2
+            assert len(job_cancelled) == 1
+            assert len(rejected_cancels) == 1
+            assert len(browser_submitted) == 1
+            assert len(browser_cancelled) == 1
+            assert {str(row["correlation_id"]) for row in rejected_submits} == {
+                changed_replay.headers["X-Request-ID"],
+                new_paused_submit.headers["X-Request-ID"],
+            }
+            assert str(job_cancelled[0]["correlation_id"]) == cancelled.headers["X-Request-ID"]
+            assert str(rejected_cancels[0]["correlation_id"]) == (
+                cancel_rejected.headers["X-Request-ID"]
+            )
+            for audit_row in audit_rows:
+                assert audit_row["actor_kind"] == "USER"
+                assert audit_row["actor_ref"] in {str(worker_id), str(client_id)}
+                assert audit_row["correlation_id"] is not None
+                assert audit_row["created_at"] is not None
+                metadata = audit_row["metadata_redacted"]
+                assert not set(metadata) & {
+                    "password", "token", "authorization", "dsn", "secret",
+                    "seed_value", "expected_digest", "simulation_reference",
+                    "idempotency_key", "request_sha256", "raw_body",
+                }
         finally:
             if frontend_process is not None and frontend_process.poll() is None:
                 frontend_process.terminate()
@@ -378,4 +525,3 @@ def test_worker_client_job_lifecycle_over_http_browser_and_native_runtime_role(
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=10)
-            runtime_engine.dispose()

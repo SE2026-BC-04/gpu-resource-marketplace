@@ -229,7 +229,10 @@ def create_jobs_router(
                 return job_error_response(InvalidJson(), request_id=request_id)  # type: ignore[return-value]
             try:
                 return await run_in_threadpool(
-                    cancel_service.cancel, principal=principal, job_id=parsed_id
+                    cancel_service.cancel,
+                    principal=principal,
+                    job_id=parsed_id,
+                    correlation_id=UUID(request_id),
                 )
             except JobDomainError as exc:
                 return job_error_response(exc, request_id=request_id)  # type: ignore[return-value]

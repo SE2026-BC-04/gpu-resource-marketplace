@@ -25,6 +25,7 @@ from gpu_marketplace.jobs.submit_ports import (
     StoredSubmission,
 )
 from gpu_marketplace.repositories.commit_outcome import is_definite_commit_rollback
+from gpu_marketplace.repositories.audit import append_audit_event
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +315,24 @@ class PostgresJobSubmissionTransaction:
             },
         ).mappings().one()
         self._inserted_job_id = row.id
+        try:
+            append_audit_event(
+                self._active(),
+                actor_ref=str(client_id),
+                correlation_id=correlation_id,
+                subject_type="JOB",
+                subject_id=row.id,
+                event_type="JOB_SUBMIT",
+                outcome="SUCCESS",
+                metadata_redacted={
+                    "requested_gpu_count": request.gpu_count,
+                    "duration_seconds": request.duration_seconds,
+                },
+            )
+        except SQLAlchemyError as error:
+            self._failed = True
+            _log_failure("job_submit_audit_insert_failed", error, sqlstate=_sqlstate(error))
+            raise DependencyUnavailable() from None
         return _to_record(row)
 
     def insert_reference(

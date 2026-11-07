@@ -12,6 +12,8 @@ class ListingError(Exception):
 class ListingDependencyUnavailable(Exception):
     """An upstream auth/persistence adapter cannot currently serve a request."""
 
+    transaction_outcome: str | None = None
+
 
 def not_found() -> ListingError:
     return ListingError(404, "LISTING_NOT_FOUND", "Listing not found.")

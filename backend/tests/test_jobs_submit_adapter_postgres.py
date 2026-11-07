@@ -167,6 +167,14 @@ def test_postgres_same_key_same_body_replays_after_listing_is_paused(
         assert connection.execute(
             text("SELECT count(*) FROM simulation_references")
         ).scalar_one() == 1
+        assert connection.execute(
+            text(
+                "SELECT count(*) FROM audit_events a JOIN jobs j ON j.id = a.subject_id "
+                "WHERE j.client_id = :client_id AND j.idempotency_key = :key "
+                "AND a.event_type = 'JOB_SUBMIT' AND a.outcome = 'SUCCESS'"
+            ),
+            {"client_id": fixture.client_id, "key": key},
+        ).scalar_one() == 1  # the committed Job has one atomic audit row; replay adds none
 
 
 @pytest.mark.parametrize("sqlstate", ["40003", "08006"])
@@ -212,6 +220,14 @@ def test_uncertain_submit_commit_is_not_retried_and_same_key_reconciles(
             ),
             {"client_id": fixture.client_id, "key": key},
         ).scalar_one() == 1
+        assert connection.execute(
+            text(
+                "SELECT count(*) FROM audit_events a JOIN jobs j ON j.id = a.subject_id "
+                "WHERE j.client_id = :client_id AND j.idempotency_key = :key "
+                "AND a.event_type = 'JOB_SUBMIT' AND a.outcome = 'SUCCESS'"
+            ),
+            {"client_id": fixture.client_id, "key": key},
+        ).scalar_one() == 1  # the database confirms the committed mutation and its audit row
 
 
 def test_definite_submit_rollback_allows_later_explicit_retry(
@@ -238,6 +254,9 @@ def test_definite_submit_rollback_allows_later_explicit_retry(
         assert connection.execute(text("SELECT count(*) FROM jobs")).scalar_one() == 0
         assert connection.execute(
             text("SELECT count(*) FROM simulation_references")
+        ).scalar_one() == 0
+        assert connection.execute(
+            text("SELECT count(*) FROM audit_events WHERE event_type = 'JOB_SUBMIT' AND outcome = 'SUCCESS'")
         ).scalar_one() == 0
 
     retry = submit(service, fixture, key=key)

@@ -7,12 +7,15 @@ import hmac
 import json
 from uuid import UUID
 
+from gpu_marketplace.common.audit import AuditOutcomeWriter
 from gpu_marketplace.jobs.cancel_ports import CommitOutcomeUnknown
 from gpu_marketplace.jobs.errors import (
     DependencyUnavailable,
     Forbidden,
     IdempotencyKeyRequired,
     IdempotencyKeyReused,
+    JobDomainError,
+    JobErrorCode,
     JobGpuExceedsListingTotal,
     ListingNotFound,
     ListingPaused,
@@ -33,10 +36,50 @@ from gpu_marketplace.jobs.submit_ports import (
 class JobSubmitService:
     """Apply API §8 admission rules and atomically create Job plus reference."""
 
-    def __init__(self, *, store: JobSubmissionStore) -> None:
+    def __init__(
+        self,
+        *,
+        store: JobSubmissionStore,
+        audit_writer: AuditOutcomeWriter | None = None,
+    ) -> None:
         self._store = store
+        self._audit_writer = audit_writer
 
     def submit(
+        self,
+        *,
+        principal: JobPrincipal,
+        idempotency_key: str | None,
+        request: SubmitJobRequest,
+        correlation_id: UUID,
+    ) -> SubmissionResult:
+        try:
+            return self._submit(
+                principal=principal,
+                idempotency_key=idempotency_key,
+                request=request,
+                correlation_id=correlation_id,
+            )
+        except JobDomainError as error:
+            if self._audit_writer is not None:
+                user_id = getattr(principal, "user_id", None)
+                if isinstance(user_id, UUID) and user_id.version == 4:
+                    self._audit_writer.record_outcome(
+                        actor_ref=str(user_id),
+                        correlation_id=correlation_id,
+                        subject_type="LISTING",
+                        subject_id=request.listing_id,
+                        event_type="JOB_SUBMIT",
+                        outcome=(
+                            "ERROR"
+                            if error.code is JobErrorCode.DEPENDENCY_UNAVAILABLE
+                            else "REJECTED"
+                        ),
+                        reason_code=error.code.value,
+                    )
+            raise
+
+    def _submit(
         self,
         *,
         principal: JobPrincipal,

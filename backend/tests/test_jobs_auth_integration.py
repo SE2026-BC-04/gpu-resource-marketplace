@@ -34,11 +34,13 @@ class SpyJobReader:
 
 class SpyCancelService:
     def __init__(self, *, unknown_commit: bool = False) -> None:
-        self.calls: list[tuple[object, UUID]] = []
+        self.calls: list[tuple[object, UUID, UUID | None]] = []
         self.unknown_commit = unknown_commit
 
-    def cancel(self, *, principal: object, job_id: UUID) -> ClientJobResponse:
-        self.calls.append((principal, job_id))
+    def cancel(
+        self, *, principal: object, job_id: UUID, correlation_id: UUID | None = None
+    ) -> ClientJobResponse:
+        self.calls.append((principal, job_id, correlation_id))
         if self.unknown_commit:
             raise CommitOutcomeUnknown()
         now = datetime.now(timezone.utc)
@@ -229,10 +231,11 @@ def test_jobs_http_cancel_uses_authenticated_principal_and_private_headers() -> 
     assert response.json()["status"] == "CANCELLED"
     assert_private_headers(response, "client-value")
     assert len(cancellation.calls) == 1
-    principal, called_job = cancellation.calls[0]
+    principal, called_job, correlation_id = cancellation.calls[0]
     assert isinstance(principal, AuthenticatedPrincipal)
     assert principal.user_id == C1
     assert called_job == job_id
+    assert correlation_id == UUID(response.headers["X-Request-ID"])
 
 
 @pytest.mark.parametrize("body", [b"{}", b"unexpected payload"])
