@@ -15,12 +15,14 @@ from gpu_marketplace.jobs.errors import (
     JobGpuExceedsListingTotal,
     ListingPaused,
 )
+from gpu_marketplace.jobs.cancel_ports import CommitOutcomeUnknown
 from gpu_marketplace.jobs.models import SubmitJobRequest
 from gpu_marketplace.jobs.reference import create_simulation_reference
 from gpu_marketplace.jobs.submit import JobSubmitService
 from gpu_marketplace.jobs.submit_ports import SimulationReference
 from gpu_marketplace.repositories.job_submit import PostgresJobSubmissionStore
 from sqlalchemy import event, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 from test_schema_constraints import add_listing, add_user, add_worker
@@ -37,6 +39,11 @@ class ListingFixture:
     client_id: UUID
     worker_id: UUID
     listing_id: UUID
+
+
+class _DriverError(Exception):
+    def __init__(self, sqlstate: str) -> None:
+        self.sqlstate = sqlstate
 
 
 @pytest.fixture
@@ -155,6 +162,86 @@ def test_postgres_same_key_same_body_replays_after_listing_is_paused(
 
     assert replay.replayed
     assert replay.job.id == first.job.id
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM jobs")).scalar_one() == 1
+        assert connection.execute(
+            text("SELECT count(*) FROM simulation_references")
+        ).scalar_one() == 1
+
+
+@pytest.mark.parametrize("sqlstate", ["40003", "08006"])
+def test_uncertain_submit_commit_is_not_retried_and_same_key_reconciles(
+    submit_service: tuple[Engine, JobSubmitService],
+    monkeypatch: pytest.MonkeyPatch,
+    sqlstate: str,
+) -> None:
+    engine, service = submit_service
+    fixture = seed_listing(engine)
+    key = f"postgres-unknown-commit-{sqlstate}"
+    real_commit = Session.commit
+    commit_attempts: list[None] = []
+
+    def commit_then_lose_ack(session: Session) -> None:
+        commit_attempts.append(None)
+        real_commit(session)
+        raise OperationalError("COMMIT", {}, _DriverError(sqlstate))
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Session, "commit", commit_then_lose_ack)
+        with pytest.raises(CommitOutcomeUnknown):
+            submit(service, fixture, key=key)
+
+    assert len(commit_attempts) == 1  # the adapter never retries an uncertain COMMIT
+
+    # A later explicit request with the same key reconciles to the retained Job.
+    replay = submit(service, fixture, key=key)
+    assert replay.replayed
+    with engine.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT count(*) FROM jobs "
+                "WHERE client_id = :client_id AND idempotency_key = :key"
+            ),
+            {"client_id": fixture.client_id, "key": key},
+        ).scalar_one() == 1
+        assert connection.execute(
+            text(
+                "SELECT count(*) FROM simulation_references sr "
+                "JOIN jobs j ON j.id = sr.job_id "
+                "WHERE j.client_id = :client_id AND j.idempotency_key = :key"
+            ),
+            {"client_id": fixture.client_id, "key": key},
+        ).scalar_one() == 1
+
+
+def test_definite_submit_rollback_allows_later_explicit_retry(
+    submit_service: tuple[Engine, JobSubmitService],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, service = submit_service
+    fixture = seed_listing(engine)
+    key = "postgres-known-rollback-40001"
+    commit_attempts: list[None] = []
+
+    def rollback_then_report_serialization_failure(session: Session) -> None:
+        commit_attempts.append(None)
+        session.rollback()
+        raise OperationalError("COMMIT", {}, _DriverError("40001"))
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Session, "commit", rollback_then_report_serialization_failure)
+        with pytest.raises(DependencyUnavailable):
+            submit(service, fixture, key=key)
+
+    assert len(commit_attempts) == 1
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM jobs")).scalar_one() == 0
+        assert connection.execute(
+            text("SELECT count(*) FROM simulation_references")
+        ).scalar_one() == 0
+
+    retry = submit(service, fixture, key=key)
+    assert not retry.replayed
     with engine.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM jobs")).scalar_one() == 1
         assert connection.execute(

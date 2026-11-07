@@ -14,7 +14,7 @@ LISTING_CURSOR_SECRET = "api-cors-listing-cursor-key-at-least-32-bytes"
 JOBS_CURSOR_SECRET = "api-cors-jobs-cursor-key-at-least-32-bytes"
 
 
-def _client() -> TestClient:
+def _client(*, raise_server_exceptions: bool = True) -> TestClient:
     app = create_app(
         Settings(
             _env_file=None,
@@ -44,7 +44,11 @@ def _client() -> TestClient:
             headers={"X-Request-ID": str(uuid4())},
         )
 
-    return TestClient(app)
+    @app.get("/api/v1/auth/test-unexpected-error", include_in_schema=False)
+    def unexpected_auth_error():
+        raise RuntimeError("test-only exception detail")
+
+    return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
 
 def _normalized_headers(response) -> dict[str, str]:
@@ -176,3 +180,19 @@ def test_expose_header_lookup_is_case_insensitive() -> None:
         response = client.get("/api/v1/auth/me", headers={"Origin": ALLOWED_ORIGIN})
 
     assert response.headers.get("ACCESS-CONTROL-EXPOSE-HEADERS", "").lower() == "x-request-id"
+
+
+def test_unexpected_auth_failure_keeps_cors_and_private_error_headers() -> None:
+    with _client(raise_server_exceptions=False) as client:
+        response = client.get(
+            "/api/v1/auth/test-unexpected-error",
+            headers={"Origin": ALLOWED_ORIGIN},
+        )
+
+    assert response.status_code == 500
+    assert response.headers["Access-Control-Allow-Origin"] == ALLOWED_ORIGIN
+    assert response.headers["Access-Control-Expose-Headers"] == "X-Request-ID"
+    assert response.headers["Vary"] == "Origin"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.headers["X-Request-ID"] == response.json()["error"]["request_id"]
+    assert "test-only exception detail" not in response.text

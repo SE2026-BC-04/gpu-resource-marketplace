@@ -40,6 +40,7 @@ from gpu_marketplace.jobs.ports import (
     JobPrincipal,
     JobRecord,
 )
+from gpu_marketplace.repositories.commit_outcome import is_definite_commit_rollback
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +50,6 @@ ALLOWED_RUNTIME_ROLES = frozenset({"gpm_api_app", "gpm_api_rw"})
 # also requires the native API login. Tests that deliberately use an owner login plus
 # ``SET ROLE`` must pass ``allowed_session_users`` explicitly.
 ALLOWED_RUNTIME_LOGINS = frozenset({"gpm_api_app"})
-
-# SQLSTATE classes after which PostgreSQL has definitely aborted the transaction
-# (class 23 = integrity violation incl. deferred checks at COMMIT; 40 = rollback).
-_KNOWN_ABORT_SQLSTATE_CLASSES = frozenset({"23", "40"})
 
 _JOB_COLUMNS = (
     "id, client_id, worker_id, listing_id, requested_gpu_count, duration_seconds, "
@@ -461,7 +458,7 @@ class PostgresJobCancelTransaction:
         except SQLAlchemyError as error:
             self._failed = True
             sqlstate = _sqlstate(error)
-            if sqlstate is not None and sqlstate[:2] in _KNOWN_ABORT_SQLSTATE_CLASSES:
+            if is_definite_commit_rollback(sqlstate):
                 self._outcome = TransactionOutcome.ROLLED_BACK
                 _log_store_failure("job_cancel_commit_aborted", error, self._outcome)
                 raise DependencyUnavailable() from None

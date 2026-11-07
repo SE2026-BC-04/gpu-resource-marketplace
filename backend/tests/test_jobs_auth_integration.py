@@ -235,6 +235,39 @@ def test_jobs_http_cancel_uses_authenticated_principal_and_private_headers() -> 
     assert called_job == job_id
 
 
+@pytest.mark.parametrize("body", [b"{}", b"unexpected payload"])
+def test_jobs_http_cancel_rejects_any_body_before_calling_service(body: bytes) -> None:
+    auth_service, _account_reader, clock, _ = build_service()
+    token = AccessTokenCodec(SECRET, clock=clock).issue(C1).token
+    cancellation = SpyCancelService()
+    router = create_jobs_router(
+        service=JobsReadService(
+            reader=SpyJobReader(),
+            cursor_codec=HmacCursorCodec(b"test-only-jobs-cursor-key-0123456789"),
+        ),
+        cancel_service=cancellation,  # type: ignore[arg-type]
+        principal_provider=create_principal_dependency(auth_service),
+    )
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/jobs/33333333-3333-4333-8333-333333333333/cancel",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        content=body,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "INVALID_JSON"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert UUID(response.headers["X-Request-ID"]).version == 4
+    assert not cancellation.calls
+
+
 def test_jobs_http_unknown_cancel_commit_returns_503_without_retry() -> None:
     auth_service, _account_reader, clock, _ = build_service()
     token = AccessTokenCodec(SECRET, clock=clock).issue(C1).token
@@ -336,3 +369,26 @@ def test_jobs_http_unexpected_submit_failure_is_sanitized() -> None:
     assert response.headers["Cache-Control"] == "no-store"
     assert response.headers["X-Request-ID"] == response.json()["error"]["request_id"]
     assert secret not in response.text
+
+
+def test_jobs_http_unknown_submit_commit_returns_503_without_retry() -> None:
+    submitter = SpySubmitService(failure=CommitOutcomeUnknown())
+    client, token, _job_reader = make_auth_jobs_client(submit_service=submitter)
+    response = client.post(
+        "/api/v1/jobs",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Idempotency-Key": "client-request-0001",
+        },
+        json={
+            "listing_id": "22222222-2222-4222-8222-222222222222",
+            "gpu_count": 2,
+            "duration_seconds": 60,
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "DEPENDENCY_UNAVAILABLE"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert UUID(response.headers["X-Request-ID"]).version == 4
+    assert len(submitter.calls) == 1

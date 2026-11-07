@@ -1,6 +1,6 @@
 # GPU Resource Marketplace
 
-GPU Resource Marketplace is a modular-monolith platform foundation for GPU providers and customers. This change establishes the agreed runtime boundaries and local development workflow; it does not implement business workflows.
+GPU Resource Marketplace is a simulation-only modular-monolith MVP for GPU providers and customers. Phase 1 integrates Authentication, GPU Listings, and Jobs submit/read/cancel on the production React, FastAPI, and PostgreSQL runtime. It does not execute GPU workloads: a submitted Job remains `QUEUED` until it is cancelled or a later approved phase adds execution.
 
 ## Requirements
 
@@ -9,9 +9,16 @@ GPU Resource Marketplace is a modular-monolith platform foundation for GPU provi
 - Node.js 24 and npm for frontend development
 - Git
 
+## Clone the repository
+
+```powershell
+git clone https://github.com/SE2026-BC-04/gpu-resource-marketplace.git
+Set-Location gpu-resource-marketplace
+```
+
 The containers use digest-pinned Python 3.12, Node 24, and PostgreSQL 16 images. Python dependencies are locked separately for the shared API/Manager package and the isolated Simulator; frontend dependencies are locked in `frontend/package-lock.json`.
 
-## Start the full stack
+## Configure local signing secrets
 
 ```powershell
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
@@ -45,16 +52,98 @@ if (-not $jobsCursorSetting -or $jobsCursorSetting.Line -eq 'GPU_MARKETPLACE_JOB
     }
     Remove-Variable jobsCursorSecret
 }
+```
+
+## Provision PostgreSQL and local demo accounts
+
+The Compose file does not run migrations or create user accounts. On a fresh local database, provision runtime roles, apply the reviewed migrations, and create demo accounts before starting the full stack. The following PowerShell commands use the existing `.env`; keep it local and ignored by Git.
+
+```powershell
+# Load the simple KEY=value entries from .env into this PowerShell process.
+foreach ($envLine in Get-Content -LiteralPath .env) {
+    if ($envLine -match '^(?<key>[A-Za-z_][A-Za-z0-9_]*)=(?<value>.*)$') {
+        Set-Item -Path "Env:$($Matches.key)" -Value $Matches.value
+    }
+}
+
+# Start only PostgreSQL while provisioning.
+docker compose --env-file .env up --detach postgres
+
+function New-LocalRolePassword {
+    $randomBytes = New-Object byte[] 32
+    $randomGenerator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $randomGenerator.GetBytes($randomBytes)
+        return [BitConverter]::ToString($randomBytes).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $randomGenerator.Dispose()
+    }
+}
+
+function Set-LocalEnvValue([string]$Key, [string]$Value) {
+    $envLines = @(Get-Content -LiteralPath .env)
+    $keyPattern = '^' + [regex]::Escape($Key) + '='
+    $found = $false
+    for ($index = 0; $index -lt $envLines.Count; $index++) {
+        if ($envLines[$index] -match $keyPattern) {
+            $envLines[$index] = "$Key=$Value"
+            $found = $true
+        }
+    }
+    if (-not $found) { $envLines += "$Key=$Value" }
+    Set-Content -LiteralPath .env -Value $envLines -Encoding Ascii
+}
+
+# Create random role passwords once. On later runs, reuse the values already in .env.
+if (-not $env:GPU_MARKETPLACE_API_DB_PASSWORD) {
+    $env:GPU_MARKETPLACE_API_DB_PASSWORD = New-LocalRolePassword
+}
+if (-not $env:GPU_MARKETPLACE_MANAGER_DB_PASSWORD) {
+    $env:GPU_MARKETPLACE_MANAGER_DB_PASSWORD = New-LocalRolePassword
+}
+$databasePort = if ($env:POSTGRES_HOST_PORT) { $env:POSTGRES_HOST_PORT } else { '5432' }
+$escapedOwnerPassword = [uri]::EscapeDataString($env:POSTGRES_PASSWORD)
+$ownerDatabaseUrl = "postgresql+psycopg://$($env:POSTGRES_USER):$escapedOwnerPassword@127.0.0.1:$databasePort/$($env:POSTGRES_DB)"
+$env:GPU_MARKETPLACE_MIGRATION_DATABASE_URL = $ownerDatabaseUrl
+
+# The bootstrap is create-only. Do not pass passwords as command-line arguments.
+uv run --project backend --locked python -m gpu_marketplace.common.db_roles
+
+# Run Alembic as the owner/migration connection, never as the API runtime role.
+$env:GPU_MARKETPLACE_DATABASE_URL = $ownerDatabaseUrl
+uv run --project backend --locked alembic upgrade head
+
+# Persist local-only credentials/DSNs so API and Manager use their restricted login roles.
+$apiPasswordForUrl = [uri]::EscapeDataString($env:GPU_MARKETPLACE_API_DB_PASSWORD)
+$managerPasswordForUrl = [uri]::EscapeDataString($env:GPU_MARKETPLACE_MANAGER_DB_PASSWORD)
+Set-LocalEnvValue 'GPU_MARKETPLACE_API_DB_PASSWORD' $env:GPU_MARKETPLACE_API_DB_PASSWORD
+Set-LocalEnvValue 'GPU_MARKETPLACE_MANAGER_DB_PASSWORD' $env:GPU_MARKETPLACE_MANAGER_DB_PASSWORD
+Set-LocalEnvValue 'GPU_MARKETPLACE_MIGRATION_DATABASE_URL' $ownerDatabaseUrl
+Set-LocalEnvValue 'GPU_MARKETPLACE_API_DATABASE_URL' "postgresql+psycopg://gpm_api_app:$apiPasswordForUrl@postgres:5432/$($env:POSTGRES_DB)"
+Set-LocalEnvValue 'GPU_MARKETPLACE_MANAGER_DATABASE_URL' "postgresql+psycopg://gpm_manager_app:$managerPasswordForUrl@postgres:5432/$($env:POSTGRES_DB)"
+
+# Interactive prompts do not echo passwords. The command refuses remote hosts,
+# databases other than gpu_marketplace, and non-owner connections.
+uv run --project backend --locked python -m gpu_marketplace.common.local_demo_accounts --allow-local-dev-db
+```
+
+The account tool inserts one active `WORKER` and one active `CLIENT`, hashes their passwords with the configured Scrypt implementation, and refuses to overwrite existing login names. It changes no schema or roles and stores no plaintext password. This bootstrap sequence is for a fresh local development database. If a reused volume contains runtime roles whose passwords are unknown, stop and resolve those credentials with its operator; do not regenerate passwords or use `--rotate-password`.
+
+## Start and use the V1 application
+
+After provisioning, start the five Compose services:
+
+```powershell
 docker compose --env-file .env up --build
 ```
 
-When upgrading an existing `.env`, keep the JWT and cursor secrets unchanged and add `GPU_MARKETPLACE_LISTING_CURSOR_SECRET`, `GPU_MARKETPLACE_JOBS_CURSOR_SECRET`, plus the two database URL entries from `.env.example`; do not replace them on each restart. Each cursor key is separate from the JWT secret and from the other cursor key, and stays stable across API restarts so existing cursors remain valid.
+At the default ports, open `http://localhost:5173`. Sign in as the Worker account created above and create an ACTIVE GPU Listing. Sign out, sign in as the Client, browse Listings, submit a Job, view it, and cancel it while it is `QUEUED`. Phase 1 has no Manager scheduler or Simulator execution, so Jobs do not advance to `RUNNING` automatically.
 
-The local UI is at `http://localhost:5173`, the operational API at `http://localhost:8000`, and PostgreSQL is bound to `127.0.0.1:5432`. The sample credentials are for local development only. Compose starts five services: `frontend`, `api`, `manager`, `simulator`, and `postgres`.
+When upgrading an existing `.env`, preserve the JWT and cursor secrets. The provisioning commands add separate API and Manager role DSNs; keep them stable across restarts. Each cursor key must be distinct from the JWT secret and from the other cursor key. Compose starts five services: `frontend`, `api`, `manager`, `simulator`, and `postgres`.
 
-The API exposes `/health/live`, `/health/ready`, Auth, GPU Listings and Jobs submit/read/cancel routes. Job submission uses the approved `demo-v1-public1` protected reference generator and commits the Job and reference atomically; the reference is never returned in a public DTO or sent to the Simulator. Readiness requires PostgreSQL connectivity and query access to the Auth `users` and `user_roles` tables. A fresh database volume is not migrated automatically; the API remains unready and Auth requests fail with a sanitized `503` until an operator provisions the database using the procedure in [backend/migrations/README.md](backend/migrations/README.md). This repository change does not provision an existing persistent database. The API requires dedicated `GPU_MARKETPLACE_JWT_SECRET`, `GPU_MARKETPLACE_LISTING_CURSOR_SECRET`, and `GPU_MARKETPLACE_JOBS_CURSOR_SECRET` values, each at least 32 UTF-8 bytes; generate them once for the local `.env` as shown above and keep them out of source control. Compose maps separate `GPU_MARKETPLACE_API_DATABASE_URL` and `GPU_MARKETPLACE_MANAGER_DATABASE_URL` values to the corresponding process configuration. The `.env.example` uses the local bootstrap/owner account for local development only; it is not evidence of D1 least-privilege runtime access. Nonlocal deployments must use the D1 `gpm_api_app` and `gpm_manager_app` logins respectively and keep owner/migration credentials separate. The Manager checks its database connection and shuts down on SIGINT/SIGTERM. The Simulator is an independent runtime with health endpoints only. It has no database package, credentials, host port, or database-network attachment.
+The API exposes `/health/live`, `/health/ready`, Auth, GPU Listings and Jobs submit/read/cancel routes. Job submission uses the owner-approved `demo-v1-public1` protected-reference version, creates the Job and reference atomically, and never returns the reference in a public DTO or sends it to the Simulator. Current readiness checks database connectivity and Auth table access; full Listings/Jobs readiness remains an owner-decision gate documented in the [integration progress record](docs/development/handoffs/GPU-INT-01_integration_progress.md). A fresh database volume is not migrated automatically; follow [backend/migrations/README.md](backend/migrations/README.md) and the local setup above. Keep the three distinct signing secrets and database role passwords in the ignored `.env`; they are never checked into source control. `.env.example` starts with local bootstrap credentials and is not evidence of D1 least-privilege runtime access; the setup procedure replaces API and Manager DSNs with `gpm_api_app` and `gpm_manager_app`. The Manager currently checks database connectivity and shuts down on SIGINT/SIGTERM. The Simulator is a separate runtime with health endpoints only and has no database package, credentials, host port, or database-network attachment.
 
-Stop the stack with `docker compose --env-file .env down`. Add `--volumes` only when you intentionally want to delete the local PostgreSQL data.
+Stop services with `docker compose --env-file .env down`. This keeps the PostgreSQL volume. Add `--volumes` only when you intentionally want to delete all local database data.
 
 ## Development checks
 
@@ -90,12 +179,12 @@ The smoke check starts a uniquely named Compose project on dynamically allocated
 
 ## Repository map
 
-- `backend/` contains the shared Python package and the API and Manager entry points. Domain packages are placeholders for later approved work.
+- `backend/` contains the shared Python package, Auth/Listings/Jobs API, Manager process, Alembic migrations, PostgreSQL adapters, and safety-guarded tests.
 - `simulator/` is a separate Python project and container boundary.
 - `frontend/` contains the React/TypeScript/Vite client.
 - `compose.yaml` defines the five local services and their isolated networks.
-- `docs/architecture/` and `docs/design/` hold the approved architecture and design decisions.
-- `docs/development/foundation-handoff.md` records the implementation boundaries and next-step ownership.
+- `docs/architecture/` and `docs/design/` hold the approved architecture, phase plans, contracts, and design decisions.
+- `docs/development/handoffs/GPU-INT-01_integration_progress.md` records integration progress, evidence, and remaining review gates.
 - `tests/` contains cross-service architecture and configuration checks.
 
-No authentication, GPU listings, jobs, scheduling, business schemas, or business migrations are included. Authentication details still marked for owner decision remain outside this foundation task.
+No public account registration endpoint is provided; accounts are provisioned by an operator. The local demo-account tool is intentionally restricted to an explicitly confirmed loopback development database. The MVP remains simulation-only, and Phase 2 scheduling/execution is outside this repository workflow.

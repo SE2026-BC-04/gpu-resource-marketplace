@@ -24,6 +24,7 @@ from gpu_marketplace.jobs.submit_ports import (
     SimulationReference,
     StoredSubmission,
 )
+from gpu_marketplace.repositories.commit_outcome import is_definite_commit_rollback
 
 logger = logging.getLogger(__name__)
 
@@ -345,7 +346,7 @@ class PostgresJobSubmissionTransaction:
             if _constraint_name(error) == _IDEMPOTENCY_CONSTRAINT:
                 raise IdempotencyCollision() from None
             sqlstate = _sqlstate(error)
-            if sqlstate is not None and sqlstate[:2] in {"23", "40"}:
+            if is_definite_commit_rollback(sqlstate):
                 _log_failure("job_submit_commit_aborted", error, sqlstate=sqlstate)
                 raise DependencyUnavailable() from None
             _log_failure("job_submit_commit_unknown", error, sqlstate=sqlstate)

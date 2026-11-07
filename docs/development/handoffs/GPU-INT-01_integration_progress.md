@@ -61,6 +61,8 @@ Local backend and Simulator commands used the repository venvs because `uv` and 
 | Check | Result | Evidence / limitation |
 |---|---|---|
 | Full local backend regression after browser E2E addition | **PASS — 798 passed, 355 skipped, 0 failed** | `backend/.venv/Scripts/python.exe -m pytest backend/tests tests -rs`; exit 0, 70.01s. PostgreSQL tests, including HTTP/browser E2E and adapter suites, skip because disposable database safety variables are unavailable locally. |
+| Full local backend regression after final-remediation test changes | **PASS — 821 passed, 358 skipped, 0 failed** | `backend/.venv/Scripts/python.exe -m pytest backend/tests tests -rs`; exit 0, 36.18s. Python 3.12.15; the guarded PostgreSQL adapter and HTTP/E2E suites remain skipped because the safety-marked disposable database variables are not configured locally. |
+| CORS unexpected-auth-failure regression | **PASS — 7 passed** | `backend/.venv/Scripts/python.exe -m pytest backend/tests/test_api_cors.py -q`; exit 0, 1.67s. Includes an allowed-Origin unexpected Auth 500 response, `Access-Control-Allow-Origin`, `X-Request-ID`, `Cache-Control: no-store`, and sanitized error body. |
 | Simulator regression | **PASS — 2 passed** | `simulator/.venv/Scripts/python.exe -m pytest simulator/tests`; exit 0. This tests Simulator regression only, not Phase 2 execution. |
 | Frontend dependency install | **PASS** | `npm ci --cache D:\gpu-marketplace-npm-cache`; 115 packages installed, 0 vulnerabilities. Node 22.13.0/npm 10.9.2 local. |
 | Frontend Vitest | **PASS — 158 passed, 10 files** | `npm test`; exit 0. Vitest is scoped to `src/`; it no longer loads Playwright specs. |
@@ -82,6 +84,23 @@ Local backend and Simulator commands used the repository venvs because `uv` and 
 
 - Auth/CORS, Listings runtime composition, Jobs read/submit/cancel runtime wiring, PostgreSQL adapters, regression tests, Jobs UI integration, `.env.example`, Compose smoke/configuration, CI, README, Playwright test-only dependency/config/spec, and this progress record.
 - No Requirements, API Contract, Database Design, migration, grant, ADR, Manager scheduler, Simulator execution, or Phase 2 implementation changes.
+
+## Final remediation update — 2026-11-07
+
+Before editing, `git fetch origin` succeeded. The shared branch and PR #39 were both at `9ba7d6d7e4abc229d8476c87023f51e21d48837e`; `origin/main` was `1d8b1b2c52b759d99a072c3d0d889b375083a8c4`. The working tree had only the local remediation changes described below. No upstream commits appeared during the fetch.
+
+| Finding / area | Result on this remediation | Evidence / remaining gate |
+|---|---|---|
+| Auth schema missing on a fresh Compose volume | **Addressed by existing runtime readiness + Compose smoke coverage** | `/health/ready` reports Auth schema unavailable and Auth login fails closed before migrations; after migration, the smoke checks the real mounted Auth route. Compose smoke has not run locally (Docker unavailable); GitHub Actions must recheck the pushed head. |
+| CORS on unexpected Auth 500 | **Regression covered** | Added `test_unexpected_auth_failure_keeps_cors_and_private_error_headers`; HTTP test confirms an allowed Origin can read the sanitized 500 and request ID. Seven CORS tests pass locally. |
+| Cancel request contract / blocking DB call | **Implemented** | Cancel rejects any non-empty body before service invocation and calls the synchronous transaction service via `run_in_threadpool`; empty-body behavior and auth/response headers are covered by HTTP tests. |
+| PostgreSQL COMMIT uncertainty | **Implemented** | Only SQLSTATE class 23 and the explicit definite-rollback allowlist (`40000`, `40001`, `40002`, `40P01`) are definite aborts. `40003`, connection failures, and unknown codes remain uncertain and are not retried. Fault tests pass; durable/lost-ACK PostgreSQL tests are guarded and need CI's disposable database. |
+| Local V1 demo setup | **Implemented as explicit local-only provisioning** | README gives setup steps; the account tool requires explicit local-development confirmation, loopback `gpu_marketplace`, database-owner identity, hidden passwords, and insert-only behavior. Nine local guard tests pass. No credentials are committed. |
+| GPU-005 protected reference status | **Owner decision synchronized** | The exact reference algorithm/vectors and paused-listing replay rule are recorded as Phase 1 approved via decision comment #6690901724. Phase 2 output schema/execution remains unapproved. |
+| FIX-03 — readiness for complete V1 Listings/Jobs dependency set | **BLOCKED — L2 owner decision required; no code changed** | Current accepted Foundation §4.1 covers database/Auth readiness. Expanding it to Listings/Jobs relations and runtime privileges changes operational readiness. CR `CR-GPU-INT-01-READY-01` is recorded as **PROPOSED** in [PR comment #6702856516](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39#issuecomment-6702856516). It proposes catalog-only checks (including INSERT privilege only for `simulation_references`, never reading protected rows) or retaining current semantics. Owner decision and normative/test-design update are required before implementation. |
+| C1 scrypt work-factor evidence | **PENDING** | No fresh benchmark/load evidence was run in this remediation. The existing accepted Option A decision remains in force; do not claim the evidence gate has passed. |
+
+This remediation was tested locally with Python 3.12.15 from the repository venv. `uv` and Docker are unavailable in the local PATH; Node 22.13.0 is available, but `npm`'s global shim is broken, so previously installed frontend dependencies were used. Full backend regression passed at **821 passed, 358 skipped, 0 failed**; the skipped PostgreSQL tests require a safety-marked disposable database. Simulator, frontend Vitest, TypeScript, and production build checks previously passed on the unchanged implementation; Compose, local PostgreSQL, and local browser E2E remain **NOT_RUN**. GitHub Actions on the new remediation commit is **PENDING**.
 
 ## Next actions
 

@@ -32,9 +32,11 @@ from gpu_marketplace.jobs.submit import JobSubmitService
 from gpu_marketplace.identity.request_body import (
     BodyTooLarge,
     InvalidBody,
+    UnexpectedBody,
     parse_json,
     read_bounded_body,
     require_json_media_type,
+    require_empty_body,
 )
 
 MAX_SUBMIT_BODY_BYTES = 16_384
@@ -208,7 +210,7 @@ def create_jobs_router(
     if cancel_service is not None:
 
         @router.post("/{job_id}/cancel", response_model=PublicJobResponse)
-        def cancel_job(
+        async def cancel_job(
             job_id: str,
             request: Request,
             response: Response,
@@ -222,7 +224,13 @@ def create_jobs_router(
             except ValueError:
                 return job_error_response(ValidationFailed(), request_id=request_id)  # type: ignore[return-value]
             try:
-                return cancel_service.cancel(principal=principal, job_id=parsed_id)
+                await require_empty_body(request)
+            except (InvalidBody, UnexpectedBody):
+                return job_error_response(InvalidJson(), request_id=request_id)  # type: ignore[return-value]
+            try:
+                return await run_in_threadpool(
+                    cancel_service.cancel, principal=principal, job_id=parsed_id
+                )
             except JobDomainError as exc:
                 return job_error_response(exc, request_id=request_id)  # type: ignore[return-value]
             except CommitOutcomeUnknown:

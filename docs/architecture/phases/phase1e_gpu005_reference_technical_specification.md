@@ -1,14 +1,15 @@
 # GPU-005-B Reference Technical Specification
 
-**Status:** `DRAFT — PROPOSED — NOT OWNER APPROVED`
-**Baseline:** `main@538802adebeaeb74dcccd0c025f3a7abc81336c0`
-**Runtime tests:** `NOT_RUN`
-**Cross-phase ACK:** `NOT PROVIDED`
+**Phase 1 protected-reference status:** `OWNER-APPROVED` on 2026-11-07; see [PR #39 decision comment #6690901724](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39#issuecomment-6690901724).
+**Phase 2 Simulator/output compatibility:** `NOT APPROVED`.
+**Owner-approved source:** the exact draft at blob `cac731d192e2527fa2561e417849c0f2357e205f`.
+**Runtime tests:** `RECHECK REQUIRED ON PR #39 REMEDIATION HEAD`.
+**Cross-phase ACK:** renewed checks on the current PR head remain pending.
 **Owner:** Thành viên 5 — GPU-005
 
 ## 1. Scope and approved invariants
 
-This document specifies the proposed protected deterministic simulation reference created during `TX-SUBMIT`. It does not change API Contract, Database Design, ADR-004, or the internal dispatch allowlist.
+This document specifies the protected deterministic simulation reference created during Phase 1 `TX-SUBMIT`. The project owner approved the exact existing draft, including `demo-v1-public1`, byte rules, outcome/work-unit mapping, digest format, and vectors V1–V4, for Phase 1 reference creation only. It does not change API Contract, Database Design, ADR-004, or the internal dispatch allowlist, and it does not authorize Manager scheduling, Simulator execution, receipt verification, or Phase 2 work.
 
 The following invariants are already present in the baseline design:
 
@@ -24,7 +25,7 @@ The following invariants are already present in the baseline design:
 
 Evidence: [AGENTS.md](https://github.com/SE2026-BC-04/gpu-resource-marketplace/blob/538802adebeaeb74dcccd0c025f3a7abc81336c0/AGENTS.md#L30-L38), [Phase 1E](https://github.com/SE2026-BC-04/gpu-resource-marketplace/blob/538802adebeaeb74dcccd0c025f3a7abc81336c0/docs/architecture/phases/phase1e_job_submission_queue.md#L118-L142), [Database Design](https://github.com/SE2026-BC-04/gpu-resource-marketplace/blob/538802adebeaeb74dcccd0c025f3a7abc81336c0/docs/design/database-design.md#L307-L319).
 
-The generator details in this document are `PROPOSED — NOT OWNER APPROVED`; the baseline explicitly classified them as `SPEC_REQUIRED`.
+The generator details and vectors in this document are approved for persisting the Phase 1 protected reference by owner decision [#6690901724](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39#issuecomment-6690901724). This is not approval to execute the generator in a Simulator or to deploy Phase 2.
 
 ## 2. Algorithm identity and byte-level constants
 
@@ -56,7 +57,7 @@ H(D, C) = SHA-256(
 
 The canonical JSON byte sequence has no automatically appended final newline. The LF bytes shown above are only the prefix/domain separators in the hash input; they are not appended to the JCS document.
 
-These constants are now explicit in this proposed document. The three previously verified vectors are retained unchanged. No vector byte was changed in this documentation revision; therefore no vector recomputation or changed digest explanation is required.
+These constants are explicit in the owner-approved Phase 1 specification. Vectors V1–V4 remain byte-for-byte unchanged; no vector recomputation or digest change is introduced by this status update.
 
 ## 3. Exact canonical input
 
@@ -119,7 +120,7 @@ work_units_raw(C) = UINT32_BE(H(WORK_UNITS_DOMAIN, C)[0:4])
 work_units = accepted_candidate mod 1,000,000
 ```
 
-The outcome distribution and all generator constants remain `PROPOSED — NOT OWNER APPROVED`.
+The outcome distribution and generator constants are owner-approved for creating the Phase 1 protected reference only. No Simulator execution or Phase 2 behavior is approved by this decision.
 
 ## 6. Expected output schema
 
@@ -265,7 +266,7 @@ Expected output:
 expected_digest = sha256:ad2212d44fef948b303afb1e5d5d8e9435eeab64f6701c54cafc3c6f3fd77aa7
 Calculation status = VERIFIED CALCULATION
 Runtime tests = NOT_RUN
-Design status = PROPOSED — NOT OWNER APPROVED
+Design status = OWNER-APPROVED FOR PHASE 1 REFERENCE CREATION; PHASE 2 EXECUTION NOT APPROVED
 ```
 
 Vector status:
@@ -273,7 +274,7 @@ Vector status:
 ```text
 Calculation: VERIFIED CALCULATION
 Runtime integration tests: NOT_RUN
-Owner approval: NOT PROVIDED
+Owner approval: APPROVED for Phase 1 protected-reference creation by [PR #39 comment #6690901724](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39#issuecomment-6690901724)
 ```
 
 ## 9. Transaction and protection boundary
@@ -295,7 +296,7 @@ Recommended policy:
 - A breaking algorithm requires a new workload profile and separate owner-approved change.
 - Adding `algorithm_version` to internal dispatch is outside this draft.
 
-Status: `PROPOSED — NOT OWNER APPROVED`.
+Status: `PHASE 2 ONLY — NOT OWNER APPROVED`. The 2026-11-07 approval covers storing a Phase 1 reference; it does not authorize Simulator execution or deployment compatibility.
 
 ## 11. Signed Result and Dispute compatibility
 
@@ -303,31 +304,26 @@ This document does not modify Signed Result V1, its 11 signed fields, Ed25519, J
 
 Evidence: [ADR-004](https://github.com/SE2026-BC-04/gpu-resource-marketplace/blob/538802adebeaeb74dcccd0c025f3a7abc81336c0/docs/architecture/decisions/ADR-004-signed-result.md#L77-L87).
 
-## 12. Explicitly separate GPU-005-B approval from GPU-005-D implementation
+## 12. Approval and implementation boundaries
 
-### GPU-005-B design approval conditions
+### Phase 1 protected-reference approval
 
-- Group lead approval of public deterministic reference policy.
-- Approval of exact constants, canonical input/output, distribution, and version policy.
-- TV2 schema/permission review.
-- TV4/TV5 decision on replay after Listing `PAUSED`.
-- Phase 2 owner review of output and Signed Result/Dispute compatibility.
-- Cross-phase ACKs, if required by the final change classification.
+- The owner approved the exact existing draft for Phase 1 reference creation on 2026-11-07, including `demo-v1-public1`, byte-level rules, expected digest format, outcome/work-unit mapping, and vectors V1–V4. See [PR #39 comment #6690901724](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39#issuecomment-6690901724).
+- The same decision approves retained same-key/same-body replay after Listing `PAUSED` as HTTP `200`; a changed body remains a conflict and a new key still requires an ACTIVE Listing.
+- The decision does not approve Simulator execution, Manager scheduling, Phase 2 output compatibility, Signed Result processing, or production deployment.
+- Renewed TV2 schema/permission and TV4 lock/replay ACKs, TV3 Auth/session ACK, Phase 2 compatibility review, and independent human review remain separate PR #39 gates.
 
-### GPU-005-D implementation blockers
+### Phase 2 gates still open
 
-- No approved generator implementation.
-- No verified real PostgreSQL transaction.
-- No verified Listing-first lock implementation.
-- No verified authentication integration.
-- No verified idempotency/concurrency behavior.
-- No runtime vector tests.
+- The output schema remains `PROPOSED — NOT OWNER APPROVED` pending Phase 2 owner review against ADR-004/Signed Result V1.
+- No Simulator execution, Manager scheduling, signed receipt verification, or Dispute/reference comparison is authorized by the Phase 1 decision.
+- Reference table grants and production-role permissions remain subject to TV2 review; no migration or grant change is authorized.
 
-The second list must not be mislabeled as a GPU-005-B design rejection; it is implementation readiness for GPU-005-D.
+These Phase 2 gates do not reverse the Phase 1 owner approval or its reference vectors.
 
 ## 13. Planned verification
 
-All runtime and integration tests remain `NOT_RUN`:
+Runtime and integration evidence must be recorded against the exact PR #39 remediation HEAD. Recheck these items before treating them as current acceptance evidence:
 
 - JCS interoperability.
 - Byte-level prefix/domain/counter tests.
@@ -339,14 +335,16 @@ All runtime and integration tests remain `NOT_RUN`:
 - Signed Result digest verification.
 - Dispute/reference comparison.
 
-## 14. Required decisions
+## 14. Decision status
 
 | Decision | Required owner | Status |
 |---|---|---|
-| Public outcome predictability | Group lead + Phase 2 owner | `PROPOSED — NOT OWNER APPROVED` |
-| Exact algorithm constants | Group lead + TV2/Phase 2 | `PROPOSED — NOT OWNER APPROVED` |
+| Public outcome predictability | Group lead; Phase 2 owner for execution | `APPROVED FOR PHASE 1 REFERENCE CREATION; PHASE 2 EXECUTION NOT APPROVED` |
+| Exact algorithm constants | Group lead | `APPROVED FOR PHASE 1 REFERENCE CREATION` |
 | Exact output schema | Phase 2 owner + group lead | `PROPOSED — NOT OWNER APPROVED` |
-| Outcome distribution | Group lead + Phase 2 owner | `PROPOSED — NOT OWNER APPROVED` |
-| Version compatibility | Group lead + Phase 2 owner | `PROPOSED — NOT OWNER APPROVED` |
-| Replay after Listing `PAUSED` | TV4 + TV5 + group lead | `BLOCKED` |
-| Reference grants/permissions | TV2 + group lead | `PROPOSED — NOT OWNER APPROVED` |
+| Outcome/work-unit mapping | Group lead | `APPROVED FOR PHASE 1 REFERENCE CREATION; NO SIMULATOR EXECUTION` |
+| Version compatibility | Group lead for reference version; Phase 2 owner for execution | `demo-v1-public1 APPROVED FOR PHASE 1 STORAGE; PHASE 2 COMPATIBILITY PENDING` |
+| Replay after Listing `PAUSED` | Group lead | `APPROVED: same retained key/body returns original Job with HTTP 200` |
+| Reference grants/permissions | TV2 + group lead | `PENDING TV2 REVIEW; NO GRANT CHANGE APPROVED` |
+
+All Phase 1 approvals above refer to the exact existing draft and vectors V1–V4 in [owner decision #6690901724](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39#issuecomment-6690901724). They do not approve Phase 2 behavior.
