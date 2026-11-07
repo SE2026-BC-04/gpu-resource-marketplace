@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import secrets
 import socket
 import subprocess
 import sys
@@ -11,7 +13,8 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 import psycopg
 
@@ -22,7 +25,21 @@ LOCAL_PROJECT = "gpu-resource-marketplace"
 EXPECTED_SERVICES = {"frontend", "api", "manager", "simulator", "postgres"}
 
 
-def compose(env_file: Path, project: str, *args: str) -> subprocess.CompletedProcess[str]:
+def compose(
+    env_file: Path,
+    project: str,
+    *args: str,
+    process_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    child_env = os.environ.copy()
+    # Docker Compose gives the caller's process environment precedence over --env-file.
+    # Clear keys defined by the isolated smoke file so ambient CI/local secrets or port
+    # overrides cannot leak into the smoke project. Explicit per-command overrides are
+    # applied last (for example the disposable owner DSN used only by Alembic).
+    for name in read_env_values(env_file):
+        child_env.pop(name, None)
+    if process_env:
+        child_env.update(process_env)
     return subprocess.run(
         [
             "docker", "compose", "--env-file", str(env_file),
@@ -32,6 +49,7 @@ def compose(env_file: Path, project: str, *args: str) -> subprocess.CompletedPro
         text=True,
         capture_output=True,
         check=False,
+        env=child_env,
     )
 
 
@@ -111,6 +129,156 @@ def check_http(url: str) -> bytes:
     raise RuntimeError(f"Host HTTP check failed for {url}: {last_error}") from last_error
 
 
+def http_response(
+    url: str,
+    *,
+    method: str = "GET",
+    body: bytes | None = None,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, dict[str, str], bytes]:
+    request = Request(url, data=body, headers=headers or {}, method=method)
+    try:
+        with urlopen(request, timeout=8) as response:
+            response_headers = {name.lower(): value for name, value in response.headers.items()}
+            return response.status, response_headers, response.read()
+    except HTTPError as response:
+        response_headers = {name.lower(): value for name, value in response.headers.items()}
+        return response.code, response_headers, response.read()
+
+
+def expect_http_status(
+    url: str,
+    expected: int,
+    *,
+    method: str = "GET",
+    body: bytes | None = None,
+    headers: dict[str, str] | None = None,
+) -> tuple[dict[str, str], bytes]:
+    last_error: OSError | None = None
+    for _ in range(20):
+        try:
+            status, response_headers, response_body = http_response(
+                url, method=method, body=body, headers=headers
+            )
+            if status != expected:
+                raise RuntimeError(f"HTTP check failed for {url}: expected {expected}, received {status}")
+            return response_headers, response_body
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.5)
+    raise RuntimeError(f"HTTP check could not reach {url}: {type(last_error).__name__}")
+
+
+def require_compose_success(result: subprocess.CompletedProcess[str], action: str) -> None:
+    if result.returncode:
+        # Compose stderr may echo environment values; report only the operation and exit code.
+        raise RuntimeError(f"Smoke-only {action} failed (exit {result.returncode})")
+
+
+def verify_runtime_role(env_file: Path, service: str, expected_role: str) -> None:
+    probe = (
+        "import os; from sqlalchemy import create_engine, text; "
+        "engine=create_engine(os.environ['GPU_MARKETPLACE_DATABASE_URL']); "
+        "connection=engine.connect(); "
+        "row=connection.execute(text(\"SELECT current_user, session_user, "
+        "(SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=current_database()), "
+        "(SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls "
+        " FROM pg_roles WHERE rolname=current_user), "
+        "has_database_privilege(current_user,current_database(),'CREATE'), "
+        "has_schema_privilege(current_user,'public','CREATE')\")).one(); "
+        "connection.close(); engine.dispose(); "
+        f"assert row[0] == '{expected_role}' and row[1] == '{expected_role}' and "
+        "row[2] != row[0] and not any(row[3:]), 'runtime role privilege check failed'; "
+        "print('runtime_role_ok')"
+    )
+    result = compose(env_file, PROJECT, "exec", "--no-TTY", service, "python", "-c", probe)
+    if result.returncode or result.stdout.strip() != "runtime_role_ok":
+        raise RuntimeError(f"{service} runtime database-role verification failed")
+
+
+def verify_runtime_roles_from_host(port: int, env_file: Path) -> None:
+    """Run the README's native-login verifier through the isolated loopback host port."""
+    values = read_env_values(env_file)
+    process_env = os.environ.copy()
+    process_env.update(
+        {
+            "POSTGRES_DB": values["POSTGRES_DB"],
+            "POSTGRES_HOST_PORT": str(port),
+            "GPU_MARKETPLACE_API_DATABASE_URL": values["GPU_MARKETPLACE_API_DATABASE_URL"],
+            "GPU_MARKETPLACE_MANAGER_DATABASE_URL": values["GPU_MARKETPLACE_MANAGER_DATABASE_URL"],
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "verify_runtime_roles.py")],
+        cwd=ROOT,
+        env=process_env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    expected = (
+        "PASS: API native session_user and restricted privileges verified\n"
+        "PASS: Manager native session_user and restricted privileges verified"
+    )
+    if result.returncode or result.stdout.strip() != expected:
+        raise RuntimeError("Host native API/Manager runtime-role verification failed")
+
+
+def create_restart_persistence_marker(port: int, env_file: Path) -> str:
+    """Commit a synthetic Client row to the isolated smoke DB before Compose recreation."""
+    values = read_env_values(env_file)
+    login_name = f"restart-smoke-{uuid.uuid4().hex}"
+    try:
+        with psycopg.connect(
+            host="127.0.0.1",
+            port=port,
+            dbname=values["POSTGRES_DB"],
+            user=values["POSTGRES_USER"],
+            password=values["POSTGRES_PASSWORD"],
+            connect_timeout=5,
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO users (login_name, password_hash, status) "
+                    "VALUES (%s, %s, 'ACTIVE') RETURNING id",
+                    (login_name, "scrypt$compose-restart-smoke-marker"),
+                )
+                user_id = cursor.fetchone()[0]
+                cursor.execute(
+                    "INSERT INTO user_roles (user_id, role_code) VALUES (%s, 'CLIENT')",
+                    (user_id,),
+                )
+    except Exception as exc:
+        raise RuntimeError(f"Could not commit Compose restart marker ({type(exc).__name__})") from None
+    return login_name
+
+
+def verify_restart_persistence(port: int, env_file: Path, login_name: str) -> None:
+    """Read the committed marker after Compose down/up without deleting the named volume."""
+    values = read_env_values(env_file)
+    try:
+        with psycopg.connect(
+            host="127.0.0.1",
+            port=port,
+            dbname=values["POSTGRES_DB"],
+            user=values["POSTGRES_USER"],
+            password=values["POSTGRES_PASSWORD"],
+            connect_timeout=5,
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT count(*) FROM users AS u "
+                    "JOIN user_roles AS ur ON ur.user_id = u.id "
+                    "WHERE u.login_name = %s AND ur.role_code = 'CLIENT'",
+                    (login_name,),
+                )
+                count = cursor.fetchone()[0]
+    except Exception as exc:
+        raise RuntimeError(f"Could not verify Compose restart marker ({type(exc).__name__})") from None
+    if count != 1:
+        raise RuntimeError("Committed smoke data was not preserved after Compose recreation")
+
+
 def published_host_port(
     services: list[dict[str, object]], service_name: str, container_port: int, project: str
 ) -> int:
@@ -174,12 +342,22 @@ def check_postgres_from_host(port: int, env_file: Path) -> None:
 
 def main() -> int:
     smoke_env: Path | None = None
+    inspect_env: Path | None = None
     smoke_project_created = False
     local_resources_before: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None = None
     exit_code = 1
     try:
         # Inspect the normal local project first. It is never started, stopped, or cleaned here.
-        local = compose(ROOT / ".env.example", LOCAL_PROJECT, "ps", "--all", "--format", "json")
+        # Compose validates required interpolation even for `ps`; this one-use key only
+        # renders the existing project config and is never passed to a started service.
+        inspect_env = make_smoke_env_file(
+            {
+                "GPU_MARKETPLACE_JWT_SECRET": secrets.token_hex(32),
+                "GPU_MARKETPLACE_LISTING_CURSOR_SECRET": secrets.token_hex(32),
+                "GPU_MARKETPLACE_JOBS_CURSOR_SECRET": secrets.token_hex(32),
+            }
+        )
+        local = compose(inspect_env, LOCAL_PROJECT, "ps", "--all", "--format", "json")
         if local.returncode:
             raise RuntimeError(f"Could not inspect the existing local Compose stack: {local.stderr.strip()}")
         local_services = parse_services(local.stdout)
@@ -203,9 +381,28 @@ def main() -> int:
             "POSTGRES_HOST_PORT": available_port(used_ports),
         }
         print(f"Smoke host ports reserved: {ports}", flush=True)
+        database_name = "gpu_marketplace_smoke"
+        owner_password = secrets.token_hex(24)
+        api_password = secrets.token_hex(24)
+        manager_password = secrets.token_hex(24)
+        owner_database_url = (
+            f"postgresql+psycopg://gpu_marketplace:{owner_password}@postgres:5432/{database_name}"
+        )
+        api_database_url = f"postgresql+psycopg://gpm_api_app:{api_password}@postgres:5432/{database_name}"
+        manager_database_url = (
+            f"postgresql+psycopg://gpm_manager_app:{manager_password}@postgres:5432/{database_name}"
+        )
         smoke_env = make_smoke_env_file(
             {
                 **ports,
+                "POSTGRES_DB": database_name,
+                "POSTGRES_USER": "gpu_marketplace",
+                "POSTGRES_PASSWORD": owner_password,
+                "GPU_MARKETPLACE_API_DATABASE_URL": api_database_url,
+                "GPU_MARKETPLACE_MANAGER_DATABASE_URL": manager_database_url,
+                "GPU_MARKETPLACE_JWT_SECRET": secrets.token_hex(32),
+                "GPU_MARKETPLACE_LISTING_CURSOR_SECRET": secrets.token_hex(32),
+                "GPU_MARKETPLACE_JOBS_CURSOR_SECRET": secrets.token_hex(32),
                 "GPU_MARKETPLACE_CORS_ORIGINS": f'["http://localhost:{ports["FRONTEND_HOST_PORT"]}"]',
             }
         )
@@ -226,6 +423,35 @@ def main() -> int:
             raise RuntimeError(
                 f"API CORS origins {configured_origins!r} do not match isolated frontend origin {expected_origins!r}"
             )
+        smoke_values = read_env_values(smoke_env)
+        api_environment = rendered_config["services"]["api"]["environment"]
+        if (
+            api_environment["GPU_MARKETPLACE_LISTING_CURSOR_SECRET"]
+            != smoke_values["GPU_MARKETPLACE_LISTING_CURSOR_SECRET"]
+            or smoke_values["GPU_MARKETPLACE_LISTING_CURSOR_SECRET"]
+            == smoke_values["GPU_MARKETPLACE_JWT_SECRET"]
+        ):
+            raise RuntimeError("API did not receive a separate Listing cursor secret")
+        if (
+            api_environment["GPU_MARKETPLACE_JOBS_CURSOR_SECRET"]
+            != smoke_values["GPU_MARKETPLACE_JOBS_CURSOR_SECRET"]
+            or smoke_values["GPU_MARKETPLACE_JOBS_CURSOR_SECRET"]
+            in {
+                smoke_values["GPU_MARKETPLACE_JWT_SECRET"],
+                smoke_values["GPU_MARKETPLACE_LISTING_CURSOR_SECRET"],
+            }
+        ):
+            raise RuntimeError("API did not receive a separate Jobs cursor secret")
+        if (
+            rendered_config["services"]["api"]["environment"]["GPU_MARKETPLACE_DATABASE_URL"]
+            != smoke_values["GPU_MARKETPLACE_API_DATABASE_URL"]
+        ):
+            raise RuntimeError("API container did not receive its API-specific database URL")
+        if (
+            rendered_config["services"]["manager"]["environment"]["GPU_MARKETPLACE_DATABASE_URL"]
+            != smoke_values["GPU_MARKETPLACE_MANAGER_DATABASE_URL"]
+        ):
+            raise RuntimeError("Manager container did not receive its Manager-specific database URL")
         for service_name, target, host_port in (
             ("frontend", 5173, ports["FRONTEND_HOST_PORT"]),
             ("api", 8000, ports["API_HOST_PORT"]),
@@ -248,13 +474,94 @@ def main() -> int:
             raise RuntimeError(f"Refusing to reuse non-empty smoke project {PROJECT}")
 
         smoke_project_created = True
-        result = compose(
-            smoke_env, PROJECT, "up", "--build", "--detach", "--wait", "--wait-timeout", "240"
+        require_compose_success(
+            compose(smoke_env, PROJECT, "up", "--detach", "--wait", "--wait-timeout", "120", "postgres"),
+            "PostgreSQL startup",
         )
-        if result.returncode:
-            print(result.stdout, end="")
-            print(result.stderr, end="", file=sys.stderr)
-            raise RuntimeError(f"Compose smoke project did not become healthy (exit {result.returncode})")
+        bootstrap_environment = {
+            "GPU_MARKETPLACE_MIGRATION_DATABASE_URL": owner_database_url,
+            "GPU_MARKETPLACE_API_DB_PASSWORD": api_password,
+            "GPU_MARKETPLACE_MANAGER_DB_PASSWORD": manager_password,
+        }
+        require_compose_success(
+            compose(
+                smoke_env,
+                PROJECT,
+                "run",
+                "--rm",
+                "--no-deps",
+                "--env",
+                "GPU_MARKETPLACE_MIGRATION_DATABASE_URL",
+                "--env",
+                "GPU_MARKETPLACE_API_DB_PASSWORD",
+                "--env",
+                "GPU_MARKETPLACE_MANAGER_DB_PASSWORD",
+                "api",
+                "python",
+                "-m",
+                "gpu_marketplace.common.db_roles",
+                process_env=bootstrap_environment,
+            ),
+            "disposable D1 role bootstrap",
+        )
+
+        # Bring up only the API before migrations. It must stay unready and return a
+        # sanitized dependency error until the Auth tables exist.
+        require_compose_success(
+            compose(smoke_env, PROJECT, "up", "--build", "--detach", "api"),
+            "API startup before schema provisioning",
+        )
+        api_url = f"http://127.0.0.1:{ports['API_HOST_PORT']}"
+        _, unready_body = expect_http_status(f"{api_url}/health/ready", 503)
+        unready = json.loads(unready_body)
+        if unready != {
+            "status": "not_ready",
+            "components": {"database": "ok", "auth_schema": "unavailable"},
+        }:
+            raise RuntimeError(f"API readiness did not identify the missing Auth schema: {unready}")
+        _, missing_schema_login = expect_http_status(
+            f"{api_url}/api/v1/auth/login",
+            503,
+            method="POST",
+            body=json.dumps({"login_name": "smoke-no-account", "password": "smoke-only-password"}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        if json.loads(missing_schema_login).get("error", {}).get("code") != "DEPENDENCY_UNAVAILABLE":
+            raise RuntimeError("Auth route did not fail closed while its schema was missing")
+
+        require_compose_success(
+            compose(
+                smoke_env,
+                PROJECT,
+                "run",
+                "--rm",
+                "--no-deps",
+                "--env",
+                "GPU_MARKETPLACE_DATABASE_URL",
+                "api",
+                "python",
+                "-m",
+                "alembic",
+                "upgrade",
+                "head",
+                process_env={"GPU_MARKETPLACE_DATABASE_URL": owner_database_url},
+            ),
+            "disposable schema migrations",
+        )
+
+        require_compose_success(
+            compose(
+                smoke_env,
+                PROJECT,
+                "up",
+                "--build",
+                "--detach",
+                "--wait",
+                "--wait-timeout",
+                "240",
+            ),
+            "five-service Compose startup after disposable migrations",
+        )
 
         state_result = compose(smoke_env, PROJECT, "ps", "--format", "json")
         if state_result.returncode:
@@ -313,6 +620,23 @@ def main() -> int:
         if readiness != {"status": "ready", "components": {"database": "ok"}}:
             raise RuntimeError(f"Backend API database readiness returned an unexpected response: {readiness}")
 
+        origin = f"http://localhost:{ports['FRONTEND_HOST_PORT']}"
+        auth_headers, auth_body = expect_http_status(
+            f"{api_url}/api/v1/auth/login",
+            401,
+            method="POST",
+            body=json.dumps({"login_name": "smoke-no-account", "password": "smoke-only-password"}).encode(),
+            headers={"Content-Type": "application/json", "Origin": origin},
+        )
+        if json.loads(auth_body).get("error", {}).get("code") != "INVALID_CREDENTIALS":
+            raise RuntimeError("Mounted Auth router did not return the generic invalid-credentials response")
+        if auth_headers.get("access-control-allow-origin") != origin:
+            raise RuntimeError("Mounted Auth route did not return the configured CORS origin")
+
+        verify_runtime_role(smoke_env, "api", "gpm_api_app")
+        verify_runtime_role(smoke_env, "manager", "gpm_manager_app")
+        verify_runtime_roles_from_host(postgres_port, smoke_env)
+
         manager_db = compose(
             smoke_env, PROJECT, "exec", "--no-TTY", "manager",
             "python", "-m", "gpu_marketplace.manager.healthcheck",
@@ -334,14 +658,59 @@ def main() -> int:
         if probe.returncode or "db_network_isolated" not in probe.stdout:
             raise RuntimeError(f"Simulator database-isolation check failed: {probe.stderr.strip()}")
 
+        restart_marker = create_restart_persistence_marker(postgres_port, smoke_env)
+        require_compose_success(
+            compose(smoke_env, PROJECT, "down", "--remove-orphans"),
+            "smoke stack shutdown before persistence verification",
+        )
+        require_compose_success(
+            compose(
+                smoke_env,
+                PROJECT,
+                "up",
+                "--build",
+                "--detach",
+                "--wait",
+                "--wait-timeout",
+                "240",
+            ),
+            "smoke stack recreation with its existing PostgreSQL volume",
+        )
+        restarted_state_result = compose(smoke_env, PROJECT, "ps", "--format", "json")
+        if restarted_state_result.returncode:
+            raise RuntimeError("Could not read service health after Compose recreation")
+        restarted_state = parse_services(restarted_state_result.stdout)
+        restarted_services = {
+            str(service.get("Service") or str(service.get("Name", "")).removeprefix(f"{PROJECT}-"))
+            for service in restarted_state
+        }
+        if restarted_services != EXPECTED_SERVICES or any(
+            service.get("State") != "running" or service.get("Health") != "healthy"
+            for service in restarted_state
+        ):
+            raise RuntimeError("Compose services did not become healthy after recreation")
+        verify_runtime_role(smoke_env, "api", "gpm_api_app")
+        verify_runtime_role(smoke_env, "manager", "gpm_manager_app")
+        verify_runtime_roles_from_host(postgres_port, smoke_env)
+        check_postgres_from_host(postgres_port, smoke_env)
+        verify_restart_persistence(postgres_port, smoke_env, restart_marker)
+        if json.loads(check_http(f"{api_url}/health/live")) != {"status": "ok"}:
+            raise RuntimeError("Backend API was not available after Compose recreation")
+
         print("PASS: exactly five Compose services are running and healthy")
         print("PASS: host can fetch the production frontend index and built JavaScript bundle")
         print("PASS: frontend SPA route falls back to the production index")
         print(f"PASS: frontend image build received API host URL {expected_api_url}")
         print(f"PASS: host TCP and PostgreSQL SELECT 1 via loopback port {postgres_port}")
         print("PASS: API /health/ready and Manager healthcheck can query PostgreSQL")
+        print("PASS: fresh Compose API remains unready and Auth fails closed before schema provisioning")
+        print("PASS: disposable migrations enable the mounted Auth route with the approved generic 401")
+        print("PASS: API and Manager connect as gpm_api_app and gpm_manager_app without CREATE privileges")
+        print("PASS: host verifies native API/Manager session_user values through the loopback PostgreSQL port")
         print("PASS: host can access Backend API /health/live")
         print("PASS: Simulator can reach API but cannot resolve/connect to PostgreSQL")
+        print("PASS: native API/Manager session_user values remain restricted after restart")
+        print("PASS: committed Client data survives Compose down/up with its PostgreSQL volume")
         exit_code = 0
     except (OSError, subprocess.SubprocessError, RuntimeError, json.JSONDecodeError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
@@ -379,6 +748,11 @@ def main() -> int:
                 smoke_env.unlink(missing_ok=True)
             except OSError as exc:
                 print(f"Could not remove temporary smoke env file: {exc}", file=sys.stderr)
+        if inspect_env is not None:
+            try:
+                inspect_env.unlink(missing_ok=True)
+            except OSError as exc:
+                print(f"Could not remove temporary Compose inspection env file: {exc}", file=sys.stderr)
 
     return exit_code
 

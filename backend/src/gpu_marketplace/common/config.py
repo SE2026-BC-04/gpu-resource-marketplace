@@ -1,7 +1,7 @@
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
@@ -14,6 +14,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     api_host: str = "0.0.0.0"
@@ -21,16 +22,45 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+psycopg://gpu_marketplace:local-dev-only-change-me@localhost:5432/gpu_marketplace"
     )
+    jwt_secret: SecretStr | None = None
+    listing_cursor_secret: SecretStr | None = None
+    jobs_cursor_secret: SecretStr | None = None
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     log_level: LogLevel = "INFO"
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def validate_jwt_secret(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and len(value.get_secret_value().encode("utf-8")) < 32:
+            raise ValueError("JWT secret must contain at least 256 bits (32 UTF-8 bytes)")
+        return value
+
+    @field_validator("listing_cursor_secret")
+    @classmethod
+    def validate_listing_cursor_secret(
+        cls, value: SecretStr | None
+    ) -> SecretStr | None:
+        if value is not None and len(value.get_secret_value().encode("utf-8")) < 32:
+            raise ValueError(
+                "Listing cursor secret must contain at least 256 bits (32 UTF-8 bytes)"
+            )
+        return value
+
+    @field_validator("jobs_cursor_secret")
+    @classmethod
+    def validate_jobs_cursor_secret(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and len(value.get_secret_value().encode("utf-8")) < 32:
+            raise ValueError("Jobs cursor secret must contain at least 256 bits (32 UTF-8 bytes)")
+        return value
 
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, value: str) -> str:
         try:
             url = make_url(value)
-        except Exception as exc:
-            raise ValueError("database URL is invalid") from exc
+        except Exception:
+            # SQLAlchemy parser exceptions can include the original URL, including its password.
+            raise ValueError("database URL is invalid") from None
         if url.drivername != "postgresql+psycopg":
             raise ValueError("database URL must use the approved postgresql+psycopg driver")
         if not url.host or not url.database:

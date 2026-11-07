@@ -33,8 +33,15 @@ from gpu_marketplace.jobs.cancel_ports import (
     JobLocator,
 )
 from gpu_marketplace.jobs.errors import DependencyUnavailable
-from gpu_marketplace.jobs.models import FailureReason, JobStatus
-from gpu_marketplace.jobs.ports import JobPrincipal, JobRecord
+from gpu_marketplace.jobs.models import FailureReason, JobRole, JobStatus
+from gpu_marketplace.jobs.ports import (
+    CursorPosition,
+    JobPage,
+    JobPrincipal,
+    JobRecord,
+)
+from gpu_marketplace.repositories.commit_outcome import is_definite_commit_rollback
+from gpu_marketplace.repositories.audit import append_audit_event
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +52,14 @@ ALLOWED_RUNTIME_ROLES = frozenset({"gpm_api_app", "gpm_api_rw"})
 # ``SET ROLE`` must pass ``allowed_session_users`` explicitly.
 ALLOWED_RUNTIME_LOGINS = frozenset({"gpm_api_app"})
 
-# SQLSTATE classes after which PostgreSQL has definitely aborted the transaction
-# (class 23 = integrity violation incl. deferred checks at COMMIT; 40 = rollback).
-_KNOWN_ABORT_SQLSTATE_CLASSES = frozenset({"23", "40"})
-
 _JOB_COLUMNS = (
     "id, client_id, worker_id, listing_id, requested_gpu_count, duration_seconds, "
     "status, failure_reason, submitted_at, started_at, terminal_at"
+)
+_JOB_SELECT_COLUMNS = (
+    "j.id, j.client_id, j.worker_id, j.listing_id, j.requested_gpu_count, "
+    "j.duration_seconds, j.status, j.failure_reason, j.submitted_at, "
+    "j.started_at, j.terminal_at"
 )
 
 _LOCATOR_SQL = text("SELECT listing_id FROM jobs WHERE id = :job_id")
@@ -71,7 +79,117 @@ _ROLE_CHECK_SQL = text("SELECT current_user, session_user")
 _SESSION_CHECK_SQL = text(
     "SELECT current_user, session_user, current_setting('transaction_isolation')"
 )
+_READ_ROLE_CHECK_SQL = text("SELECT current_user, session_user")
 _SET_TIMEOUT_SQL = text("SELECT set_config(:name, :value, true)")
+
+
+class PostgresJobReader:
+    """Read safe Job projections with visibility enforced by PostgreSQL predicates.
+
+    Queries select only fields needed by the public projection. Clients are scoped
+    by ``client_id``; Workers by their immutable Job Worker assignment and profile;
+    Admins are read-only and may see all Jobs. The caller supplies a Session factory
+    bound to the restricted API runtime login.
+    """
+
+    def __init__(
+        self,
+        sessions: Callable[[], Session],
+        *,
+        allowed_session_users: frozenset[str] = ALLOWED_RUNTIME_LOGINS,
+    ) -> None:
+        self._sessions = sessions
+        self._allowed_session_users = allowed_session_users
+
+    def list_visible(
+        self,
+        *,
+        principal: JobPrincipal,
+        status: JobStatus | None,
+        after: CursorPosition | None,
+        limit: int,
+    ) -> JobPage:
+        _role, visibility_sql, params = self._visibility(principal)
+        clauses = [visibility_sql] if visibility_sql else []
+        if status is not None:
+            clauses.append("j.status = :status")
+            params["status"] = status.value
+        if after is not None:
+            clauses.append(
+                "(j.submitted_at < :cursor_submitted_at OR "
+                "(j.submitted_at = :cursor_submitted_at AND j.id < :cursor_job_id))"
+            )
+            params["cursor_submitted_at"] = after.submitted_at
+            params["cursor_job_id"] = after.job_id
+        params["limit"] = limit + 1
+        where_sql = " AND ".join(clauses) if clauses else "TRUE"
+        statement = text(
+            f"SELECT {_JOB_SELECT_COLUMNS} "
+            "FROM jobs AS j "
+            f"WHERE {where_sql} "
+            "ORDER BY j.submitted_at DESC, j.id DESC LIMIT :limit"
+        )
+        try:
+            with self._sessions() as session:
+                self._verify_runtime_session(session)
+                rows = session.execute(statement, params).mappings().all()
+        except SQLAlchemyError as error:
+            _log_store_failure("job_read_list_failed", error, None)
+            raise DependencyUnavailable() from None
+
+        has_more = len(rows) > limit
+        visible_rows = rows[:limit]
+        items = tuple(_to_record(row) for row in visible_rows)
+        next_position = None
+        if has_more and items:
+            last = items[-1]
+            next_position = CursorPosition(submitted_at=last.submitted_at, job_id=last.id)
+        return JobPage(items=items, next_position=next_position)
+
+    def get_visible(self, *, principal: JobPrincipal, job_id: UUID) -> JobRecord | None:
+        _role, visibility_sql, params = self._visibility(principal)
+        clauses = ["j.id = :job_id"]
+        if visibility_sql:
+            clauses.append(visibility_sql)
+        params["job_id"] = job_id
+        statement = text(
+            f"SELECT {_JOB_SELECT_COLUMNS} "
+            "FROM jobs AS j WHERE " + " AND ".join(clauses)
+        )
+        try:
+            with self._sessions() as session:
+                self._verify_runtime_session(session)
+                row = session.execute(statement, params).mappings().one_or_none()
+        except SQLAlchemyError as error:
+            _log_store_failure("job_read_detail_failed", error, None)
+            raise DependencyUnavailable() from None
+        return None if row is None else _to_record(row)
+
+    @staticmethod
+    def _visibility(principal: JobPrincipal) -> tuple[JobRole, str, dict[str, Any]]:
+        try:
+            role = JobRole(principal.role)
+        except (TypeError, ValueError) as error:
+            raise DependencyUnavailable() from error
+        if role is JobRole.CLIENT:
+            return role, "j.client_id = :principal_id", {"principal_id": principal.user_id}
+        if role is JobRole.WORKER:
+            return (
+                role,
+                "EXISTS (SELECT 1 FROM workers AS w "
+                "WHERE w.id = j.worker_id AND w.user_id = :principal_id)",
+                {"principal_id": principal.user_id},
+            )
+        return role, "", {}
+
+    def _verify_runtime_session(self, session: Session) -> None:
+        try:
+            role, login = session.execute(_READ_ROLE_CHECK_SQL).one()
+        except SQLAlchemyError:
+            raise
+        if role not in ALLOWED_RUNTIME_ROLES or login not in self._allowed_session_users:
+            logger.error("job_reader_session_misconfigured")
+            raise DependencyUnavailable()
 
 
 class TransactionOutcome(StrEnum):
@@ -314,13 +432,39 @@ class PostgresJobCancelTransaction:
         self._locked_job = job_id
         return None if row is None else _to_record(row)
 
-    def cancel_queued(self, *, job_id: UUID, listing_id: UUID, client_id: UUID) -> JobRecord:
+    def cancel_queued(
+        self,
+        *,
+        job_id: UUID,
+        listing_id: UUID,
+        client_id: UUID,
+        correlation_id: UUID,
+    ) -> JobRecord:
         if self._locked_listing != listing_id or self._locked_job != job_id:
             raise RuntimeError("Listing and Job locks are required before cancelling")
         params = {"job_id": job_id, "listing_id": listing_id, "client_id": client_id}
         row = self._execute(_CANCEL_SQL, params).one_or_none()
         if row is not None:
-            return _to_record(row)
+            record = _to_record(row)
+            try:
+                append_audit_event(
+                    self._active(),
+                    actor_ref=str(client_id),
+                    correlation_id=correlation_id,
+                    subject_type="JOB",
+                    subject_id=job_id,
+                    event_type="JOB_CANCEL",
+                    outcome="SUCCESS",
+                    metadata_redacted={
+                        "from_status": "QUEUED",
+                        "to_status": "CANCELLED",
+                    },
+                )
+            except SQLAlchemyError as error:
+                self._failed = True
+                _log_store_failure("job_cancel_audit_insert_failed", error, self._outcome)
+                raise DependencyUnavailable() from None
+            return record
         # Zero rows: classify from the row still locked by this transaction.
         current = self._execute(_CLASSIFY_SQL, {"job_id": job_id}).one_or_none()
         if current is None:
@@ -341,7 +485,7 @@ class PostgresJobCancelTransaction:
         except SQLAlchemyError as error:
             self._failed = True
             sqlstate = _sqlstate(error)
-            if sqlstate is not None and sqlstate[:2] in _KNOWN_ABORT_SQLSTATE_CLASSES:
+            if is_definite_commit_rollback(sqlstate):
                 self._outcome = TransactionOutcome.ROLLED_BACK
                 _log_store_failure("job_cancel_commit_aborted", error, self._outcome)
                 raise DependencyUnavailable() from None

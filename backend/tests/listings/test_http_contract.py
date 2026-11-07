@@ -32,6 +32,54 @@ def test_create_uses_trusted_owner_and_server_defaults(env):
     assert env.store.events[0][0] == "insert"
     assert set(env.store.events[0][1]) == set(VALID)
     assert data["worker"]["reputation"]["success_rate"] is None
+    audit = env.store.audit_events[-1]
+    assert audit["event_type"] == "LISTING_CREATE"
+    assert audit["outcome"] == "SUCCESS"
+    assert audit["actor_ref"] == str(env.store.w1.user_id)
+    assert audit["correlation_id"] == UUID(response.headers["X-Request-ID"])
+    assert audit["subject_id"] == UUID(data["id"])
+    assert audit["metadata_redacted"] == {"status": "ACTIVE"}
+
+
+def test_listing_update_pause_resume_record_redacted_mutations(env):
+    created = env.client.post(BASE, json=VALID)
+    listing_id = created.json()["id"]
+    updated = env.client.patch(f"{BASE}/{listing_id}", json={"gpu_model": "A100 refreshed"})
+    paused = env.client.post(f"{BASE}/{listing_id}/pause")
+    resumed = env.client.post(f"{BASE}/{listing_id}/resume")
+
+    assert updated.status_code == paused.status_code == resumed.status_code == 200
+    rows = env.store.audit_events[-3:]
+    assert [row["event_type"] for row in rows] == [
+        "LISTING_UPDATE",
+        "LISTING_PAUSE",
+        "LISTING_RESUME",
+    ]
+    assert all(row["outcome"] == "SUCCESS" for row in rows)
+    assert rows[0]["metadata_redacted"] == {"changed_fields": ["gpu_model"]}
+    assert rows[1]["metadata_redacted"] == {"from_status": "ACTIVE", "to_status": "PAUSED"}
+    assert rows[2]["metadata_redacted"] == {"from_status": "PAUSED", "to_status": "ACTIVE"}
+    assert [str(row["correlation_id"]) for row in rows] == [
+        updated.headers["X-Request-ID"],
+        paused.headers["X-Request-ID"],
+        resumed.headers["X-Request-ID"],
+    ]
+
+
+def test_listing_capacity_rejection_is_audited_as_rejected_not_success(env):
+    listing_id = str(env.store.l1.id)
+    response = env.client.patch(f"{BASE}/{listing_id}", json={"total_gpu_count": 4})
+
+    assert response.status_code == 409
+    assert not any(
+        event["event_type"] == "LISTING_UPDATE" and event["outcome"] == "SUCCESS"
+        for event in env.store.audit_events
+    )
+    rejected = env.audit.events[-1]
+    assert rejected["event_type"] == "LISTING_UPDATE"
+    assert rejected["outcome"] == "REJECTED"
+    assert rejected["reason_code"] == "LISTING_CAPACITY_BELOW_QUEUED_MAX"
+    assert rejected["correlation_id"] == UUID(response.headers["X-Request-ID"])
 
 
 @pytest.mark.parametrize("price", ["0.00", "9999999999.99", None])
@@ -466,12 +514,30 @@ def test_error_correlation_redaction_and_commit_rollback(env):
     )
     assert request_id != "untrusted" and "do-not-expose" not in response.text
     assert response.headers["cache-control"] == "no-store"
+    assert not env.audit.events
+    assert not env.store.audit_events
     env.store.fail_commit = RuntimeError("secret-connection-string")
     response = env.client.post(BASE, json=VALID)
     assert (
         response.status_code == 500 and "secret-connection-string" not in response.text
     )
     assert len(env.store.records) == 2
+    assert not env.store.audit_events
+
+
+def test_dependency_failure_is_audited_as_error_not_success(env):
+    env.store.fail_open = ListingDependencyUnavailable("password=do-not-expose")
+    response = env.client.post(BASE, json=VALID)
+
+    assert response.status_code == 503
+    assert "do-not-expose" not in response.text
+    assert not env.store.audit_events
+    assert len(env.audit.events) == 1
+    outcome = env.audit.events[0]
+    assert outcome["event_type"] == "LISTING_CREATE"
+    assert outcome["outcome"] == "ERROR"
+    assert outcome["reason_code"] == "DEPENDENCY_UNAVAILABLE"
+    assert outcome["correlation_id"] == UUID(response.headers["X-Request-ID"])
 
 
 def test_service_also_rejects_managed_fields(env):

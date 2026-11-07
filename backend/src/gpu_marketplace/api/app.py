@@ -2,15 +2,41 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 import logging
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from gpu_marketplace.common.config import Settings
-from gpu_marketplace.common.database import create_engine, database_is_ready
+from gpu_marketplace.common.database import authentication_schema_is_ready, create_engine, database_is_ready
 from gpu_marketplace.common.logging import configure_logging
+from gpu_marketplace.identity.dependencies import create_principal_dependency
+from gpu_marketplace.identity.passwords import ScryptPasswordHasher
+from gpu_marketplace.identity.router import create_auth_router
+from gpu_marketplace.identity.service import AuthService
+from gpu_marketplace.identity.tokens import AccessTokenCodec
+from gpu_marketplace.jobs.cancel import JobCancelService
+from gpu_marketplace.jobs.cursor import HmacCursorCodec
+from gpu_marketplace.jobs.router import create_jobs_router
+from gpu_marketplace.jobs.service import JobsReadService
+from gpu_marketplace.jobs.submit import JobSubmitService
+from gpu_marketplace.listings.cursors import ListingCursorCodec
+from gpu_marketplace.listings.errors import ListingDependencyUnavailable
+from gpu_marketplace.listings.models import ListingRecord, WorkerProfile
+from gpu_marketplace.listings.router import create_listing_router
+from gpu_marketplace.listings.service import ListingService
+from gpu_marketplace.repositories.accounts import PostgresAccountReader
+from gpu_marketplace.repositories.audit import PostgresAuditWriter
+from gpu_marketplace.repositories.jobs import (
+    PostgresJobCancelUnitOfWork,
+    PostgresJobLocatorReader,
+    PostgresJobReader,
+)
+from gpu_marketplace.repositories.job_submit import PostgresJobSubmissionStore
+from gpu_marketplace.repositories.listings import PostgresListingUnitOfWork
 
 logger = logging.getLogger(__name__)
 
@@ -19,14 +45,75 @@ def create_app(
     settings: Settings | None = None,
     *,
     database_probe: Callable[[], bool] | None = None,
+    auth_schema_probe: Callable[[], bool] | None = None,
+    account_sessions: sessionmaker[Session] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
+    if resolved_settings.jwt_secret is None:
+        raise ValueError("GPU_MARKETPLACE_JWT_SECRET must be configured for the API")
+    if resolved_settings.listing_cursor_secret is None:
+        raise ValueError(
+            "GPU_MARKETPLACE_LISTING_CURSOR_SECRET must be configured for Listings"
+        )
+    if resolved_settings.jobs_cursor_secret is None:
+        raise ValueError("GPU_MARKETPLACE_JOBS_CURSOR_SECRET must be configured for Jobs")
+    signing_keys = {
+        resolved_settings.jwt_secret.get_secret_value(),
+        resolved_settings.listing_cursor_secret.get_secret_value(),
+        resolved_settings.jobs_cursor_secret.get_secret_value(),
+    }
+    if len(signing_keys) != 3:
+        raise ValueError("JWT, Listing cursor, and Jobs cursor secrets must be distinct")
     configure_logging(resolved_settings.log_level)
 
     engine: Engine | None = None
-    if database_probe is None:
+    if account_sessions is None:
         engine = create_engine(resolved_settings.database_url)
+        account_sessions = sessionmaker(bind=engine)
+    elif database_probe is None:
+        raise ValueError("database_probe is required when injecting account_sessions")
+    if database_probe is None:
+        assert engine is not None
         database_probe = lambda: database_is_ready(engine)
+    if auth_schema_probe is None:
+        auth_schema_probe = (
+            (lambda: authentication_schema_is_ready(engine)) if engine is not None else (lambda: True)
+        )
+    assert account_sessions is not None
+
+    auth_service = AuthService(
+        PostgresAccountReader(account_sessions),
+        AccessTokenCodec(resolved_settings.jwt_secret.get_secret_value().encode("utf-8")),
+        ScryptPasswordHasher(),
+    )
+    principal_dependency = create_principal_dependency(auth_service)
+    audit_writer = PostgresAuditWriter(account_sessions)
+    listing_service = ListingService(
+        lambda: PostgresListingUnitOfWork(
+            account_sessions,
+            worker_record=WorkerProfile,
+            listing_record=ListingRecord,
+            unavailable_error=ListingDependencyUnavailable,
+        ),
+        ListingCursorCodec(
+            resolved_settings.listing_cursor_secret.get_secret_value().encode("utf-8")
+        ),
+        audit_writer=audit_writer,
+    )
+    jobs_read_service = JobsReadService(
+        reader=PostgresJobReader(account_sessions),
+        cursor_codec=HmacCursorCodec(
+            resolved_settings.jobs_cursor_secret.get_secret_value().encode("utf-8")
+        ),
+    )
+    jobs_cancel_service = JobCancelService(
+        locator_reader=PostgresJobLocatorReader(account_sessions),
+        uow=PostgresJobCancelUnitOfWork(account_sessions),
+        audit_writer=audit_writer,
+    )
+    jobs_submit_service = JobSubmitService(
+        store=PostgresJobSubmissionStore(account_sessions), audit_writer=audit_writer
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -46,13 +133,47 @@ def create_app(
         openapi_url=None,
         lifespan=lifespan,
     )
+    app.state.auth_service = auth_service
+    app.state.require_authenticated_principal = principal_dependency
+    app.state.jobs_read_service = jobs_read_service
+    app.state.jobs_cancel_service = jobs_cancel_service
+    app.state.jobs_submit_service = jobs_submit_service
+    app.include_router(create_auth_router(service=auth_service))
+    app.include_router(
+        create_listing_router(
+            service=listing_service,
+            principal_dependency=principal_dependency,
+        )
+    )
+    app.include_router(
+        create_jobs_router(
+            service=jobs_read_service,
+            cancel_service=jobs_cancel_service,
+            submit_service=jobs_submit_service,
+            principal_provider=principal_dependency,
+        )
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=resolved_settings.cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PATCH"],
         allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Request-ID"],
+        expose_headers=["X-Request-ID"],
     )
+
+    @app.middleware("http")
+    async def restrict_cors_exposure_to_allowed_origins(request: Request, call_next):
+        # Starlette emits expose_headers even when the Origin is not allowlisted. The
+        # browser will still block that response, but remove the header as well so the
+        # response itself never advertises access to an untrusted origin.
+        response = await call_next(request)
+        if (
+            request.headers.get("origin") not in resolved_settings.cors_origins
+            and "Access-Control-Expose-Headers" in response.headers
+        ):
+            del response.headers["Access-Control-Expose-Headers"]
+        return response
 
     @app.get("/health/live", include_in_schema=False)
     def live() -> dict[str, str]:
@@ -65,11 +186,41 @@ def create_app(
                 status_code=503,
                 content={"status": "not_ready", "components": {"database": "unavailable"}},
             )
+        if not auth_schema_probe():
+            return JSONResponse(
+                status_code=503,
+                content={"status": "not_ready", "components": {"database": "ok", "auth_schema": "unavailable"}},
+            )
         return {"status": "ready", "components": {"database": "ok"}}
 
     @app.exception_handler(Exception)
-    async def unexpected_error_handler(_: Request, exc: Exception) -> JSONResponse:
+    async def unexpected_error_handler(request: Request, exc: Exception) -> JSONResponse:
         # Keep response and log fields free of exception text, which can contain secrets.
+        if request.url.path.startswith("/api/v1/auth/"):
+            request_id = getattr(request.state, "request_id", None)
+            if not isinstance(request_id, str):
+                request_id = str(uuid4())
+            logger.error(
+                "unhandled_api_exception",
+                extra={"exception_type": type(exc).__name__, "request_id": request_id},
+            )
+            headers = {"X-Request-ID": request_id, "Cache-Control": "no-store"}
+            origin = request.headers.get("origin")
+            if origin in resolved_settings.cors_origins:
+                headers["Access-Control-Allow-Origin"] = origin
+                headers["Access-Control-Expose-Headers"] = "X-Request-ID"
+                headers["Vary"] = "Origin"
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": {
+                        "code": "INTERNAL_ERROR",
+                        "message": "Internal server error.",
+                        "request_id": request_id,
+                    }
+                },
+                headers=headers,
+            )
         logger.error("unhandled_api_exception", extra={"exception_type": type(exc).__name__})
         return JSONResponse(
             status_code=500,

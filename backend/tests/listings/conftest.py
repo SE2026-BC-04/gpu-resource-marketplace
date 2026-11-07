@@ -11,11 +11,22 @@ from gpu_marketplace.listings.service import ListingService
 from .fakes import Store
 
 
+class AuditRecorder:
+    def __init__(self):
+        self.events = []
+
+    def record_outcome(self, **event):
+        self.events.append(event)
+
+
 @pytest.fixture
 def env():
     store = Store()
+    audit = AuditRecorder()
     service = ListingService(
-        store.open, ListingCursorCodec(b"test-only-cursor-key-not-a-secret")
+        store.open,
+        ListingCursorCodec(b"test-only-cursor-key-not-a-secret"),
+        audit_writer=audit,
     )
 
     def trusted_test_principal():
@@ -33,6 +44,7 @@ def env():
     with TestClient(app, raise_server_exceptions=False) as client:
         yield SimpleNamespace(
             store=store,
+            audit=audit,
             service=service,
             client=client,
             app=app,

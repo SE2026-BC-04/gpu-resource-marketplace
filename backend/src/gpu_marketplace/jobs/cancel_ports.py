@@ -94,6 +94,7 @@ class JobCancelTransaction(Protocol):
         job_id: UUID,
         listing_id: UUID,
         client_id: UUID,
+        correlation_id: UUID,
     ) -> JobRecord:
         """Guard QUEUED/identity predicates and return the DB-timestamped row.
 

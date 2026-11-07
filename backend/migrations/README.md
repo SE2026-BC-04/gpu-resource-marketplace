@@ -17,7 +17,7 @@ Alembic is configured for the shared Backend API/Manager package.
    ```
 
    It reads the owner URL from `GPU_MARKETPLACE_MIGRATION_DATABASE_URL` and the two login passwords from `GPU_MARKETPLACE_API_DB_PASSWORD` / `GPU_MARKETPLACE_MANAGER_DB_PASSWORD`. Values come from the environment only; pass variable names, never values, on a command line. A role that differs from the approved definition stops the run with a non-zero exit code for an operator to fix by hand. Replacing a password requires the explicit `--rotate-password` flag, which no migration or test uses.
-2. `alembic upgrade head`.
+2. From the repository root, run `uv run --project backend --locked alembic -c backend/alembic.ini upgrade head`.
 
 D1 downgrade only revokes what revision 0002 granted; it never drops roles because roles are cluster-wide, and it does not hand database privileges back to `PUBLIC` because it cannot know the state before the upgrade. D7 downgrade drops only its trigger/function and preserves all rows, timestamps and D1 ACLs. The Listing adapter rejects effective updates when the enabled D7 mechanism is absent; coordinate feature/migration rollout with the integrator rather than enabling incomplete writes or automatically downgrading production.
 
