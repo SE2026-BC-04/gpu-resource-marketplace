@@ -10,6 +10,7 @@ stored.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from getpass import getpass
 import os
 import sys
@@ -23,21 +24,41 @@ from gpu_marketplace.identity.passwords import ScryptPasswordHasher
 
 _ALLOWED_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _LOCAL_DATABASE = "gpu_marketplace"
+_LIBPQ_ROUTING_ENVIRONMENT = frozenset(
+    {"PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGUSER", "PGSERVICE", "PGSERVICEFILE"}
+)
 
 
 def validate_local_owner_url(raw_url: str) -> URL:
-    """Parse a PostgreSQL URL only when it targets the explicit local DB."""
+    """Accept only an explicit loopback TCP URL for the local demo database."""
     try:
         url = make_url(raw_url)
+        port = url.port
     except Exception:
         raise ValueError("database URL is invalid") from None
+    if url.query:
+        raise ValueError("query parameters are forbidden for local demo provisioning")
     if url.drivername != "postgresql+psycopg":
         raise ValueError("only the approved PostgreSQL driver is allowed")
+    if not url.username:
+        raise ValueError("database URL username must be explicit")
     if url.host not in _ALLOWED_LOCAL_HOSTS:
         raise ValueError("database host must be loopback")
+    if port is None or not 1 <= port <= 65535:
+        raise ValueError("database URL must contain an explicit valid TCP port")
     if url.database != _LOCAL_DATABASE:
         raise ValueError("database name must be gpu_marketplace")
     return url
+
+
+def validate_local_libpq_environment(environment: Mapping[str, str] | None = None) -> None:
+    """Reject ambient libpq routing defaults before opening the local connection."""
+    source = os.environ if environment is None else environment
+    configured = sorted(name for name in _LIBPQ_ROUTING_ENVIRONMENT if name in source)
+    if configured:
+        raise ValueError(
+            "libpq routing environment variables are forbidden: " + ", ".join(configured)
+        )
 
 
 def validate_local_database_identity(
@@ -138,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         url = validate_local_owner_url(raw_url)
+        validate_local_libpq_environment()
     except ValueError as error:
         print(f"refused: {error}", file=sys.stderr)
         return 2

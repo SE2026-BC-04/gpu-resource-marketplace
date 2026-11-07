@@ -20,11 +20,23 @@ The containers use digest-pinned Python 3.12, Node 24, and PostgreSQL 16 images.
 
 ## Configure local signing secrets
 
+The following PowerShell helper uses the operating system cryptographic random number generator, so this step does not depend on the Python launcher.
+
 ```powershell
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+function New-LocalHexSecret {
+    $randomBytes = New-Object byte[] 32
+    $randomGenerator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $randomGenerator.GetBytes($randomBytes)
+        return [BitConverter]::ToString($randomBytes).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $randomGenerator.Dispose()
+    }
+}
 $jwtSetting = Select-String -Path .env -Pattern '^GPU_MARKETPLACE_JWT_SECRET=.*$'
 if (-not $jwtSetting -or $jwtSetting.Line -eq 'GPU_MARKETPLACE_JWT_SECRET=') {
-    $jwtSecret = py -3.12 -c "import secrets; print(secrets.token_hex(32))"
+    $jwtSecret = New-LocalHexSecret
     if ($jwtSetting) {
         (Get-Content .env) -replace '^GPU_MARKETPLACE_JWT_SECRET=.*$', "GPU_MARKETPLACE_JWT_SECRET=$jwtSecret" | Set-Content -Encoding Ascii .env
     } else {
@@ -34,7 +46,7 @@ if (-not $jwtSetting -or $jwtSetting.Line -eq 'GPU_MARKETPLACE_JWT_SECRET=') {
 }
 $cursorSetting = Select-String -Path .env -Pattern '^GPU_MARKETPLACE_LISTING_CURSOR_SECRET=.*$'
 if (-not $cursorSetting -or $cursorSetting.Line -eq 'GPU_MARKETPLACE_LISTING_CURSOR_SECRET=') {
-    $cursorSecret = py -3.12 -c "import secrets; print(secrets.token_hex(32))"
+    $cursorSecret = New-LocalHexSecret
     if ($cursorSetting) {
         (Get-Content .env) -replace '^GPU_MARKETPLACE_LISTING_CURSOR_SECRET=.*$', "GPU_MARKETPLACE_LISTING_CURSOR_SECRET=$cursorSecret" | Set-Content -Encoding Ascii .env
     } else {
@@ -44,7 +56,7 @@ if (-not $cursorSetting -or $cursorSetting.Line -eq 'GPU_MARKETPLACE_LISTING_CUR
 }
 $jobsCursorSetting = Select-String -Path .env -Pattern '^GPU_MARKETPLACE_JOBS_CURSOR_SECRET=.*$'
 if (-not $jobsCursorSetting -or $jobsCursorSetting.Line -eq 'GPU_MARKETPLACE_JOBS_CURSOR_SECRET=') {
-    $jobsCursorSecret = py -3.12 -c "import secrets; print(secrets.token_hex(32))"
+    $jobsCursorSecret = New-LocalHexSecret
     if ($jobsCursorSetting) {
         (Get-Content .env) -replace '^GPU_MARKETPLACE_JOBS_CURSOR_SECRET=.*$', "GPU_MARKETPLACE_JOBS_CURSOR_SECRET=$jobsCursorSecret" | Set-Content -Encoding Ascii .env
     } else {
@@ -128,6 +140,8 @@ uv run --project backend --locked python -m gpu_marketplace.common.local_demo_ac
 ```
 
 The account tool inserts one active `WORKER` and one active `CLIENT`, hashes their passwords with the configured Scrypt implementation, and refuses to overwrite existing login names. It changes no schema or roles and stores no plaintext password. This bootstrap sequence is for a fresh local development database. If a reused volume contains runtime roles whose passwords are unknown, stop and resolve those credentials with its operator; do not regenerate passwords or use `--rotate-password`.
+
+The demo-account tool accepts only a PostgreSQL URL with an explicit loopback host, TCP port, username, and the `gpu_marketplace` database; it rejects every URL query parameter. It also refuses to connect if `PGHOST`, `PGHOSTADDR`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGSERVICE`, or `PGSERVICEFILE` is set in the current PowerShell environment. Inspect and clear any such routing overrides before running the tool.
 
 ## Start and use the V1 application
 
