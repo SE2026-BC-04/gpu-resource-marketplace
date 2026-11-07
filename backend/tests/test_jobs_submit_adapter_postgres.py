@@ -151,14 +151,15 @@ def test_postgres_same_key_same_body_replays_after_listing_is_paused(
 ) -> None:
     engine, service = submit_service
     fixture = seed_listing(engine)
-    first = submit(service, fixture, key="postgres-submit-key-02")
+    key = "postgres-submit-key-02"
+    first = submit(service, fixture, key=key)
     with engine.begin() as connection:
         connection.execute(
             text("UPDATE gpu_listings SET status = 'PAUSED' WHERE id = :id"),
             {"id": fixture.listing_id},
         )
 
-    replay = submit(service, fixture, key="postgres-submit-key-02")
+    replay = submit(service, fixture, key=key)
 
     assert replay.replayed
     assert replay.job.id == first.job.id
