@@ -1,13 +1,21 @@
 # HANDOFF TV1 — Phase 2A: Manager Runtime & Integration
 
-**Version:** v1.2 — re-review từ đầu, đối chiếu 5 file Phase 2 FINAL (2026-11-07)  
+**Version:** v1.2 — review update after PR #39 merge (2026-11-08; original design snapshot 2026-11-07)
 **Owner thực hiện:** TV1 — `@thangSy221105` (Team Lead/Integration Owner)  
 **Trạng thái tài liệu:** `REVIEWED_CANDIDATE / NEEDS_OWNER_SIGNOFF`  
 **Trạng thái thiết kế tham chiếu:** `P2A-GATE-01 = APPROVED_DESIGN_CONDITIONAL`; 2B/2C/2D/2E cũng `APPROVED_DESIGN_CONDITIONAL`.  
 **Trạng thái triển khai:** `NOT_AUTHORIZED_FOR_CODE / PHASE2_RUNTIME_TESTS_NOT_RUN / CROSS_OWNER_ACK_PENDING`.  
 **Mục đích:** bàn giao phạm vi, hợp đồng phối hợp, thứ tự thực hiện, kiểm thử và điều kiện nghiệm thu **riêng cho TV1**, không thay thế tài liệu chuẩn hoặc tự mở coding gate.
 
-> **Lưu ý về mốc GitHub:** tại lần kiểm tra 2026-11-07, [PR #39](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39) ở `6788505cbb68e09ad08ea2b96728bc6c69e8a32e`, `OPEN / DRAFT / UNMERGED`, base `main@1d8b1b2c52b759d99a072c3d0d889b375083a8c4`. [PR #42](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/42) **đã merge vào nhánh #39**, không phải `main`. CI của #39 trên HEAD này ghi nhận 4 jobs thành công ([run #42378797067](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42378797067)); đây là bằng chứng Phase 1, **không chứng minh Phase 2**. Trước bất kỳ lệnh code nào, bắt buộc kiểm lại HEAD/merge/CI thực tế.
+> **Baseline hiện tại (2026-11-08):** `main@bee832eaf5463df20f6c6815174322871eb6685a` (merge commit PR #44); PR #39 merge commit `aff538f79997c6e2bfcf359b176a82f2cd9ecc53`. [PR #39](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39) merged; [Actions run #42385995533](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42385995533) trên final head `3482bce3cc9726543b9345a5224d8db1b9fc6454` passed 4/4 jobs. Read-only Alembic graph check found one source head `0005_listing_d7`; this review did not inspect an applied database or run migration. Open [PR #45](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/45) supplies TV4's pure FIFO policy only; open [PR #46](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46) proposes TV2 pre-code schema/grants/UoW docs. Neither is merged or an owner ACK for final Phase 2 runtime interfaces. Phase 2 runtime remains `NOT_RUN`.
+
+### Tóm tắt finding của vòng review hiện tại
+
+- **P0/P1:** chưa xác nhận finding tài liệu P0/P1 trên baseline đã đọc; điều này không xác nhận runtime an toàn hay Phase 2 đã chạy.
+- **P2:** Phase 2 schema/grants/UoW chưa có trên `main`; TX-ALLOCATE và finalization chưa có DB integration; healthcheck hiện chỉ kiểm tra PostgreSQL; X-01 cần TV2/lead xác nhận; `P2E-CACHE-GAP-01` còn `NEEDS_OWNER_DECISION`; các ACK bên dưới vẫn chờ owner.
+- **P3:** sửa đường dẫn target, broken links và các trạng thái PR/baseline đã cũ; báo cáo `REVIEW_CROSS_PHASE_CONSISTENCY_v1.0.md` không có trong repository.
+
+Ma trận đầy đủ input/output, success/error, call order, transaction boundary, owner và status nằm trong [Appendix C Phase 2A](../../../architecture/phases/phase2/Phase_2A_v0.9.md#appendix-c-2026-11-08-cross-owner-interface-review-matrix). Ma trận chỉ là hợp đồng cần review; không đại diện ACK.
 
 ## 1. Nguồn bắt buộc đọc — chỉ dùng phiên bản FINAL
 
@@ -23,7 +31,7 @@ Năm file nằm trong gói `Phase2_FINAL_5_FILES_2026-11-07.zip` đã được n
 
 **Đọc chéo bắt buộc:** `docs/design/{database-design,api-contract,module-design,test-design}.md`, `docs/architecture/decisions/{ADR-002-postgresql-access-boundaries,ADR-003-internal-communication,ADR-004-signed-result,ADR-005-retry-timeout-internal-auth}.md`, `docs/development/{change-control,interphase-change-control}.md`. Dùng đường dẫn có thật trên repo, không đoán file ADR theo tên gọi chung.
 
-**Dấu vết đối chiếu:** báo cáo `REVIEW_CROSS_PHASE_CONSISTENCY_v1.0.md` (12 findings `X-01..12`) và sổ phê duyệt tương ứng. Các đề xuất triển khai chưa được TV2–TV5 ACK vẫn giữ `PENDING_ACK`; không coi một file có chữ `FINAL` là các hợp đồng code đã chốt.
+**Dấu vết đối chiếu:** báo cáo `REVIEW_CROSS_PHASE_CONSISTENCY_v1.0.md` và sổ phê duyệt được nhắc trong snapshot ban đầu không có trong repository hiện tại; findings/ACK từ các tài liệu vắng mặt đó không thể được xác minh tại đây. Sử dụng các Phase 2 spec, handoff và PR links trong bản cập nhật này. Các đề xuất triển khai chưa được TV2–TV5 ACK vẫn giữ `PENDING_ACK`; không coi một file có chữ `FINAL` là hợp đồng code đã chốt.
 
 ## 2. Vai trò và kết quả TV1 chịu trách nhiệm
 
@@ -63,7 +71,7 @@ Các vị trí TV1 bắt buộc đọc trên **HEAD được chốt khi vào cod
 | `backend/tests/test_phase1_runtime_http_postgres_e2e.py`, `backend/tests/test_auth_session_browser_e2e.py`, `backend/tests/role_credentials.py` | Phase 1 E2E/Auth & role-password test isolation; không gán PASS Phase 2 từ chúng |
 | `tools/{compose_smoke,verify_runtime_roles,verify_alembic_head}.py`, `frontend/e2e/phase1-runtime.spec.ts` | Reuse guarded CI/Compose/PostgreSQL/browser harness; kiểm tra quyền test cluster an toàn |
 
-**Nợ Phase 1 còn phải triage:** PR #39 audit cho Listing/Jobs mutations; deterministic barrier `Submit ↔ Pause/Resize`; independent human re-review; `CR-GPU-INT-01-READY-01` là đề xuất L2 chưa có quyết định; Scrypt C1 evidence là **production gate** riêng. PR #42 đã thêm helper lưu/khôi phục role credentials nhưng **không được tự kết luận** mọi test E2E khác đã dùng helper hay nguy cơ credential drift đã đóng.
+**Nợ Phase 1 cần theo dõi riêng:** owner comment cuối của PR #39 báo cáo đã xử lý `P2-PGROLE`, `P2-LISTING-AUDIT`, `P2-JOBS-AUDIT` và race Submit↔Pause/Resize; run CI trên final PR head xanh 4/4 jobs. Báo cáo này không thay cho independent human re-review. Open PR #45 vẫn ghi nhận role-rejection audit follow-up riêng; nội dung và disposition chưa được xác minh độc lập ở đây. `CR-GPU-INT-01-READY-01` vẫn là L2 proposal chưa có quyết định; Scrypt C1 evidence vẫn là **production gate** riêng. PR #42 đã merge vào #39, do đó phần đó có trong `main`; điều này không tự chứng minh mọi test E2E khác đã dùng helper hay credential drift đã đóng.
 
 ## 4. Công việc theo thứ tự — phân biệt trước code và sau code
 
@@ -71,7 +79,7 @@ Các vị trí TV1 bắt buộc đọc trên **HEAD được chốt khi vào cod
 
 | ID | Việc TV1 phải làm | Bàn giao nhị phân/quan sát được | Người xác nhận |
 |---|---|---|---|
-| `TV1-P2A-01` | Chốt Phase 1 accepted baseline: PR #39 thật sự có trên `main` hoặc có ngoại lệ baseline được nhóm trưởng phê duyệt riêng; ghi commit SHA, Alembic heads/version, các CI và native DB roles | `BASELINE.md` hoặc record gồm `main_sha`, `phase1_pr_head`, `db_revision`, CI URLs; không khẳng định “merged” khi PR Draft | TV1 + TV2 + các owner chịu ảnh hưởng |
+| `TV1-P2A-01` | Phase 1 baseline đã được ghi nhận: `main@bee832eaf5463df20f6c6815174322871eb6685a`, PR #39 merged, final-head CI run và source graph head `0005_listing_d7`; xác minh applied DB revision/roles theo quy trình TV2 trước DB work | Baseline code/CI evidence đã ghi ở đầu handoff; applied `alembic_version`, role ACL và Phase 2 schema/grants vẫn cần bằng chứng an toàn, không chạy migration trong vòng docs này | TV1 + TV2 + các owner chịu ảnh hưởng |
 | `TV1-P2A-02` | Triage các finding #39 trên **HEAD mới**, phân loại fix/waiver/deferral cho audit, race, test credential, readiness; giữ C1 là production gate | Bảng finding ID → actual source/evidence → owner → disposition; không tự đóng bằng CI xanh | TV1, TV2, TV3, TV4, TV5 theo miền |
 | `TV1-P2A-03` | Chốt **9 hợp đồng liên thành viên** ở §5; bao gồm typed returns/errors, retry/no-op semantics và owner of transaction | Biên bản `PENDING_ACK → ACK_*` theo file version/SHA của cả producer lẫn consumer; nội dung chưa chốt vẫn `PENDING` | TV2–TV5 + TV1 |
 | `TV1-P2A-04` | Đóng các blocker an toàn/hợp đồng `X-01` (sai tên cột), `X-02` (conflict sau cold restart), `X-03` (key compromise), `X-04` (key readiness), `X-05/06` (verifier/Inbox) | Quyết định/errata và cross-owner ACK đúng thẩm quyền; **TV1 không tự sửa schema hay tự chọn chính sách bảo mật** | TV1 điều phối; TV2–TV5 và lead |
@@ -93,7 +101,9 @@ Các vị trí TV1 bắt buộc đọc trên **HEAD được chốt khi vào cod
 
 **Nguyên tắc nhánh:** ưu tiên **một nhánh triển khai xuyên suốt công việc TV1** (không tự bẻ thành nhiều nhánh nhỏ). Nhánh PR #39 vẫn là Phase 1 integration, không dùng trực tiếp làm Phase 2 branch nếu chưa có quyết định scope/baseline mới.
 
-## 5. Hợp đồng giữa TV1 và TV2–TV5 — tất cả còn `PENDING_ACK` code-level
+## 5. Hợp đồng giữa TV1 và TV2–TV5 — chưa có ACK code-level
+
+PR #45 chỉ đưa policy thuần cho review; PR #46 là proposal pre-code. Vì vậy, interface matrix dưới đây là target contract, không phải xác nhận đã tích hợp. Dùng Appendix C của Phase 2A (được link ở đầu handoff) để xem đủ purpose, inputs/outputs, success/error, call order, transaction boundary, owner và trạng thái.
 
 | Mã/Gate | Producer → Consumer | Nội dung cần khóa | Kết quả lỗi/no-op và trách nhiệm TV1 |
 |---|---|---|---|
@@ -107,7 +117,7 @@ Các vị trí TV1 bắt buộc đọc trên **HEAD được chốt khi vào cod
 | `X-IF-08` / `P2A-IF-02/03` | TV2 Inbox/TV3 Verifier → TV5 Finalizer; TV1 caller | Durable candidate locator chỉ **unlocked**, không giữ Inbox row lock khi chờ Listing/Job; canonical sequence và progress pagination | Sau mỗi lock thực hiện fresh re-query/read-committed, no false `SYSTEM_FAULT` do batch limit |
 | `X-IF-09` / `P2A-IF-04` | TV1/TV3/TV5 + owner | Cache RAM sau cold Simulator restart không tự phát hiện changed immutable dispatch cùng `attempt_id` | `P2E-CACHE-GAP-01 = NEEDS_OWNER_DECISION`; SQL exactly-once finalization **không thay thế** 409 conflict guarantee |
 
-**Đặc biệt `X-01`:** `Phase_2D_v0.9.md` có pseudocode dùng **`reserved_gpu_count`**, nhưng cột đã được duyệt là **`gpu_listings.allocated_gpu_count`**. TV2/TV4 phải ký nhận errata và chỉ triển khai đúng cột hiện hành, **không tạo cột mới**. Handoff TV1 không tự sửa file 2D đã được chốt.
+**Đặc biệt `X-01`:** `Phase_2D_v0.9.md` có pseudocode dùng **`reserved_gpu_count`**, trong khi schema hiện tại đặt tên cột `gpu_listings.allocated_gpu_count`. Open PR #45 ghi TV4 xác nhận dùng tên thứ hai và yêu cầu TV2/lead xác nhận. Trạng thái ở handoff này vẫn `PENDING_ACK`; TV1 không sửa file 2D đã được chốt và không đề xuất tạo cột mới.
 
 **Khác biệt hai cách retry khi Listing PAUSED:** (1) cùng Client/key/body gửi lại TX-SUBMIT trả Job gốc HTTP `200` dù Listing PAUSED — **đã có owner decision** trên #39; (2) một Job đã `RUNNING` được retry dispatch cùng Attempt khi Listing PAUSED — `P2D-OPEN-02`. Không phát sinh **allocation mới** trên Listing PAUSED.
 
@@ -183,7 +193,7 @@ Các vị trí TV1 bắt buộc đọc trên **HEAD được chốt khi vào cod
 
 | Gate | Trước khi mở | State tại lần review này |
 |---|---|---|
-| `G0 BASELINE` | Accepted Phase 1 main SHA/real DB revision; PR39 audit/Submit↔Pause race/test credential issue disposition; reviewer/human gates; giữ C1 trước production | `PENDING`: #39 Draft/unmerged |
+| `G0 BASELINE` | Phase 1 main SHA/PR #39 final-head CI đã ghi nhận; applied DB revision/roles cần xác minh theo TV2; theo dõi độc lập role-rejection audit, human review và C1 production gate | `PHASE1_BASELINE_RECORDED / DB_AND_REVIEW_FOLLOW_UP_OPEN` |
 | `G1 DESIGN_ACK` | X-01 errata; X-02 cold-restart contract và X-03 key compromise owner decisions; X-IF01..09 source/consumer ACK; DB/key readiness/budget parameters | `PENDING_ACK / NEEDS_OWNER_DECISION` |
 | `G2 CODE_AUTH` | **Quyết định nhóm trưởng cho phép code riêng** có scope, base và nhánh, review class, rollback plan | `NOT_AUTHORIZED` |
 | `G3 IMPLEMENT_AND_TEST` | Sau G2, triển khai công việc `TV1-P2A-07..13`, test T01..T16 và TV2–TV5 integration | `NOT_RUN` (không yêu cầu PASS trước khi viết code) |
