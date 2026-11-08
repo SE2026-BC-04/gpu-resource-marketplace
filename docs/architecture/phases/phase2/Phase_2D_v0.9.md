@@ -1,15 +1,15 @@
 # Phase 2D — FIFO Scheduling and Listing Capacity (TV4) — v0.9 Deep Review
 
-> **PR #39 alignment addendum (2026-11-07):** See final Appendix PR39-D. Existing conditional owner approvals stay in force. HEAD `44579ed84605` is a draft Phase 1 PR, not merged; no Phase 2 code authorization. Historical earlier OPEN labels are superseded only where explicitly recorded below.
+> **Current review snapshot (2026-11-08):** Phase 1 PR #39 is merged; accepted `main` is `bee832eaf5463df20f6c6815174322871eb6685a` (see §7.1). The 2026-11-07 ledger records historical conditional decisions. This revision is **SELF_REVIEWED / AWAITING_CROSS_REVIEW**, not a completed owner/consumer ACK or coding authorization. Follow the docs-first workflow in §7.8.
 
 > **Repository:** `SE2026-BC-04/gpu-resource-marketplace`  
-> **Version:** `0.9-deep-review` (extends 0.8 PR #39 alignment; approved baseline remains conditional), updated 2026-11-07  
+> **Version:** `0.9-docs-review-20261108` (stable filename retained; approved baseline remains conditional), updated 2026-11-08
 > **Existing baseline status:** `P2D-GATE-01 = APPROVED_DESIGN_CONDITIONAL`; **new v0.9 changes:** `PROPOSED_FOR_OWNER_REVIEW / PENDING_ACK / NOT_APPROVED_FOR_IMPLEMENTATION`.  
 > **Important:** These five Phase 2A-2E files are *design work packages for five team members*. Assignment below proposes documentation ownership; it does not approve new implementation rights, modify the architectural ownership of API/Manager/Simulator, or authorize coding.  
-> **Phase 2 start gate:** Phase 1 integration must be accepted on `main`, affected interfaces reviewed, and coding separately authorized.
+> **Phase 2 start gate:** self-review and revise design → docs PR/cross-review → leader decision and merge docs → implementation by task. No independent policy, application/test code or runtime activation before the applicable docs/dependency gates are approved.
 
 > **Proposed documentation owner:** TV4 - Listings owner (`VietNguyen865`)  
-**Review conclusion:** `DOCUMENTATION_REMEDIATED / 14 P2 + 3 P3 FINDINGS / INTERFACE_ACK_PENDING / TESTS_NOT_RUN` — no implementation authorization.
+**Current review conclusion:** `SELF_REVIEWED / DOC_CORRECTIONS_PROPOSED / CROSS_REVIEW_PENDING / PHASE2_RUNTIME_NOT_RUN`. The earlier count of 14 P2 + 3 P3 findings is historical; it is not approval of this revision.
 
 ## 1. Goal and boundary
 
@@ -167,10 +167,12 @@ TV2 validates PostgreSQL lock/migration/transaction semantics; TV5 validates Job
 
 ## Approved design references
 
-- [SRS](../../requirements.md), [FR](../../functional-requirements.md), [NFR](../../non-functional-requirements.md).
-- [System Architecture](../system-architecture.md), [Module Design](../../design/module-design.md), [Database Design](../../design/database-design.md), [API Contract](../../design/api-contract.md), [Test Design](../../design/test-design.md).
-- [ADR-001 to ADR-008](../decisions/), especially ADR-002 (data access), ADR-003 (Outbox/Inbox), ADR-004 (signed result) and ADR-005 (retries and deadlines).
-- [Phase 1E](phase1e_job_submission_queue.md), [GPU-005-B reference proposal](phase1e_gpu005_reference_technical_specification.md), [Phase 2 readiness](../../development/phase2_readiness_and_handoffs.md), [Phase 2 decisions](../../development/phase2_decision_register.md) and [Phase 2 test plan](../../design/phase2_test_and_acceptance_plan.md).
+- [SRS](../../../requirements.md), [FR](../../../functional-requirements.md), [NFR](../../../non-functional-requirements.md).
+- [System Architecture](../../system-architecture.md), [Module Design](../../../design/module-design.md), [Database Design](../../../design/database-design.md), [API Contract](../../../design/api-contract.md), [Test Design](../../../design/test-design.md).
+- [ADR-001 to ADR-008](../../decisions/), especially ADR-002 (data access), ADR-003 (Outbox/Inbox), ADR-004 (signed result) and ADR-005 (retries and deadlines).
+- [Phase 1E](../phase1e_job_submission_queue.md), [GPU-005-B reference proposal](../phase1e_gpu005_reference_technical_specification.md) and [TV4 handoff](../../../development/handoffs/phase2/HANDOFF_TV4_Phase2D_v1.1.md).
+
+The formerly linked `phase2_readiness_and_handoffs.md`, `phase2_decision_register.md` and `phase2_test_and_acceptance_plan.md` do not exist on this `main`. Use the actual approved sources above, §7.5–7.8 and the handoff; absent files are not approval/evidence.
 
 Only the existing approved baselines are normative. Phase 2D holds `APPROVED_DESIGN_CONDITIONAL`; `P2D-OPEN-01` (one Listing per transaction), `P2D-OPEN-02` (PAUSED transport replay), and `P2D-OPEN-03` (configurable 2-second Scheduler scan) are **APPROVED design decisions**; numeric work/batch budget and pool size remain `PENDING`. Phase 2A/2B/2C have only conditional design approvals. This document does not authorize coding or execute any Phase 2 tests (`NOT_RUN`).
 
@@ -207,7 +209,7 @@ Only the existing approved baselines are normative. Phase 2D holds `APPROVED_DES
 
 Owner decision on PR #39 explicitly resolves the earlier Submit/PAUSED ambiguity: for a **retained** `(client_id, idempotency_key)` and identical normalized body, TX-SUBMIT returns the original Job with HTTP 200 even if the Listing is now PAUSED. Changed body -> existing 409 conflict; new key -> ACTIVE and guarded admission required. Phase 2 should not reopen this as an unapproved contract change. This is distinct from `P2D-OPEN-02`: a PAUSED Listing permits repair dispatch of an *already RUNNING* Attempt but not a new allocation.
 
-TV4's independent PR #39 review still finds missing **barrier-controlled Submit vs Pause/Resize tests in both commit orders**. Treat this as Phase 1 acceptance evidence gap (not a demonstrated implementation failure), and reuse the test harness for the more demanding Phase 2 Pause/Cancel/Allocate races.
+**Updated 2026-11-08:** the four barrier-controlled Submit ↔ Pause/Resize cases were supplied and passed in [Phase 1 head `3482bce` CI](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42385995533), as recorded in [TV4's re-review](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39#pullrequestreview-5813339600). Reuse that harness for Phase 2; these are not allocation tests. The remaining [early role-rejection audit finding](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39#discussion_r4502535120) is a separate Phase 1 follow-up requiring lead disposition, not a reason to report the old barrier gap as still missing.
 
 ### D2. Scheduler fairness without violating strict per-Listing FIFO
 
@@ -234,7 +236,7 @@ The approved planned K1->K2 policy waits for related RUNNING work to quiesce. A 
 | `P2D-RACE-07` | rotation races allocation | no in-flight job bound to unavailable key; no deadlock |
 | `P2D-RACE-08` | same-key TX-SUBMIT after PAUSED | original Job HTTP 200; new key remains rejected |
 
-All are planned against **real disposable PostgreSQL**, not PASS evidence. Keep Phase 1 Submit/Resize race on PR #39 as a separately tracked acceptance action.
+All are planned against **real disposable PostgreSQL**, not PASS evidence. The Phase 1 Submit/Resize barriers are baseline evidence only; every Phase 2 allocation race above still requires its own execution evidence.
 
 ## 7. Deep-review technical closure — v0.9 (`PROPOSED_FOR_CROSS_OWNER_ACK`)
 
@@ -244,7 +246,9 @@ All are planned against **real disposable PostgreSQL**, not PASS evidence. Keep 
 
 | Item | Verified evidence/baseline | Boundary of that evidence |
 |---|---|---|
-| PR #39 | [`GPU-INT-01` PR #39](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39), reviewed HEAD `44579ed846051dee9000078e1afd7e8ea62e7358`; **Draft, unmerged** at review | Phase 1 Auth → Listing → Submit → View → Cancel, not Phase 2 `TX-ALLOCATE` or Scheduler |
+| Current `main` | `bee832eaf5463df20f6c6815174322871eb6685a`, merged docs intake [#44](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/44) | Contains five Phase designs and five handoffs; merge is not completion of their cross-review/coding gates |
+| PR #39 | [`GPU-INT-01` PR #39](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39) **merged** by TV1 as `aff538f79997c6e2bfcf359b176a82f2cd9ecc53`; source head `3482bce3cc9726543b9345a5224d8db1b9fc6454`. #42 is included transitively | Phase 1 Auth → Listing → Submit → View → Cancel, not Phase 2 `TX-ALLOCATE` or Scheduler; audit follow-up remains separately recorded in D1 |
+| Migration baseline | Read-only Alembic graph on this main: one head `0005_listing_d7` | No DB migration or native Manager-role verification was run for this docs review; TV2 must freeze the actual Phase 2 migration/grants |
 | Listing implementation | `backend/src/gpu_marketplace/listings/service.py`: Listing-first lock for PATCH/Pause/Resume, hardware lock on nonterminal Jobs, downsize check against reserved count and max still-QUEUED demand | No Manager allocation API exists in this file; do not retrofit allocation into Listing routes |
 | PostgreSQL Listing adapter | `backend/src/gpu_marketplace/repositories/listings.py`, via merged #31; SQLAlchemy `READ COMMITTED` UoW and D7 guard | Must not infer Manager grants or native `session_user` proof from this API adapter; separate role verification is pending |
 | Phase 1 TX-SUBMIT | `backend/src/gpu_marketplace/repositories/job_submit.py` on #39: Listing `FOR UPDATE`; replay existing retained key/body even after PAUSED; creates Job+reference transactionally | New API Job submission does **not** allocate GPU, create Attempt/Outbox or guarantee execution |
@@ -276,13 +280,14 @@ The following is **pseudocode**, not executable SQL or a new frozen Python signa
 allocate_one_listing(listing_id) -> AllocationDecision
   one TV2 native gpm_manager_app Session / one READ COMMITTED UoW
   begin; lock Listing[listing_id] before querying or locking any Job
-  re-read Listing status and allocated/total capacity; require ACTIVE
+  re-read Listing status and allocated/total capacity
+  if not ACTIVE: no mutation -> INACTIVE_LISTING (cleanup/result mapping pending ACK)
   select first still-QUEUED Job by enqueue_seq ASC LIMIT 1 FOR UPDATE
       (NEVER SKIP LOCKED on Job rows)
   if none: commit no-op -> EMPTY_QUEUE
   if head GPUs > total - allocated: commit no-op -> BLOCKED_CAPACITY(head_id)
   trusted t = clock_timestamp() AFTER required locks
-  conditional update Listing reserved_gpu_count += head.requested_gpu_count
+  conditional update Listing allocated_gpu_count += head.requested_gpu_count
   conditional update exact Job QUEUED -> RUNNING, started_at=t
   insert exactly one active Allocation for Job; one stable Execution Attempt
   insert one EXECUTE_JOB Outbox event, immutable dispatch payload and due time
@@ -291,7 +296,11 @@ allocate_one_listing(listing_id) -> AllocationDecision
   any failed insert/guard -> rollback entire UoW; NO remote HTTP inside DB TX
 ```
 
-**Proposed result categories** to prevent competing implementations: `ALLOCATED`, `EMPTY_QUEUE`, `BLOCKED_CAPACITY`, `INACTIVE_LISTING`, `LOCK_BUSY`, `DEPENDENCY_UNAVAILABLE` and `COMMIT_OUTCOME_UNKNOWN`. Typed data may include `listing_id`, `job_id`/`attempt_id`/`outbox_event_id` only when safely known. TV1+TV2+TV4+TV5 must approve names/types, exception-to-outcome mapping and whether each *no-op* completes an explicit commit or rollback; until then the interface is `PENDING_ACK`.
+**Erratum X-01 (proposed correction):** `reserved_gpu_count` in the previous §7.3 pseudocode was a typo. The field is `gpu_listings.allocated_gpu_count` in Database Design §11.3 A, the actual schema and TV2/TV4 handoffs. This revision aligns the pseudocode; no column is added/renamed. TV2+TV4 cross-review and lead confirmation of the correction remain pending.
+
+**Proposed result categories** to prevent competing implementations: `ALLOCATED`, `EMPTY_QUEUE`, `BLOCKED_CAPACITY`, `INACTIVE_LISTING`, `LOCK_BUSY`, `DEPENDENCY_UNAVAILABLE` and `COMMIT_OUTCOME_UNKNOWN`. Typed data may include `listing_id`, `job_id`/`attempt_id`/`outbox_event_id` only when safely known. TV1+TV2+TV4+TV5 must approve exact names/types, missing-Listing behavior and exception-to-outcome mapping; the Python port is `PENDING_ACK`.
+
+**No-op baseline:** approved Database Design §11.3 A already specifies **COMMIT no-op** for an empty queue or insufficient head capacity. Preserve that behavior; it is not an open choice to substitute a rollback. TV2 must align the port/cleanup semantics with that source. Cleanup for inactive/missing/lock-busy outcomes and resource release on every exit still need explicit ACK. A policy-only `ELIGIBLE` assessment, if used later, is not `ALLOCATED` and cannot authorize dispatch.
 
 **Mandatory correctness guards:** `jobs.id`, `jobs.listing_id`, `jobs.worker_id` remain immutable; one Job has **at most one** Allocation, Attempt and EXECUTE_JOB event (`UNIQUE`/FK as specified by Database Design); `allocated_gpu_count` reflects `SUM(active allocations.gpu_count)` after commit; no caller may open a second Session to finish an in-flight partial transaction. Do not hand a live ORM entity/locked Session across `asyncio.to_thread`/executor or across TV1/TV2 service boundaries. The short DB UoW is owned entirely within one synchronous worker call.
 
@@ -350,9 +359,11 @@ Existing `P2D-TX-01..12`, `P2D-RACE-01..08`, `P2D-SCHED-01..05`, `DBTX-*` and `A
 | `D-IF-06` | Cancel/Pause/Capacity edit vs TX-ALLOCATE barriers and error mapping | TV2 + TV4 + TV5 | `PENDING_ACK` |
 | `D-IF-07` | Worker key readiness, planned rotation quiescence and emergency incident policy | TV2 + TV3 + TV4 + TV5 | `PENDING_ACK / OWNER_DECISION_REQUIRED` |
 | `D-IF-08` | Allocation release/finalization/timeout counter reconciliation and retry | TV1 + TV2 + TV4 + TV5 | `PENDING_ACK` |
-| `D-IF-09` | Phase 1 PR #39 audit, R3 Submit-Pause/Resize barrier and baseline acceptance | TV1 + TV2 + TV4 + TV5 | `PENDING_PHASE1_GATE` |
+| `D-IF-09` | Acknowledge merged main/Phase 1 barrier evidence and record disposition of remaining audit follow-up | TV1 + TV2 + TV4 + TV5 | `PENDING_ACK / AUDIT_DISPOSITION_PENDING` |
 
-**No Phase 2 code gate is opened by this document.** Before implementation: (i) Phase 1 accepted `main` SHA + single Alembic head + role setup, including disposition of PR #39's actual open findings; (ii) TV1/TV2/TV4/TV5 ACK on the concrete `allocate_one_listing` port and tested lock/commit boundary; (iii) resolved/explicitly gated key signer readiness with TV3/TV5; (iv) bounded scheduler work/pool parameters and tests agreed; (v) separate leader authorization to code Phase 2. Before merge: real PostgreSQL barriers and CI/E2E evidence at exact implementation SHA, all intended `P2D-TX/RACE/SCHED/DRT` tests run with no critical `SKIPPED/BLOCKED`, independent human review, owner approvals and no regressed Phase 1 semantics.
+**Docs gate before code:** finish self-review/corrections, obtain affected source/consumer ACKs and independent cross-review, resolve blocking choices, then obtain the leader's decision and merge the docs PR. This applies to the pure policy too; a prototype or green CI cannot open the gate. Before the relevant code task starts: (i) freeze merged main/migration/role baseline and audit disposition; (ii) ACK the concrete TV2 port and lock/commit boundary for dependent tasks; (iii) resolve signer readiness before allocation integration; (iv) agree scan/work/pool parameters before runtime scanning. Follow §7.8 rather than using one implementation branch for the whole Phase.
+
+**Code merge evidence is per task:** run the acceptance tests applicable to that task at its exact SHA; do not demand unrelated whole-Phase runtime evidence for a policy-only task or label policy tests as PG PASS. Full allocation/Scheduler integration still needs the intended `P2D-TX/RACE/SCHED/DRT` PostgreSQL/CI evidence, no unresolved critical skipped/blocked case, human review and no Phase 1 regression.
 
 **Evidence log template:**
 
@@ -373,4 +384,26 @@ Owner/consumer ACKs and remaining gaps:
 - **Preserved (owner-approved):** strict per-Listing FIFO, Listing-first Job locking, one Listing per `TX-ALLOCATE`, PAUSED RUNNING dispatch repair, configurable 2s scan, 18 total database tables, 5 runtime services, immutable Job and Attempt identities.
 - **Clarified in v0.9:** split TV1/TV2/TV4/TV5 ownership, proposed scan/cursor semantics, bounded executor limits, typed allocation outcomes, commit-unknown reconciliation, stale Outbox fencing, signer readiness interface and deterministic evidence.
 - **Still undecided:** concrete adapter signature/port, numerical budget/pool limit, complete key-rotation SQL and separate compromised-key response, exact `LOCK_BUSY`/`DEPENDENCY_UNAVAILABLE` retry policy. Preserve as `PENDING` until source/consumer ACK and any required owner change control.
-- **Runtime status:** `NOT_RUN` for all Phase 2D tests; PR #39's Phase 1 CI evidence does not transfer to Phase 2.
+- **Runtime status:** official Phase 2D PG/Scheduler acceptance IDs remain `NOT_RUN`; PR #39's Phase 1 CI and prototype #45's policy unit results do not close those IDs. The prototype remains on hold pending docs approval.
+
+### 7.8. Self-review and docs-first delivery — 2026-11-08
+
+**Workflow:** self-review → `docs/phase2d-design-review` → cross-review/corrections → leader approves and merges docs → one code task/branch/PR at a time. Each subsequent task starts from latest `main`, with its own scoped tests and review; independent tasks may run in parallel only after their design/dependency approval. No self-merge. [Prototype #45 is Draft/HOLD](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/45#issuecomment-6721101443); it is not the docs PR or an approved implementation baseline.
+
+| Self-review finding | Proposed document correction | Cross-review still required |
+|---|---|---|
+| Stale unmerged #39 snapshot and already-supplied Phase 1 barriers | Current SHA/evidence in §7.1 and D1; retain audit follow-up separately | TV1+TV2 acknowledge baseline/disposition |
+| Broken source links after move to `phase2/`; three referenced files absent | Repair actual relative links; point to existing handoff/test design | TV2/TV1 verify source precedence |
+| Wrong `reserved_gpu_count` field | X-01 corrected to actual `allocated_gpu_count` | TV2 + lead confirm erratum |
+| No-op commit described as undecided despite approved DB pseudocode | Preserve EMPTY/BLOCKED COMMIT no-op in §7.3 | TV2 confirm port cleanup/mapping |
+| Earlier handoff says one branch/PR for whole Phase | Docs first, then one branch/PR per code task | TV1 confirms sequence |
+| PENDING labels without a concrete closure question | Questions below; no invented values, ACK or approval | Named producer/consumer owners |
+
+**Questions to close during cross-review (still PENDING):**
+
+1. **TV2 ↔ TV4, with TV1/TV5 (`D-IF-01/02`):** publish/confirm the proposed `allocate_one_listing(listing_id)` input and safe outcome fields. Listing ID is a locator, not permission to use a UI/stale head; SQL selects the authoritative head under locks. Which IDs/sequence/free capacity are returned for each outcome, how is a missing Listing handled, and how are lock/statement failures distinguished from unknown COMMIT? Reconciliation must identify the original Job/Attempt/Outbox when safely known, not blindly retry the next head.
+2. **TV1+TV2+TV4 (`D-IF-03/04`):** agree cursor/Listing-only lock-skip semantics and concrete max Listings/work time/executor/pool/SQL timeout budgets, with a disposable-DB measurement plan. The already-approved configurable 2s cadence does not select those values. No new benchmark/SLA is proposed.
+3. **TV2+TV3+TV4+TV5 (`D-IF-07`):** specify atomic signer readiness and quiescent rotation. Merely pausing a discovered set is insufficient if another Listing can be created/resumed meanwhile. Confirm admission/rotation serialization without private-key reads or HTTP under locks; lead decides compromised-key incident handling. No new lock order/table/grant is approved here.
+4. **TV1+TV2+TV5 with TV4 (`D-IF-05/06/08/09`):** ACK same-Attempt PAUSED repair, both-order Cancel/Pause/Resize races and exactly-once release. Record the existing audit follow-up disposition separately from the now-merged baseline and completed Phase 1 barriers.
+
+**Review evidence:** link/file consistency and schema/design comparison only. All Phase 2 runtime, PG races and performance tests remain `NOT_RUN` (signer-dependent scenarios `BLOCKED` until contract approval). Self-review, CI and Codex advice do not count as independent human approval. The docs PR must record exact reviewed SHA, cross-owner ACKs and the leader's closure/merge decision before code resumes.
