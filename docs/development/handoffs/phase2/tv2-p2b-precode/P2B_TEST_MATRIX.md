@@ -36,7 +36,7 @@
 
 ## 3. Additional design-listed tests
 
-`P2B-MIG-01..05`, `P2B-FK-01..05`, `P2B-GUARD-01..10` (see `GUARDS_TRIGGER_PLAN.md`), `P2B-UOW-01..07`, `G-01..06` (`PHASE2_ROLE_GRANTS.md`), plus `P2B-DRT-17` (new, TV3 review): a callback whose first clock read is just before `hard_deadline_at` is never answered `202` with a stored `received_at >= hard_deadline_at` (techniques T-D2 (b) and (c); both outcomes are legal, the forbidden one is "202 and stored late"), paired with TV3's `P2C-DRT-10`; and `P2B-DRT-16` (new): Phase 1 regressions `Submit↔Pause` and `Submit↔Resize` in **both** commit orders stay green after R1/R2.
+`P2B-MIG-01..05`, `P2B-MIG-06` (new, TV3: the unique/exclusion constraints and unique indexes of `result_inbox` are exactly the primary key and `uq_result_inbox_result_id`, plus the `rejection_code` CHECK accepts only the eight listed codes), `P2B-FK-01..05`, `P2B-GUARD-01..10` (see `GUARDS_TRIGGER_PLAN.md`), `P2B-UOW-01..07`, `G-01..06` (`PHASE2_ROLE_GRANTS.md`), plus `P2B-DRT-17` (new, TV3 review): a callback whose first clock read is just before `hard_deadline_at` is never answered `202` with a stored `received_at >= hard_deadline_at` (techniques T-D2 (b) and (c); both outcomes are legal, the forbidden one is "202 and stored late"), paired with TV3's `P2C-DRT-10`; and `P2B-DRT-16` (new): Phase 1 regressions `Submit↔Pause` and `Submit↔Resize` in **both** commit orders stay green after R1/R2.
 
 `P2B-GUARD-04` is extended with the same Outbox cases (the CHECKs `ck_execution_outbox_lease_pair`, `ck_execution_outbox_state_lease`, `ck_execution_outbox_acked_at` reject a `CLAIMED` row without a lease and an `ACKED`/`PENDING`/`EXHAUSTED` row that keeps one).
 

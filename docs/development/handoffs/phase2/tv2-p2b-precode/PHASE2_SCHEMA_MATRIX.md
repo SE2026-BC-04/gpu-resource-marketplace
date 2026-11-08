@@ -72,7 +72,7 @@ Index: `ix_execution_outbox_due (next_retry_at, event_id) WHERE state IN ('PENDI
 | `envelope_sha256` | `bytea` | NN | `octet_length = 32` |
 | `received_at` | `timestamptz(6)` | NN | **[Δ] `DEFAULT clock_timestamp()`; API has no INSERT grant on the column** (see below) |
 | `state` | `varchar(12)` | NN, `'PENDING'` | `PENDING`,`ACCEPTED`,`REJECTED` |
-| `rejection_code` | `varchar(64)` | nullable | redacted code, no secrets |
+| `rejection_code` | `varchar(64)` | nullable | redacted code, no secrets; **[Δ] `ck_result_inbox_rejection_code`** (TV3 action 1): `COALESCE(((state = 'REJECTED') = (rejection_code IS NOT NULL)) AND (rejection_code IS NULL OR rejection_code IN ('INVALID_STRUCTURE','UNSUPPORTED_SCHEMA_VERSION','UNKNOWN_KEY','KEY_WORKER_MISMATCH','CONTEXT_MISMATCH','INVALID_SIGNATURE','NOT_SELECTED','ALREADY_TERMINAL')), false)`. The first six are TV3 verifier verdicts (proposal `PROPOSED_FOR_ACK`, to be frozen in TV3's PR #49); the last two are TV2 housekeeping codes. No free-form code can be stored |
 | `processed_at` | `timestamptz(6)` | nullable | |
 
 Constraints (from §9.2): `(bound_job_id IS NULL) = (bound_attempt_id IS NULL)`; `state <> 'PENDING' OR bound_job_id IS NOT NULL`; `(state = 'PENDING') = (processed_at IS NULL)`.
