@@ -1,12 +1,12 @@
 # Phase 2C - Internal Authentication and Signed Result Verification (TV3)
 
-> **Review v0.9 (2026-11-07):** Deep document review of v0.8 against accepted ADR-003/004/005, API Contract §13, Database Design §§9/11, Phase 2A v0.9 and Phase 2B v1.3. Earlier owner-approved Phase 2C design choices remain conditionally approved; the additional Appendix DR-C below is **PROPOSED_FOR_ACK**, not a unilateral architectural change. PR #39 at `44579ed84605` is Phase 1 Draft, not an approved Phase 2 runtime.
+> **Current review snapshot (2026-11-08):** Phase 1 PR #39 is merged; accepted `main` is `bee832eaf5463df20f6c6815174322871eb6685a` (see DR-C1). This revision is **SELF_REVIEWED / AWAITING_CROSS_REVIEW**: it corrects stale baseline text and links and records the TV3 self-review in §6. It is not an owner/consumer ACK or a coding authorization. The 2026-11-07 deep review (Appendix DR-C) stays `PROPOSED_FOR_ACK`.
 
 > **Repository:** `SE2026-BC-04/gpu-resource-marketplace`  
-> **Document version:** `v0.9-DEEP-REVIEW` (revises local v0.8; inherited `P2C-GATE-01 = APPROVED_DESIGN_CONDITIONAL`, updated 2026-11-07)  
+> **Document version:** `v0.9-docs-review-20261108` (stable filename retained; inherited `P2C-GATE-01 = APPROVED_DESIGN_CONDITIONAL`), updated 2026-11-08  
 > **Status:** `APPROVED_DESIGN_CONDITIONAL / DOCUMENTATION_ONLY / NOT_APPROVED_FOR_IMPLEMENTATION` (owner-approved P2C-GATE-01; technical prerequisites below remain `PENDING`)  
 > **Important:** These five Phase 2A-2E files are *design work packages for five team members*. Assignment below proposes documentation ownership; it does not approve new implementation rights, modify the architectural ownership of API/Manager/Simulator, or authorize coding.  
-> **Phase 2 start gate:** Phase 1 integration must be accepted on `main`, affected interfaces reviewed, and coding separately authorized.
+> **Phase 2 start gate (team process, 2026-11-08):** self-review and revise design → docs PR into `main` and cross-review → leader decision and merge of the docs → code one task = one branch = one PR. No Phase 2 code before the docs and the dependencies a task needs are approved.
 
 > **Proposed documentation owner:** TV3 - Authentication and security owner (`giakhanh-hub`)
 
@@ -136,7 +136,7 @@ The following are **design acceptance requirements** for later implementation, *
 
 **Open before implementation:** (i) exact verifier/result typed interface and owner ACKs; (ii) exact DB key-rotation lock/provisioning transaction and runtime key refresh; (iii) concrete secret-injection/ingress protection in Compose; (iv) emergency compromise runbook; (v) integration evidence. None changes frozen ADR-004 V1 bytes or introduces another database table.
 
-**Recorded historical gate:** `P2C-GATE-01 = APPROVED_DESIGN_CONDITIONAL`. Current review step: **owner review of Phase 2C v0.9**, after conditional reviews of Phase 2A v0.9 and Phase 2B v1.3; Phase 2D follows only if the owner accepts this revision. Do not begin Phase 2 implementation until separate authorization, Phase 1 acceptance and requisite human ACKs.
+**Recorded historical gate:** `P2C-GATE-01 = APPROVED_DESIGN_CONDITIONAL`. **Current review step (2026-11-08):** docs-first cross-review of this file and the TV3 handoff (§6), in parallel with the Phase 2A/2B/2D/2E docs PRs. Phase 1 acceptance on `main` is done (#39 merged). Do not begin Phase 2 implementation until the docs are approved and merged by the leader and the dependencies of the specific task are ACKed.
 
 ## 3. Accepted V1 receipt semantics
 
@@ -161,12 +161,85 @@ The following are **design acceptance requirements** for later implementation, *
 - **Status alignment (2026-11-07):** GPU-005-B public `demo-v1-public1` algorithm, nine-field mock output, V1–V4 fixtures and version/least-privilege policy were conditionally approved **in the local Phase 2E design package** (`P2E-GPU005B-GATE-01` and `P2E-GATE-01`). GitHub PR #39 approves only Phase 1 protected-reference creation; Phase 2 Simulator/output compatibility has **not** been synchronized into GitHub or tested. TV3 must preserve ADR-004 V1 signed payload and should not implement the reference generator inside authentication.
 - **Docs exit:** signed-receipt and ingress matrices with concrete negative-test design and owner ACKs. **Runtime status:** `NOT_RUN`.
 
+## 6. TV3 self-review and docs-first delivery (2026-11-08)
+
+**Workflow (team process notice 2026-11-08):** self-review → branch `docs/phase2c-tv3-design` → docs PR into `main` → cross-review (priority pairs **TV2 ↔ TV3** callback/Inbox and **TV3 ↔ TV5** Ed25519/Signed Result/Simulator; TV1 checks compatibility) → corrections → leader decision and merge → code **one task = one branch = one PR** from the latest `main`. No self-merge, no push to `main`.
+
+**Method:** this file and the TV3 handoff were compared with API Contract §13.2–13.3, ADR-004 §§3.2–3.4, ADR-005 §2.1 and the token rules, Database Design §§5, 12, 11.3 (`TX-INBOX-INGRESS`, `TX-FINALIZE`) and the TV2 pre-code proposals in #46 @ `517942f` (`INBOX_DUPLICATE_PRIVILEGES.md`, `P2B_UOW_INTERFACES.md`, `OPEN_DECISION_REGISTER.md`). Documentation comparison only; no code or test was run.
+
+### 6.1. Self-review findings and corrections in this revision
+
+| ID | Finding | Correction in this revision | Still needs |
+|---|---|---|---|
+| `S-01` | Stale baseline: #39 described as an unmerged Draft; #42 as a future change | Header, §2.5 and DR-C1/DR-C6 updated to `main@bee832e`, #39 merge `aff538f`, Alembic head `0005_listing_d7` | TV1 confirms the baseline |
+| `S-02` | 14 relative links broken after the move into `phase2/`; three referenced files do not exist | Links repaired; absent files named as absent | — |
+| `S-03` | ADR-004 §3.3 V1 JSON Schema (accepted) was not cited as the parser's normative reference | Cited in the references; the strict parser must enforce it **plus** duplicate-member rejection before dict conversion, which a JSON Schema validator cannot see | TV5 confirms the signer emits schema-valid envelopes |
+| `S-04` | Handoff prescribed one branch for the whole TV3 work | Handoff §5/§9 aligned with one task = one branch = one PR | TV1 confirms |
+| `S-05` | HTTP error names differ across sources: API Contract §13.2 says `409 RESULT_ID_COLLISION` and `404 RESULT_CONTEXT_NOT_FOUND`; Database Design pseudocode says `RESULT_ID_CONFLICT`/`LATE_RECEIPT`; #46 `B-IF-02` writes `409 RESULT_ID_CONFLICT` and maps `Ineligible` to "no row, redacted log" without an HTTP status | Mapping proposed in §6.2; the **API Contract names are normative** for HTTP; DB/port names stay internal | TV2 aligns `B-IF-02` text; TV5 confirms sender handling |
+| `S-06` | No callback body bound exists in API Contract §13.2; #46 `D-07` asks TV3 for the maximum size | Proposal in §6.3 (no new HTTP status) | TV1 + TV5 ACK (`C-IF-02`) |
+| `S-07` | Whether 401/404/409/422 paths store an unbound REJECTED Inbox row is unclear: Database Design allows retained rejected rows and an unbound purge, the API path does not need them; #46 `D-08` | TV3 position in §6.3 | TV5 ACK; TV2 records in `D-08` |
+| `S-08` | Duplicate detection: DR-C2 here says SHA-256 is "only a prefilter, never the sole equality oracle"; #46 `D-01` asks the lead to accept SHA-256 equality with a stored-hash CHECK | TV3 security input in §6.3; DR-C2 text is **not** changed until the lead decides | Lead decides `D-01` |
+| `S-09` | Where the signature is verified: Database Design `TX-FINALIZE` verifies inside the finalize UoW; DR-C3 allows provisional verification outside it | Clarified in §6.3: both are compatible because the verifier is pure CPU on bounded bytes | TV1 + TV5 ACK (`C-IF-06`) |
+| `S-10` | Database Design table 5 lists `worker_public_keys` as "Registry / API provision", while Appendix C2 requires a controlled provisioning identity that the `gpm_api_app` request path cannot use | Recorded as a question; no grant chosen here | TV2 (+ `D-12` provisioning) |
+| `S-11` | Signer readiness used by TV4 `TX-ALLOCATE` (`D-IF-07`) had no TV3 proposal | Proposal in §6.4 | TV2 + TV4 + TV5 ACK (`C-IF-07/08`) |
+
+### 6.2. Proposed callback outcome mapping (`C-IF-02`, `C-IF-03`; `PROPOSED_FOR_ACK`)
+
+HTTP names come from API Contract §13.2 and are not changed. Port names are TV2's `B-IF-02` proposal.
+
+| Stage | Condition | Port result (TV2) | HTTP (API Contract §13.2) | Inbox row |
+|---|---|---|---|---|
+| Before UoW (TV3) | Missing, malformed, wrong-direction or end-user token | — | `401` | none |
+| Before UoW (TV3) | Body over bound, wrong `Content-Type`, invalid UTF-8/JSON, duplicate member, schema or wire-format violation | — | `422 INVALID_SIGNED_ENVELOPE` | none |
+| In UoW | Same `result_id`, identical bytes and bound context | `ExactDuplicate` | `202 DUPLICATE` | none new; original `received_at` |
+| In UoW | Same `result_id`, different bytes or context | `Collision` | `409 RESULT_ID_COLLISION` | none |
+| In UoW | Claimed Job/Attempt unknown or not bindable | `Ineligible(unbound)` | `404 RESULT_CONTEXT_NOT_FOUND` | none |
+| In UoW | Job not `RUNNING`, stale attempt, or `received_at >= hard_deadline_at` | `Ineligible(not_running \| late)` | `409 RESULT_NOT_ACCEPTABLE` | none |
+| In UoW | New, bound, on-time candidate committed | `Stored` | `202 STORED` | one `PENDING` row |
+| Commit | Outcome unknown, reconcile probe says `SAME` | `CommitOutcomeUnknown` → reconcile | `202 STORED` | the committed row |
+| Commit / DB | Outcome unknown and not reconciled, or DB unavailable | `CommitOutcomeUnknown` / `DependencyUnavailable` | `503` (no false durable success; ADR-005 retry) | unknown → sender retries the same bytes |
+
+A schema-valid envelope with a wrong Ed25519 signature is **not** rejected at ingress (`202 STORED`, later `REJECTED` by the Manager), as already approved.
+
+### 6.3. TV3 positions on open questions (proposals, not decisions)
+
+1. **Body bound (`S-06`, #46 `D-07`).** A V1 envelope is a fixed 3-key object around an 11-field payload, depth 2, a few hundred bytes. Proposal: reuse the Phase 1 approved mechanism (declared and streamed byte count, strict parser) with **16,384 raw bytes inclusive** and **at most 4 object/array levels counting the root**, and map every bound or parse failure to the existing `422 INVALID_SIGNED_ENVELOPE`. This needs **no API Contract change**: §13.2 already defines `422`, and §13.3 already tells the sender not to repeat an unchanged `422` payload. Using Phase 1's `413`/`400` instead would add callback statuses and requires change control. Values are `PROPOSED_FOR_ACK` by TV1 + TV5.
+2. **Unbound rejected rows (`S-07`, #46 `D-08`).** Proposal: **no Inbox row** for `401`, `422`, `404` or `409`; a redacted structured log only (route, status, stable reason, request ID; never body, token or key). Reason: the Manager cannot use such rows, they add an API write path and retention work, and rejection is already deterministic from the response. `TX-UNBOUND-INBOX-PURGE` then stays a no-op safeguard. TV5 ACK needed.
+3. **SHA-256 equality (`S-08`, #46 `D-01`).** Security input for the lead: with the API hashing the exact received bytes and a DB `CHECK` binding `envelope_sha256` to `original_envelope_raw`, a different body with the same SHA-256 would require a second-preimage attack, and the sender must already hold `SIMULATOR_CALLBACK_TOKEN`. TV3 therefore **does not object** to option C. If the lead accepts it, the DR-C2 sentence "the SHA-256 is only a prefilter, never the sole equality oracle" must be updated in the same docs cycle. Decision: lead.
+4. **Same-`result_id` race (#46 `D-02`).** TV3 accepts TV2's `INSERT ... ON CONFLICT (result_id) WHERE result_id IS NOT NULL DO NOTHING` followed by a probe in a new statement. It needs no extra privilege, and the unknown-commit rule (probe in a new transaction, never re-insert blindly) is kept.
+5. **Verification location (`S-09`).** The TV3 verifier is a pure function over bounded bytes (≤ the bound above) and a trusted 32-byte key, without I/O. TV1/TV5 may call it **inside** the finalize UoW, as in Database Design `TX-FINALIZE`; if they call it outside, the result is provisional and the finalizer rechecks bytes, hash, bound context and `received_at < hard_deadline_at` from the DB, as `B-IF-07` already states.
+
+### 6.4. Signer readiness for allocation (`C-IF-07/08`, TV4 `D-IF-07`; `PROPOSED_FOR_ACK`)
+
+- Readiness inside `TX-ALLOCATE` is decided **only from committed DB state**: the Worker has **exactly one** `worker_public_keys` row with `retired_at IS NULL`, read under the existing locks. Zero or ambiguous → fail closed: no allocation, typed `Blocked` outcome, no secret in logs.
+- That the Simulator's private key matches that public key is proven by TV5 at provisioning and at Simulator startup (sign-and-verify self-check against the registered public key), **not** by an HTTP call during allocation.
+- Planned K1→K2 rotation needs one **per-Worker serialization point** shared by Listing create/resume, `TX-ALLOCATE` for that Worker and key activation; pausing a discovered set of Listings alone leaves a read-then-update gap. TV2 proposes the lock and its place in the global order; no new table or status.
+- K1 is retired, never deleted, while evidence references it (`P2C-KEY-03/04`).
+- Suspected compromise stays `NEEDS_OWNER_DECISION` (`C-IF-09`); TV3 does not choose an incident policy here.
+
+### 6.5. Questions to close during cross-review (still `PENDING`)
+
+| # | Question | Who answers |
+|---|---|---|
+| Q1 | Accept the outcome mapping in §6.2, and align `B-IF-02` wording to `RESULT_ID_COLLISION` / `RESULT_CONTEXT_NOT_FOUND` / `RESULT_NOT_ACCEPTABLE`? | TV2, TV5 |
+| Q2 | Accept the body bound in §6.3 item 1 (16,384 bytes, depth 4, all failures `422`)? | TV1, TV5 |
+| Q3 | Accept "no Inbox row for rejected callbacks" (§6.3 item 2)? | TV5, TV2 |
+| Q4 | Accept SHA-256 equality for duplicate detection (`D-01`)? | Lead |
+| Q5 | Accept the readiness rule in §6.4 and name the per-Worker serialization lock? | TV2, TV4, TV5 |
+| Q6 | Which identity provisions `worker_public_keys` (`S-10`, `D-12`)? | TV2, lead |
+| Q7 | Freeze `VerifiedV1Receipt` / `RejectedV1Receipt` fields and the rejection-code enum (`C-IF-06`)? | TV1, TV2, TV5 |
+| Q8 | Key-compromise incident policy (`C-IF-09`) and the cold-restart cache gap (`P2E-CACHE-GAP-01`, #46 `D-16`) | Lead (with TV1, TV5) |
+
+Nothing in §6 changes an approved decision, adds a table, service, status code or dependency, or claims an executed test.
+
 ## Approved design references
 
-- [SRS](../../requirements.md), [FR](../../functional-requirements.md), [NFR](../../non-functional-requirements.md).
-- [System Architecture](../system-architecture.md), [Module Design](../../design/module-design.md), [Database Design](../../design/database-design.md), [API Contract](../../design/api-contract.md), [Test Design](../../design/test-design.md).
-- [ADR-001 to ADR-008](../decisions/), especially ADR-002 (data access), ADR-003 (Outbox/Inbox), ADR-004 (signed result) and ADR-005 (retries and deadlines).
-- [Phase 1E](phase1e_job_submission_queue.md), [GPU-005-B reference proposal](phase1e_gpu005_reference_technical_specification.md), [Phase 2 readiness](../../development/phase2_readiness_and_handoffs.md), [Phase 2 decisions](../../development/phase2_decision_register.md) and [Phase 2 test plan](../../design/phase2_test_and_acceptance_plan.md).
+- [SRS](../../../requirements.md), [FR](../../../functional-requirements.md), [NFR](../../../non-functional-requirements.md).
+- [System Architecture](../../system-architecture.md), [Module Design](../../../design/module-design.md), [Database Design](../../../design/database-design.md), [API Contract](../../../design/api-contract.md), [Test Design](../../../design/test-design.md).
+- [ADR-001 to ADR-008](../../decisions/), especially ADR-002 (data access), ADR-003 (Outbox/Inbox), [ADR-004](../../decisions/ADR-004-signed-result.md) (signed result, including the accepted V1 JSON Schema §3.3 and public vector §3.4) and [ADR-005](../../decisions/ADR-005-retry-timeout-internal-auth.md) (retries, deadlines, service tokens).
+- [Phase 1E](../phase1e_job_submission_queue.md), [GPU-005-B reference proposal](../phase1e_gpu005_reference_technical_specification.md) and the [TV3 handoff](../../../development/handoffs/phase2/HANDOFF_TV3_Phase2C_v1.1.md).
+
+The formerly linked `phase2_readiness_and_handoffs.md`, `phase2_decision_register.md` and `phase2_test_and_acceptance_plan.md` do not exist on `main`. Use the approved sources above, §6 and the handoff; absent files are not approval or evidence.
 
 Only the existing approved baselines are normative. This Phase 2C work package has **conditional design approval only**; unresolved technical interfaces and gates remain pending. Other work packages are reviewed separately. This document does not execute any Phase 2 tests (`NOT_RUN`).
 
@@ -215,14 +288,16 @@ All Phase 2 cryptographic and HTTP runtime tests remain `NOT_RUN`. Existing Phas
 
 ### DR-C1. Source-of-truth and baseline status
 
-| Subject | Correct 2026-11-07 statement | Evidence / remaining action |
+| Subject | Statement (updated 2026-11-08) | Evidence / remaining action |
 |---|---|---|
-| PR #39 | `OPEN / DRAFT`, reviewed head `44579ed846051dee9000078e1afd7e8ea62e7358`, base `1d8b1b2c52b759d99a072c3d0d889b375083a8c4` | [PR #39](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39); four-job [Actions #42350954394](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42350954394) success pertains to **Phase 1** only |
-| Phase 1 authentication | HS256 JWT with shared principal and browser-session path already wired in PR #39 | Do **not** reuse user JWT as internal Bearer or claim internal endpoint tests PASS |
-| Existing Manager | `manager/service.py` is still the foundation idle runner; no Phase 2 verifier/consumer runtime exists at this head | Review implementation only after a separate coding gate |
-| ADR-004 | Immutable V1 payload of exactly 11 fields, JCS RFC 8785, Ed25519, fixed domain prefix, fixed public signature vector | No implicit V2, additional payload fields or alternate wire encoding |
-| GPU-005-B | The Phase 1 reference generator and vector checks exist in PR #39. Local Phase 2E approval of 9-field mock output/algorithm compatibility is conditional and **not yet reflected in GitHub** | Do not use PR #39 to claim Phase 2 runtime compatibility approval |
-| Phase 2B | Deep-reviewed v1.3 proposals cover narrow raw Inbox reads, unique-conflict resolution, historical signer public keys and PostgreSQL-bound timestamps | Require actual TV2/TV3/TV5 interface ACK; no SQL execution yet |
+| Current `main` | `bee832eaf5463df20f6c6815174322871eb6685a`, after docs intake [#44](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/44) (five Phase 2 designs and five handoffs) | Merge of #44 is not completion of their cross-review or coding gates |
+| PR #39 | **Merged** by TV1 as `aff538f79997c6e2bfcf359b176a82f2cd9ecc53` (source head `3482bce3cc9726543b9345a5224d8db1b9fc6454`); PR #42 (Auth browser E2E, role-credential restore) is included transitively | [PR #39](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39); [CI run 42385995533](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42385995533) is **Phase 1** evidence only |
+| Migration baseline | Alembic graph on this `main`: single head `0005_listing_d7` (read-only check, no migration run for this review) | TV2 freezes the Phase 2 migrations and grants (#46) |
+| Phase 1 authentication | HS256 JWT with shared principal and browser-session path wired on `main` | Do **not** reuse user JWT as internal Bearer or claim internal endpoint tests PASS |
+| Existing Manager | `manager/service.py` is still the foundation idle runner; no Phase 2 verifier/consumer runtime exists on `main` | Review implementation only after the docs gate and the task's own approval |
+| ADR-004 | Immutable V1 payload of exactly 11 fields, JCS RFC 8785, Ed25519, fixed domain prefix, accepted JSON Schema (§3.3), fixed public signature vector (§3.4) | No implicit V2, additional payload fields or alternate wire encoding |
+| GPU-005-B | The Phase 1 reference generator and vector checks are on `main` via #39. Phase 2E approval of the 9-field mock output/algorithm compatibility is conditional | Do not use #39 to claim Phase 2 runtime compatibility |
+| Phase 2B | v1.3 on `main`; TV2's pre-code proposals in [#46](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46) (`B-IF-01..09`, `D-01..16`) cover the Inbox probe, collision handling, `received_at` and historical keys | TV3 answers are in §6; actual ACK is given on #46 by file SHA; no SQL executed |
 
 ### DR-C2. Strict callback input, authorization and replay: two distinct validation points
 
@@ -276,7 +351,7 @@ Only TV3's trusted verifier produces a `VerifiedV1Receipt` after signature, wire
 
 **PostgreSQL privileges:** API needs narrowly authorized insert/duplicate-check behavior; Manager needs trusted persisted Inbox/public-key reads and controlled accepted-result inserts; Simulator has **no SQL identity**. PostgreSQL column-level SELECT is not a per-row security policy: choose and review a narrowly scoped function/role boundary or an explicit least-privilege read design, test against real native `gpm_api_app`/`gpm_manager_app` sessions. The Phase 1 reference grants do not imply arbitrary new Phase 2 read or write access. Avoid raw envelope/oracle in audit metadata.
 
-**Repeatable test environment:** use safety-marked disposable PostgreSQL 16 with safe role-password teardown. PR #39 full browser+HTTP+PostgreSQL and four green CI jobs are **Phase 1 evidence**, not `P2C-NET`, `SIG`, `WIRE`, `P2C-REPLAY` or `P2C-KEY` execution. PR #42 is stacked on #39; its future merge may change the accepted integration baseline. After coding permission, cross-runtime signer/verifier tests, actual signed callback HTTP/DB, crash barriers and key rotation races must record exact Git SHA, schema revision and CI run; skipped/blocked tests are not PASS.
+**Repeatable test environment:** use safety-marked disposable PostgreSQL 16 with safe role-password teardown. PR #39 full browser+HTTP+PostgreSQL and four green CI jobs are **Phase 1 evidence**, not `P2C-NET`, `SIG`, `WIRE`, `P2C-REPLAY` or `P2C-KEY` execution. PR #42 merged into #39 and is now part of `main`; tests that rotate role passwords must reuse its restore fixture (`restored_e2e_role_credentials` / `role_credentials.py`). After coding permission, cross-runtime signer/verifier tests, actual signed callback HTTP/DB, crash barriers and key rotation races must record exact Git SHA, schema revision and CI run; skipped/blocked tests are not PASS.
 
 ### DR-C7. Explicit cross-owner interface gates (all `PENDING_ACK`)
 
