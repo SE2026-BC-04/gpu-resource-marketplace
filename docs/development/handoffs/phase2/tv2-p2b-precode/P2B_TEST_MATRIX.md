@@ -36,12 +36,12 @@
 
 `P2B-MIG-01..05`, `P2B-FK-01..05`, `P2B-GUARD-01..10` (see `GUARDS_TRIGGER_PLAN.md`), `P2B-UOW-01..07`, `G-01..06` (`PHASE2_ROLE_GRANTS.md`), plus `P2B-DRT-16` (new): Phase 1 regressions `Submit↔Pause` and `Submit↔Resize` in **both** commit orders stay green after R1/R2.
 
-## 4. Order of work once G1 is granted
+## 4. Order of work once the docs gate (G1) is closed
 
 1. R1 migration + `P2B-DRT-01`, `-15`, `P2B-MIG-*`.
 2. R2 grants/guards + `P2B-DRT-02`, `P2B-GUARD-*`, `G-*`.
 3. UoWs in dependency order: allocate (`-09`), outbox (`-08`), ingress (`-03..05`), candidates (`-06`), finalize/fallback (`-07`, `-10`, `-11`), then runtime budget (`-14`).
-Each step is one reviewable commit group on the single work-package branch.
+Per the lead's 2026-11-08 process notice, **one task = one branch = one PR into `main`**, each cut from the latest `main` and merged as soon as it passes CI and review, without waiting for the whole Phase. The numbered steps above are the intended task slices (step 3 splits further, one PR per transaction port); the order is fixed by dependencies: R1 before R2, R2 before any UoW test that logs in as a native role.
 
 ## 5. Evidence record (per test, per exact HEAD)
 

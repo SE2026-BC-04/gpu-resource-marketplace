@@ -38,7 +38,7 @@ TV2 records what is blocked and who decides. TV2 does **not** close any item tha
 | X-02 | cold restart contract | lead | `B-IF-05/07` reconcile wording |
 | X-03 | key compromise policy | lead, TV3, TV5 | `B-IF-08` |
 | X-04..09 | remaining cross-file findings in `REVIEW_CROSS_PHASE_CONSISTENCY_v1.0.md` | various | the review file is not in this repository snapshot; TV2 has not read X-04..09 and classifies them only after it is shared |
-| G1 | coding authorization (scope, branch, base SHA, reviewers, test cluster, rollback policy) | lead | blocks tasks `TV2-P2B-07..17` |
+| G1 | coding gate. Under the 2026-11-08 process notice it opens when the Phase 2 architecture docs (this package included) are reviewed across owners, approved and merged into `main`; then one task = one branch = one PR into `main`. The handoff's separate G1 record (scope, base SHA, reviewers, test cluster, rollback policy) is satisfied by that notice only if the lead says so | lead | blocks tasks `TV2-P2B-07..17` |
 
 ## 4. Not TV2's to decide (do not do)
 
