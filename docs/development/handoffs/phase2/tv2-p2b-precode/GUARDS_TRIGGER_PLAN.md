@@ -31,7 +31,7 @@ Allow exactly `OLD.state='PENDING' AND NEW.state IN ('ACCEPTED','REJECTED')`, `N
 | `P2B-GUARD-01` | API changes Manager-owned `allocations/execution_outbox/signed_results` data | `42501` |
 | `P2B-GUARD-02` | Manager edits attempt times, Inbox bytes/hash/binding/`received_at`, signed-result bytes | `42501` (no grant) |
 | `P2B-GUARD-03` | Manager releases an allocation twice, or sets `RELEASED → ACTIVE` | trigger error, counters unchanged |
-| `P2B-GUARD-04` | stale Outbox ACK after `lease_version` moved | `UPDATE ... RETURNING` returns 0 rows |
+| `P2B-GUARD-04` | stale Outbox ACK after `lease_version` moved; duplicate ACK; ACK/RETRY on a non-`CLAIMED` row; lease CHECK violations (`CLAIMED` without lease, other states with a lease, `ACKED` without `acked_at`) | `UPDATE ... RETURNING` returns 0 rows; CHECK `23514` |
 | `P2B-GUARD-05` | duplicate `result_id`, same bytes then different bytes | idempotent, then conflict |
 | `P2B-GUARD-06` | two concurrent finalizers | one terminal state, one release, one contribution |
 | `P2B-GUARD-07` | `correction_version=1`, non-NULL dispute id, changed effective category | CHECK failure (`23514`) |

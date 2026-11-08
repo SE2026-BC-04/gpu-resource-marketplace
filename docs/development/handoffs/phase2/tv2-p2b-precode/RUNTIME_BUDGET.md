@@ -15,12 +15,19 @@ Outbox lease 30 s; retry backoff `2, 4, 8, 16, 30, 30, …` s; poll default 2 s;
 | executor queue bound (waiting work) | TV1 | bounded, drops/backs off instead of growing; metric on depth | same |
 | SQLAlchemy pool size / max overflow / pool timeout (Manager) | TV2 + TV1 | `pool_size + overflow` ≥ workers actually holding a connection; pool timeout < the loop's deadline budget; API pool sized separately | same, per process |
 | `lock_timeout` | TV2 | < `statement_timeout`; short enough that a missed lock fails a UoW rather than a loop | lock-wait histogram in race tests |
-| `statement_timeout` | TV2 | < remaining time to `hard_deadline_at` for any finalization attempt | slow-statement injection |
+| `statement_timeout` | TV2 | a fixed bound per statement, **independent of `hard_deadline_at`** (P1-02): processing an already-committed on-time Inbox candidate is required even after `now() > hard_deadline_at` (restart, backlog), so the wall-clock deadline is never a processing budget. It must be < the graceful-shutdown budget and, for ingress, short enough that the API request budget is met | slow-statement injection; post-deadline finalization of an on-time candidate after a simulated restart |
 | candidate batch bound (Inbox) | TV2 + TV3 + TV5 | bounded memory/time; `has_more` blocks fallback | `P2B-DRT-06` |
 | Outbox claim batch limit | TV1 | claim transaction short; lease (30 s) ≫ batch HTTP time or claims are renewed | dispatcher test with stale lease |
 | Scheduler scan size (Listings per pass) | TV1 + TV4 | no Listing starved; blocked head does not stop other Listings | `P2D-TX-03` |
 | graceful-shutdown budget | TV1 | ≥ longest UoW (`statement_timeout` + commit) so in-flight UoWs resolve | `P2B-DRT-11`, `P2B-UOW-05` |
 | retry budget for `40001`/`40P01` | TV2 | finite; stable identifiers; never for `23xxx`/`40003` | `P2B-UOW-04` |
+
+## 2.1 Admission deadline vs processing budget (P1-02)
+
+- **Admission deadline:** applies only to *new* callbacks. A receipt is admissible iff its **stored** `received_at < hard_deadline_at` (equality is late). It is enforced in the ingress UoW and re-checked on the stored value in finalization.
+- **Processing budget:** the lock/statement/pool limits above bound the *work*, not the *eligibility*. Finalization of an on-time candidate that was committed before the deadline is not abandoned because the wall clock has passed `hard_deadline_at`.
+- **Fallback:** `deadline_fallback` needs `now() >= hard_deadline_at` **and** no on-time `PENDING` candidate. A transiently unverifiable `PENDING` candidate blocks `SYSTEM_FAULT` until it is settled or the dependency recovers (`P2B-DRT-21`); the loop keeps retrying it within the processing budget.
+- Tests: `P2B-DRT-10` and `-21` include "restart after `hard_deadline_at`, committed on-time candidate still finalizes".
 
 ## 3. Structural rules (decided, not numbers)
 

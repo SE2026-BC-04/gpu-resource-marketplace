@@ -1,6 +1,6 @@
 # OPEN_DECISION_REGISTER — Phase 2B pre-code task TV2-P2B-05
 
-**Owner:** TV2 · **Status:** `DRAFT` · **Date:** 2026-11-08
+**Owner:** TV2 · **Status:** `DRAFT` (updated after the lead review at `0bfccf1`) · **Date:** 2026-11-08
 TV2 records what is blocked and who decides. TV2 does **not** close any item that belongs to the lead, TV3, TV4 or TV5, and does not treat `APPROVED_DESIGN_CONDITIONAL` as `PASS`.
 
 ## 1. Decisions TV2 needs from others (D-xx)
@@ -25,6 +25,16 @@ TV2 records what is blocked and who decides. TV2 does **not** close any item tha
 | D-16 | X-02 cold-restart conflict contract | affects reconcile semantics after restart | lead + TV1/TV5 | `Phase_2A`, `Phase_2E` |
 | D-17 | Deadline test and stored `received_at` must be the same instant (TV3 review action 3). Default in these docs: `INSERT ... RETURNING id, received_at`, roll back as `Ineligible(late)` if `received_at >= hard_deadline_at`; needs API `SELECT(id, received_at)`. Alternative: `BEFORE INSERT` trigger that sets `received_at` and raises when late (no extra grant, third trigger) | grant list and trigger count | TV3 + TV2 (TV5 consulted) | `INBOX_DUPLICATE_PRIVILEGES.md` §4 item 5 **TV5 ACK_COMPATIBLE on the invariant (never `202` for a stored-late row); option still pending TV2 + TV3; needs native-role privilege proof and near / equal-deadline barrier tests.** |
 
+### 1.1 Lead review findings (PR #46, `0bfccf1`) and where they are answered
+
+| Finding | Answer | Status |
+|---|---|---|
+| P1-01 Outbox CAS predicates | `P2B_UOW_INTERFACES.md` B-IF-06 (claim only `PENDING`-due or `CLAIMED`-expired; ACK/RETRY/EXHAUSTED `WHERE state='CLAIMED' AND version AND owner`; fields cleared; no resurrection; repair resend is a separate port), `PHASE2_SCHEMA_MATRIX.md` §4 CHECKs, `P2B-DRT-08`, `P2B-GUARD-04` | `PROPOSED_FOR_ACK` TV1 + lead (D-06) |
+| P1-02 timeout vs post-deadline finalization | `RUNTIME_BUDGET.md` §2.1: admission deadline (stored `received_at`) is separate from the processing budget; `statement_timeout` no longer tied to `hard_deadline_at`; `finalize_one` never compares `now()` with the deadline | `PROPOSED_FOR_ACK` TV1 |
+| P2-03 equality clock test | `P2B_TEST_MATRIX.md` §1: T-D1 limited to Manager business time; T-D2 for `received_at` (owner-seeded rows for ±1 µs, pure `is_late`, lock-wait barrier with `pg_sleep` in a holder session, race sweep); API role gains nothing | `PROPOSED_FOR_ACK` TV2 + TV3 |
+| P2-04 typed verdict / provenance | `P2B_UOW_INTERFACES.md` `P2E-VERDICT-CONTRACT-01` (fields, DB recheck, stale verdict, rejection semantics) | `PENDING_ACK` TV1 + TV3 + TV5 |
+| Re-review of `0bfccf1`+ | TV3, TV4, TV5 targeted reviews to be requested on the new exact HEAD | open |
+
 ## 2. Errata X-01 (proposed text for TV4 + TV2 ACK)
 
 **Finding.** `Phase_2D_v0.9.md` line 285 reads: `conditional update Listing reserved_gpu_count += head.requested_gpu_count`. No such column exists. The Phase 1 column is `gpu_listings.allocated_gpu_count` (`0001_phase1b_baseline.py`, with `CHECK (allocated_gpu_count >= 0 AND allocated_gpu_count <= total_gpu_count)`), and `database-design.md` §11.3 uses `allocated_gpu_count`.
@@ -39,7 +49,7 @@ TV2 records what is blocked and who decides. TV2 does **not** close any item tha
 | X-02 | cold restart contract | lead | `B-IF-05/07` reconcile wording |
 | X-03 | key compromise policy | lead, TV3, TV5 | `B-IF-08` |
 | X-04..09 | remaining cross-file findings in `REVIEW_CROSS_PHASE_CONSISTENCY_v1.0.md` | various | the review file is not in this repository snapshot; TV2 has not read X-04..09 and classifies them only after it is shared |
-| G1 | coding gate. Under the 2026-11-08 process notice it opens when the Phase 2 architecture docs (this package included) are reviewed across owners, approved and merged into `main`; then one task = one branch = one PR into `main`. The handoff's separate G1 record (scope, base SHA, reviewers, test cluster, rollback policy) is satisfied by that notice only if the lead says so | lead | blocks tasks `TV2-P2B-07..17` |
+| G0 / G1 | The lead's review states G0 and G1 are **distinct** and that this docs PR grants no implementation authority by implication. The process notice's order (docs reviewed, approved, merged; then one task = one branch = one PR into `main`) stands, and coding authorization is a separate lead decision after the docs gate. The G1 record is drafted in §3.2 and filled in by the lead | lead | blocks tasks `TV2-P2B-07..17` |
 
 ### 3.1 TV5 cross-phase blockers (PR #46 review, 2026-11-08) and where TV2 answers them
 
@@ -49,6 +59,19 @@ TV2 records what is blocked and who decides. TV2 does **not** close any item tha
 | B. `deadline_fallback` must not trust a caller proof; `VerifiedV1Receipt` binding | no caller proof; port re-reads committed Inbox under Listing → Job; DB recheck of every binding field (`B-IF-07`, `P2B-DRT-21`); typed verdict `P2E-VERDICT-CONTRACT-01` stays `PENDING_ACK` | TV1, TV3, TV5 |
 | C. one atomic finalization transaction, `SYSTEM_FAULT` has no contribution | stated in `B-IF-07`; `P2B-DRT-10`, `-19`, `-22` | TV5 |
 | D-05 payload / event id / serialization | proposal P1 with fallback P2 (`B-IF-06`, `P2B-DRT-18`) | TV1, TV5 |
+
+### 3.2 G1 record (draft for the lead; TV2 fills only the facts it can measure)
+
+| Field | Content |
+|---|---|
+| Accepted Phase 1 baseline | `main` SHA, merged PR #39 commit and the single Alembic head `0005_listing_d7` as recorded in `DB_BASELINE.md`; re-measured on the merge commit of this docs PR before any R1 work |
+| Affected file SHAs | the Git blob SHAs of the files in this directory at the merge commit (filled at merge) |
+| Producer/consumer ACKs | per-interface matrix in `P2B_UOW_INTERFACES.md` §4 and the decision table above, each ACK quoting the exact HEAD it reviewed; `PROPOSED_FOR_ACK` is not a signed decision |
+| Named reviewers | L2 change: two independent human reviewers (lead-assigned); AI/Codex reviews and author ACKs do not count |
+| Scoped work items | `TV2-P2B-07..17` (R1 schema, R2 grants/guards, then one transaction port per task), each one branch, one PR into `main` |
+| Disposable-DB safety | `backend/tests/db_safety.py` markers, loopback cluster on a non-5432 port, `restored_login_role_credentials`, serial DB tests (`DB_TEST_ISOLATION.md`) |
+| Rollback policy | R1/R2 downgrade boundary and the preflight in `MIGRATION_DEPENDENCIES.md`; accepted revisions are never rewritten |
+| Authorization | lead decision recorded in the PR or a handoff file, not implied by merging this docs PR |
 
 ## 4. Not TV2's to decide (do not do)
 
