@@ -108,7 +108,7 @@ function Workspace({ session, api }: { session: ListingsSession; api: ListingsAp
   }
 
   return (
-    <main className="listings-shell">
+    <section className="listings-shell">
       <header className="listings-header">
         <div><p className="listings-eyebrow">GPU Resource Marketplace</p><h1>GPU Listings</h1><p>Tài nguyên GPU mô phỏng, được quản lý theo quyền sở hữu.</p></div>
         {session.role === "WORKER" && <button type="button" disabled={busy} onClick={() => setEditor({ kind: "create" })}>Tạo Listing</button>}
@@ -153,6 +153,6 @@ function Workspace({ session, api }: { session: ListingsSession; api: ListingsAp
           <p className="listings-muted">Giá chỉ dùng cho mô phỏng.</p>
         </>}
       </section>}
-    </main>
+    </section>
   );
 }

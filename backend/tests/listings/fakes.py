@@ -62,8 +62,10 @@ class Store:
         self.records = {self.l1.id: self.l1, self.l2.id: self.l2}
         self.job_rows = {self.l1.id: [("RUNNING", 3), ("QUEUED", 6)]}
         self.events = []
+        self.audit_events = []
         self.commits = 0
         self.rollbacks = 0
+        self.fail_open = None
         self.fail_commit = None
 
     def open(self):
@@ -79,8 +81,11 @@ class FakeUow:
         self.listings = Listings(self)
         self.jobs = Jobs(self)
         self.committed = False
+        self.pending_audit_events = []
 
     def __enter__(self):
+        if self.store.fail_open:
+            raise self.store.fail_open
         return self
 
     def __exit__(self, *_):
@@ -89,10 +94,20 @@ class FakeUow:
 
     def commit(self):
         if self.store.fail_commit:
-            raise self.store.fail_commit
+            error = self.store.fail_commit
+            try:
+                error.transaction_outcome = "COMMIT_OUTCOME_UNKNOWN"
+            except (AttributeError, TypeError):
+                pass
+            raise error
         self.store.records = dict(self.rows)
+        self.store.audit_events.extend(self.pending_audit_events)
         self.store.commits += 1
         self.committed = True
+
+    def record_audit_event(self, **event):
+        event["outcome"] = "SUCCESS"
+        self.pending_audit_events.append(event)
 
 
 class Workers:

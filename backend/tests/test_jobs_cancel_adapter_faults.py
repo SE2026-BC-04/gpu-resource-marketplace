@@ -16,8 +16,9 @@ from gpu_marketplace.jobs.errors import DependencyUnavailable, JobNotFound
 from gpu_marketplace.repositories.jobs import (
     PostgresJobCancelTransaction,
     PostgresJobLocatorReader,
+    TransactionOutcome,
 )
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 API_ROLE = "gpm_api_app"
 
@@ -91,6 +92,11 @@ class _FakeSession:
         self.closed = True
         if self.close_error is not None:
             raise self.close_error
+
+
+class _DriverError(Exception):
+    def __init__(self, sqlstate: str) -> None:
+        self.sqlstate = sqlstate
 
 
 def _transaction(session: _FakeSession) -> PostgresJobCancelTransaction:
@@ -211,6 +217,38 @@ def test_cleanup_runtime_error_does_not_mask_unknown_commit() -> None:
         with _transaction(session) as tx:
             tx.commit()
 
+    assert session.closed
+
+
+@pytest.mark.parametrize("sqlstate", ["40003", "08006", "08007", "40P02"])
+def test_unknown_commit_sqlstates_remain_unknown(sqlstate: str) -> None:
+    session = _FakeSession(
+        commit_error=DBAPIError("COMMIT", {}, _DriverError(sqlstate))
+    )
+    transaction = _transaction(session)
+
+    with pytest.raises(CommitOutcomeUnknown):
+        with transaction as tx:
+            tx.commit()
+
+    assert transaction.outcome is TransactionOutcome.COMMIT_OUTCOME_UNKNOWN
+    assert session.closed
+
+
+@pytest.mark.parametrize("sqlstate", ["23000", "23514", "40000", "40001", "40002", "40P01"])
+def test_only_definite_postgresql_abort_codes_are_classified_as_rollback(
+    sqlstate: str,
+) -> None:
+    session = _FakeSession(
+        commit_error=DBAPIError("COMMIT", {}, _DriverError(sqlstate))
+    )
+    transaction = _transaction(session)
+
+    with pytest.raises(DependencyUnavailable):
+        with transaction as tx:
+            tx.commit()
+
+    assert transaction.outcome is TransactionOutcome.ROLLED_BACK
     assert session.closed
 
 

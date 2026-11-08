@@ -295,7 +295,7 @@ export function SubmitJobForm({ onSubmit, onSubmitted }: {
   );
 }
 
-export function JobsPage({ api, user }: { api: JobsApi; user: AuthUser }) {
+export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user: AuthUser; allowSubmit?: boolean }) {
   const emptyCollection: JobCollectionResponse = { items: [], next_cursor: null };
   const [listResult, setListResult] = useState<{
     key: string;
@@ -450,12 +450,13 @@ export function JobsPage({ api, user }: { api: JobsApi; user: AuthUser }) {
   }
 
   return (
-    <main className="jobs-page">
+    <section className="jobs-page" aria-labelledby="jobs-page-title">
       <header className="jobs-page-header">
-        <div><p className="jobs-eyebrow">GPU Resource Marketplace</p><h1>{user.role === "CLIENT" ? "My Jobs" : user.role === "WORKER" ? "Assigned Jobs" : "All Jobs"}</h1></div>
+        <div><p className="jobs-eyebrow">GPU Resource Marketplace</p><h1 id="jobs-page-title">{user.role === "CLIENT" ? "My Jobs" : user.role === "WORKER" ? "Assigned Jobs" : "All Jobs"}</h1></div>
         <span className="jobs-role">{user.role}</span>
       </header>
-      {user.role === "CLIENT" && <SubmitJobForm key={user.id} onSubmit={(attempt) => api.submitJob(attempt)} onSubmitted={submitSucceeded} />}
+      {user.role === "CLIENT" && allowSubmit && <SubmitJobForm key={user.id} onSubmit={(attempt) => api.submitJob(attempt)} onSubmitted={submitSucceeded} />}
+      {user.role === "CLIENT" && !allowSubmit && <p className="jobs-muted">Gửi Job đang chờ hoàn tất các gate TX-SUBMIT đã được ghi trong handoff.</p>}
       <section className="jobs-browser" aria-labelledby="jobs-list-title">
         <div className="jobs-section-heading"><h2 id="jobs-list-title">Công việc</h2>
           <label>Lọc trạng thái
@@ -499,6 +500,6 @@ export function JobsPage({ api, user }: { api: JobsApi; user: AuthUser }) {
           onConflict={() => setReloadVersion((version) => version + 1)}
         />}
       </section>
-    </main>
+    </section>
   );
 }

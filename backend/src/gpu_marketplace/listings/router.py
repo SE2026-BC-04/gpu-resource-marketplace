@@ -203,7 +203,12 @@ def create_listing_router(
     ) -> ListingDTO:
         require_worker(principal)
         body = await _body(request, ListingCreate)
-        record = await run_in_threadpool(service.create, principal, body.changes())
+        record = await run_in_threadpool(
+            service.create,
+            principal,
+            body.changes(),
+            correlation_id=UUID(_request_id(request)),
+        )
         response.headers["Location"] = f"/api/v1/gpu-listings/{record.id}"
         return ListingDTO.from_record(record)
 
@@ -214,7 +219,11 @@ def create_listing_router(
         require_worker(principal)
         body = await _body(request, ListingPatch)
         record = await run_in_threadpool(
-            service.patch, principal, listing_id, body.changes()
+            service.patch,
+            principal,
+            listing_id,
+            body.changes(),
+            correlation_id=UUID(_request_id(request)),
         )
         return ListingDTO.from_record(record)
 
@@ -231,7 +240,11 @@ def create_listing_router(
                 400, "INVALID_JSON", "This command does not accept a body."
             ) from exc
         record = await run_in_threadpool(
-            service.set_status, principal, listing_id, target
+            service.set_status,
+            principal,
+            listing_id,
+            target,
+            correlation_id=UUID(_request_id(request)),
         )
         return ListingDTO.from_record(record)
 

@@ -89,6 +89,8 @@ class AuthRoute(APIRoute):
 
         async def handler(request: Request) -> Response:
             request_id = _request_id(request)
+            # Make this server-generated value available to the app-level sanitized 500 handler.
+            request.state.request_id = request_id
             try:
                 response = await original(request)
             except _RequestError as exc:

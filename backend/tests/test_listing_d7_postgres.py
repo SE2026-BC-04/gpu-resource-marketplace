@@ -8,6 +8,7 @@ import secrets
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -312,6 +313,7 @@ def test_real_commit_then_lost_ack_is_unknown_and_persists_on_fresh_connection(
     baseline_database, sessions, data, monkeypatch, caplog, operation
 ):
     listing_id = data.paused if operation == "resume" else data.listing
+    correlation_id = uuid4()
     commits = []
     with pytest.raises(StoreUnavailable) as error:
         with make_uow(sessions) as uow:
@@ -327,6 +329,30 @@ def test_real_commit_then_lost_ack_is_unknown_and_persists_on_fresh_connection(
                     changed = uow.listings.set_status(
                         listing_id, "ACTIVE" if operation == "resume" else "PAUSED"
                     )
+            if operation == "create":
+                subject_id = changed.id
+                event_type = "LISTING_CREATE"
+                metadata = {"status": "ACTIVE"}
+            elif operation == "metadata":
+                subject_id = listing_id
+                event_type = "LISTING_UPDATE"
+                metadata = {"changed_fields": ["gpu_model"]}
+            elif operation == "pause":
+                subject_id = listing_id
+                event_type = "LISTING_PAUSE"
+                metadata = {"from_status": "ACTIVE", "to_status": "PAUSED"}
+            else:
+                subject_id = listing_id
+                event_type = "LISTING_RESUME"
+                metadata = {"from_status": "PAUSED", "to_status": "ACTIVE"}
+            uow.record_audit_event(
+                actor_ref=str(data.user),
+                correlation_id=correlation_id,
+                subject_type="LISTING",
+                subject_id=subject_id,
+                event_type=event_type,
+                metadata_redacted=metadata,
+            )
             real_commit = uow._active().commit
 
             def commit_then_lose_ack():
@@ -354,11 +380,19 @@ def test_real_commit_then_lost_ack_is_unknown_and_persists_on_fresh_connection(
                 ),
                 {"id": changed.id},
             ).one()
+            audit = connection.execute(
+                text(
+                    "SELECT event_type, outcome, subject_id FROM audit_events "
+                    "WHERE correlation_id = :correlation_id"
+                ),
+                {"correlation_id": correlation_id},
+            ).one()
         assert tuple(persisted) == (
             changed.gpu_model,
             changed.status,
             changed.updated_at,
         )
+        assert tuple(audit) == (event_type, "SUCCESS", subject_id)
     finally:
         observer.dispose()
 

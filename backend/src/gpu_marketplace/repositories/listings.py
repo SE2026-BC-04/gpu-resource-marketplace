@@ -22,6 +22,8 @@ from sqlalchemy.orm import Session
 from gpu_marketplace.domain.identity import Worker, WorkerReputationAggregate
 from gpu_marketplace.domain.jobs import Job
 from gpu_marketplace.domain.listings import GpuListing
+from gpu_marketplace.repositories.audit import append_audit_event
+from gpu_marketplace.repositories.commit_outcome import is_definite_commit_rollback
 
 W = TypeVar("W")
 L = TypeVar("L")
@@ -137,7 +139,12 @@ class PostgresListingUnitOfWork(Generic[W, L]):
                     "transaction_outcome": self.outcome.value,
                 },
             )
-        raise self._unavailable_error() from None
+        unavailable = self._unavailable_error()
+        try:
+            unavailable.transaction_outcome = self.outcome.value
+        except (AttributeError, TypeError):
+            pass
+        raise unavailable from None
 
     def _execute(self, statement: Any) -> Any:
         try:
@@ -160,12 +167,42 @@ class PostgresListingUnitOfWork(Generic[W, L]):
         try:
             session.commit()
         except SQLAlchemyError as error:
+            original = getattr(error, "orig", None)
+            sqlstate = getattr(original, "sqlstate", None) or getattr(
+                original, "pgcode", None
+            )
+            if is_definite_commit_rollback(sqlstate):
+                self._outcome = TransactionOutcome.ROLLED_BACK
             self._fail(error)
         except BaseException:
             self._failed = True
             raise
         self._committed = True
         self._outcome = TransactionOutcome.COMMITTED
+
+    def record_audit_event(
+        self,
+        *,
+        actor_ref: str,
+        correlation_id: UUID,
+        subject_type: str,
+        subject_id: UUID,
+        event_type: str,
+        metadata_redacted: dict[str, object],
+    ) -> None:
+        try:
+            append_audit_event(
+                self._active(),
+                actor_ref=actor_ref,
+                correlation_id=correlation_id,
+                subject_type=subject_type,
+                subject_id=subject_id,
+                event_type=event_type,
+                outcome="SUCCESS",
+                metadata_redacted=metadata_redacted,
+            )
+        except SQLAlchemyError as error:
+            self._fail(error)
 
     def __exit__(
         self,

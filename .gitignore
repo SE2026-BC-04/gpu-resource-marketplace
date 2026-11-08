@@ -16,6 +16,8 @@ simulator/.uv-cache/
 backend/.alembic-cache/
 frontend/.vite/
 frontend/coverage/
+frontend/.playwright-results/
+frontend/playwright-report/
 *.tsbuildinfo
 __pycache__/
 *.py[cod]

@@ -1,9 +1,12 @@
 """Listing use cases. Real transactions/locks are provided by GPU-002."""
 
-from uuid import UUID
+from typing import Literal
+from uuid import UUID, uuid4
+
+from gpu_marketplace.common.audit import AuditOutcomeWriter
 
 from .cursors import ListingCursorCodec
-from .errors import ListingError, not_found
+from .errors import ListingDependencyUnavailable, ListingError, not_found
 from .models import (
     ListingChanges,
     ListingPage,
@@ -37,10 +40,14 @@ def require_worker(principal: TrustedPrincipal) -> None:
 
 class ListingService:
     def __init__(
-        self, unit_of_work: UnitOfWorkFactory, cursors: ListingCursorCodec
+        self,
+        unit_of_work: UnitOfWorkFactory,
+        cursors: ListingCursorCodec,
+        audit_writer: AuditOutcomeWriter | None = None,
     ) -> None:
         self._uow = unit_of_work
         self._cursors = cursors
+        self._audit_writer = audit_writer
 
     def browse(
         self,
@@ -105,7 +112,39 @@ class ListingService:
             return record
 
     def create(
-        self, principal: TrustedPrincipal, values: ListingChanges
+        self,
+        principal: TrustedPrincipal,
+        values: ListingChanges,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> ListingRecord:
+        correlation_id = correlation_id or uuid4()
+        try:
+            return self._create(principal, values, correlation_id=correlation_id)
+        except ListingDependencyUnavailable as error:
+            if getattr(error, "transaction_outcome", None) != "COMMIT_OUTCOME_UNKNOWN":
+                self._record_failure(
+                    principal,
+                    None,
+                    "LISTING_CREATE",
+                    correlation_id,
+                    "ERROR",
+                    "DEPENDENCY_UNAVAILABLE",
+                )
+            raise
+        except ListingError as error:
+            self._record_failure(
+                principal,
+                None,
+                "LISTING_CREATE",
+                correlation_id,
+                "REJECTED",
+                error.code,
+            )
+            raise
+
+    def _create(
+        self, principal: TrustedPrincipal, values: ListingChanges, *, correlation_id: UUID
     ) -> ListingRecord:
         require_worker(principal)
         values = normalized_changes(values, create=True)
@@ -116,6 +155,14 @@ class ListingService:
                     409, "WORKER_PROFILE_MISSING", "Worker profile is unavailable."
                 )
             record = uow.listings.create(worker.id, values)
+            uow.record_audit_event(
+                actor_ref=str(principal.user_id),
+                correlation_id=correlation_id,
+                subject_type="LISTING",
+                subject_id=record.id,
+                event_type="LISTING_CREATE",
+                metadata_redacted={"status": "ACTIVE"},
+            )
             uow.commit()
             return record
 
@@ -131,7 +178,47 @@ class ListingService:
         return record
 
     def patch(
-        self, principal: TrustedPrincipal, listing_id: UUID, changes: ListingChanges
+        self,
+        principal: TrustedPrincipal,
+        listing_id: UUID,
+        changes: ListingChanges,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> ListingRecord:
+        correlation_id = correlation_id or uuid4()
+        try:
+            return self._patch(
+                principal, listing_id, changes, correlation_id=correlation_id
+            )
+        except ListingDependencyUnavailable as error:
+            if getattr(error, "transaction_outcome", None) != "COMMIT_OUTCOME_UNKNOWN":
+                self._record_failure(
+                    principal,
+                    listing_id,
+                    "LISTING_UPDATE",
+                    correlation_id,
+                    "ERROR",
+                    "DEPENDENCY_UNAVAILABLE",
+                )
+            raise
+        except ListingError as error:
+            self._record_failure(
+                principal,
+                listing_id,
+                "LISTING_UPDATE",
+                correlation_id,
+                "REJECTED",
+                error.code,
+            )
+            raise
+
+    def _patch(
+        self,
+        principal: TrustedPrincipal,
+        listing_id: UUID,
+        changes: ListingChanges,
+        *,
+        correlation_id: UUID,
     ) -> ListingRecord:
         require_worker(principal)
         changes = normalized_changes(changes)
@@ -167,11 +254,66 @@ class ListingService:
                 if value != getattr(record, field)
             }
             result = uow.listings.update(listing_id, effective) if effective else record
+            if effective:
+                uow.record_audit_event(
+                    actor_ref=str(principal.user_id),
+                    correlation_id=correlation_id,
+                    subject_type="LISTING",
+                    subject_id=listing_id,
+                    event_type="LISTING_UPDATE",
+                    metadata_redacted={"changed_fields": sorted(effective)},
+                )
             uow.commit()
             return result
 
     def set_status(
-        self, principal: TrustedPrincipal, listing_id: UUID, status: ListingStatus
+        self,
+        principal: TrustedPrincipal,
+        listing_id: UUID,
+        status: ListingStatus,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> ListingRecord:
+        correlation_id = correlation_id or uuid4()
+        event_type = "LISTING_PAUSE" if status == "PAUSED" else "LISTING_RESUME"
+        try:
+            return self._set_status(
+                principal,
+                listing_id,
+                status,
+                event_type=event_type,
+                correlation_id=correlation_id,
+            )
+        except ListingDependencyUnavailable as error:
+            if getattr(error, "transaction_outcome", None) != "COMMIT_OUTCOME_UNKNOWN":
+                self._record_failure(
+                    principal,
+                    listing_id,
+                    event_type,
+                    correlation_id,
+                    "ERROR",
+                    "DEPENDENCY_UNAVAILABLE",
+                )
+            raise
+        except ListingError as error:
+            self._record_failure(
+                principal,
+                listing_id,
+                event_type,
+                correlation_id,
+                "REJECTED",
+                error.code,
+            )
+            raise
+
+    def _set_status(
+        self,
+        principal: TrustedPrincipal,
+        listing_id: UUID,
+        status: ListingStatus,
+        *,
+        event_type: str,
+        correlation_id: UUID,
     ) -> ListingRecord:
         require_worker(principal)
         if status not in {"ACTIVE", "PAUSED"}:
@@ -183,5 +325,36 @@ class ListingService:
                 if record.status != status
                 else record
             )
+            if record.status != status:
+                uow.record_audit_event(
+                    actor_ref=str(principal.user_id),
+                    correlation_id=correlation_id,
+                    subject_type="LISTING",
+                    subject_id=listing_id,
+                    event_type=event_type,
+                    metadata_redacted={"from_status": record.status, "to_status": status},
+                )
             uow.commit()
             return result
+
+    def _record_failure(
+        self,
+        principal: TrustedPrincipal,
+        listing_id: UUID | None,
+        event_type: str,
+        correlation_id: UUID,
+        outcome: Literal["REJECTED", "ERROR"],
+        reason_code: str,
+    ) -> None:
+        user_id = getattr(principal, "user_id", None)
+        if self._audit_writer is None or not isinstance(user_id, UUID) or user_id.version != 4:
+            return
+        self._audit_writer.record_outcome(
+            actor_ref=str(user_id),
+            correlation_id=correlation_id,
+            subject_type="LISTING",
+            subject_id=listing_id,
+            event_type=event_type,
+            outcome=outcome,
+            reason_code=reason_code,
+        )

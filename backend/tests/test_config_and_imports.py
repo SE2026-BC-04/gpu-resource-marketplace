@@ -35,3 +35,69 @@ def test_local_cors_configuration_is_validated() -> None:
 def test_port_configuration_is_bounded() -> None:
     with pytest.raises(ValidationError):
         Settings(_env_file=None, api_port=70000)
+
+
+def test_jwt_secret_must_contain_at_least_256_bits() -> None:
+    valid_secret = "valid-jwt-test-secret-0123456789ab"
+    settings = Settings(_env_file=None, jwt_secret=valid_secret)
+    assert settings.jwt_secret is not None
+    assert settings.jwt_secret.get_secret_value() == valid_secret
+
+    short_secret = "jwt-short-secret-sentinel"
+    with pytest.raises(ValidationError, match="at least 256 bits") as error:
+        Settings(_env_file=None, jwt_secret=short_secret)
+    assert short_secret not in str(error.value)
+    assert short_secret not in repr(error.value)
+
+
+def test_listing_cursor_secret_must_contain_at_least_256_bits() -> None:
+    secret = "listing-cursor-test-secret-at-least-32-bytes"
+    settings = Settings(_env_file=None, listing_cursor_secret=secret)
+    assert settings.listing_cursor_secret is not None
+    assert settings.listing_cursor_secret.get_secret_value() == secret
+
+    short_secret = "short-cursor-key-sentinel"
+    with pytest.raises(ValidationError, match="Listing cursor secret") as error:
+        Settings(_env_file=None, listing_cursor_secret=short_secret)
+    assert short_secret not in str(error.value)
+    assert short_secret not in repr(error.value)
+
+
+def test_invalid_database_url_hides_password_from_validation_error() -> None:
+    password = "dsn-password-sentinel-do-not-log"
+    database_url = f"not-a-database-url-{password}"
+
+    with pytest.raises(ValidationError, match="database URL is invalid") as error:
+        Settings(_env_file=None, database_url=database_url)
+
+    assert password not in str(error.value)
+    assert database_url not in str(error.value)
+    assert password not in repr(error.value)
+
+
+def test_jwt_secret_is_redacted_from_settings_repr() -> None:
+    secret = "do-not-print-this-signing-secret-0123456789"
+    assert secret not in repr(Settings(_env_file=None, jwt_secret=secret))
+
+
+def test_listing_cursor_secret_is_redacted_from_settings_repr() -> None:
+    secret = "listing-cursor-secret-must-not-appear-in-repr"
+    assert secret not in repr(Settings(_env_file=None, listing_cursor_secret=secret))
+
+
+def test_jobs_cursor_secret_must_contain_at_least_256_bits() -> None:
+    secret = "jobs-cursor-test-secret-at-least-32-bytes"
+    settings = Settings(_env_file=None, jobs_cursor_secret=secret)
+    assert settings.jobs_cursor_secret is not None
+    assert settings.jobs_cursor_secret.get_secret_value() == secret
+
+    short_secret = "short-jobs-cursor-key"
+    with pytest.raises(ValidationError, match="Jobs cursor secret") as error:
+        Settings(_env_file=None, jobs_cursor_secret=short_secret)
+    assert short_secret not in str(error.value)
+    assert short_secret not in repr(error.value)
+
+
+def test_jobs_cursor_secret_is_redacted_from_settings_repr() -> None:
+    secret = "jobs-cursor-secret-must-not-appear-in-repr"
+    assert secret not in repr(Settings(_env_file=None, jobs_cursor_secret=secret))

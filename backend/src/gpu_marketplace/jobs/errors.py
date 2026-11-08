@@ -75,6 +75,26 @@ class JobNotFound(JobDomainError):
         super().__init__(JobErrorCode.JOB_NOT_FOUND)
 
 
+class ListingNotFound(JobDomainError):
+    def __init__(self) -> None:
+        super().__init__(JobErrorCode.LISTING_NOT_FOUND)
+
+
+class ListingPaused(JobDomainError):
+    def __init__(self) -> None:
+        super().__init__(JobErrorCode.LISTING_PAUSED)
+
+
+class IdempotencyKeyReused(JobDomainError):
+    def __init__(self) -> None:
+        super().__init__(JobErrorCode.IDEMPOTENCY_KEY_REUSED)
+
+
+class JobGpuExceedsListingTotal(JobDomainError):
+    def __init__(self) -> None:
+        super().__init__(JobErrorCode.JOB_GPU_EXCEEDS_LISTING_TOTAL)
+
+
 class JobNotCancellable(JobDomainError):
     def __init__(self) -> None:
         super().__init__(JobErrorCode.JOB_NOT_CANCELLABLE)

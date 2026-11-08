@@ -285,11 +285,20 @@ def test_exception_rolls_back_all_prior_writes(sessions, data):
 
 
 def test_injected_failure_before_real_commit_leaves_no_row_but_outcome_unknown(
-    sessions, data, monkeypatch, caplog
+    baseline_database, sessions, data, monkeypatch, caplog
 ):
+    correlation_id = uuid4()
     with caplog.at_level(logging.ERROR), pytest.raises(StoreUnavailable) as error:
         with make_uow(sessions) as uow:
             record = uow.listings.create(data.worker, VALUES)
+            uow.record_audit_event(
+                actor_ref=str(data.user),
+                correlation_id=correlation_id,
+                subject_type="LISTING",
+                subject_id=record.id,
+                event_type="LISTING_CREATE",
+                metadata_redacted={"status": "ACTIVE"},
+            )
 
             def fail():
                 raise OperationalError("secret SQL", {}, Exception("secret DSN"))
@@ -304,6 +313,11 @@ def test_injected_failure_before_real_commit_leaves_no_row_but_outcome_unknown(
     assert caplog.records[-1].transaction_outcome == "COMMIT_OUTCOME_UNKNOWN"
     with pytest.raises(RuntimeError):
         uow.commit()
+    with baseline_database.connect() as connection:
+        assert connection.execute(
+            text("SELECT count(*) FROM audit_events WHERE correlation_id=:id"),
+            {"id": correlation_id},
+        ).scalar_one() == 0
     with make_uow(sessions) as uow:
         assert uow.listings.get(record.id) is None
 

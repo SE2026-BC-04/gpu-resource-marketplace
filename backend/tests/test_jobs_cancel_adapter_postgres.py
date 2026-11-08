@@ -287,6 +287,7 @@ def test_zero_row_update_is_classified_missing_not_owner_not_queued(
                     job_id=uuid.UUID(str(job_id)),
                     listing_id=uuid.UUID(str(listing_id)),
                     client_id=client_id,
+                    correlation_id=uuid.uuid4(),
                 )
         assert rejected.value.reason is expected
         assert_snapshot_unchanged(before, read_persisted_snapshot(cancel_postgres, fixture))
@@ -308,7 +309,12 @@ def test_failure_after_guarded_update_before_commit_rolls_back(
         with transaction as tx:
             tx.lock_listing(listing_id=listing_id)
             tx.lock_job(job_id=job_id)
-            tx.cancel_queued(job_id=job_id, listing_id=listing_id, client_id=uuid.UUID(fixture.client_user_id))
+            tx.cancel_queued(
+                job_id=job_id,
+                listing_id=listing_id,
+                client_id=uuid.UUID(fixture.client_user_id),
+                correlation_id=uuid.uuid4(),
+            )
             raise _Fake()  # staged UPDATE must not survive
 
     assert transaction.outcome is TransactionOutcome.ROLLED_BACK
@@ -484,7 +490,12 @@ def test_two_concurrent_cancels_exactly_one_succeeds(
         with stack.uow.transaction(principal=owner) as first:
             first.lock_listing(listing_id=listing_id)
             first.lock_job(job_id=job_id)
-            winner = first.cancel_queued(job_id=job_id, listing_id=listing_id, client_id=owner.user_id)
+            winner = first.cancel_queued(
+                job_id=job_id,
+                listing_id=listing_id,
+                client_id=owner.user_id,
+                correlation_id=uuid.uuid4(),
+            )
             thread, box = _in_thread(lambda: contender.service.cancel(principal=owner, job_id=job_id))
             _wait_until_blocked_on_lock(cancel_postgres, "gpm-cancel-second")
             first.commit()
@@ -567,19 +578,25 @@ def test_backend_terminated_mid_transaction_is_dependency_unavailable_and_cleans
 
 def _staged_cancel(stack: Stack, fixture: CommittedJobFixture):
     job_id, listing_id = uuid.UUID(fixture.job_id), uuid.UUID(fixture.listing_id)
+    correlation_id = uuid.uuid4()
     transaction = stack.uow.transaction(principal=_owner(fixture))
     tx = transaction.__enter__()
     tx.lock_listing(listing_id=listing_id)
     tx.lock_job(job_id=job_id)
-    tx.cancel_queued(job_id=job_id, listing_id=listing_id, client_id=uuid.UUID(fixture.client_user_id))
-    return transaction
+    tx.cancel_queued(
+        job_id=job_id,
+        listing_id=listing_id,
+        client_id=uuid.UUID(fixture.client_user_id),
+        correlation_id=correlation_id,
+    )
+    return transaction, correlation_id
 
 
 def test_commit_with_lost_acknowledgement_is_unknown_and_never_rolled_back_by_adapter(
     cancel_postgres: Engine, stack: Stack
 ) -> None:
     fixture = _seed(cancel_postgres)
-    transaction = _staged_cancel(stack, fixture)
+    transaction, correlation_id = _staged_cancel(stack, fixture)
     session = transaction._session
     assert session is not None
     real_commit = session.commit
@@ -599,6 +616,15 @@ def test_commit_with_lost_acknowledgement_is_unknown_and_never_rolled_back_by_ad
     assert transaction.outcome is TransactionOutcome.COMMIT_OUTCOME_UNKNOWN
     after = read_persisted_snapshot(cancel_postgres, fixture)
     assert after.job_row[6] == "CANCELLED"  # durable although reported unknown
+    with cancel_postgres.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT count(*) FROM audit_events WHERE subject_id = :job_id "
+                "AND correlation_id = :correlation_id AND event_type = 'JOB_CANCEL' "
+                "AND outcome = 'SUCCESS'"
+            ),
+            {"job_id": uuid.UUID(fixture.job_id), "correlation_id": correlation_id},
+        ).scalar_one() == 1  # SUCCESS describes the durable row, not the lost acknowledgement
     _assert_no_leaked_connections(stack)
 
 
@@ -606,7 +632,7 @@ def test_commit_connection_loss_is_unknown_and_state_stays_queued(
     cancel_postgres: Engine, stack: Stack
 ) -> None:
     fixture = _seed(cancel_postgres)
-    transaction = _staged_cancel(stack, fixture)
+    transaction, correlation_id = _staged_cancel(stack, fixture)
     session = transaction._session
     assert session is not None
     pid = session.execute(text("SELECT pg_backend_pid()")).scalar_one()
@@ -622,6 +648,15 @@ def test_commit_connection_loss_is_unknown_and_state_stays_queued(
 
     assert transaction.outcome is TransactionOutcome.COMMIT_OUTCOME_UNKNOWN
     assert read_persisted_snapshot(cancel_postgres, fixture).job_row[6] == "QUEUED"
+    with cancel_postgres.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT count(*) FROM audit_events WHERE subject_id = :job_id "
+                "AND correlation_id = :correlation_id AND event_type = 'JOB_CANCEL' "
+                "AND outcome = 'SUCCESS'"
+            ),
+            {"job_id": uuid.UUID(fixture.job_id), "correlation_id": correlation_id},
+        ).scalar_one() == 0
     _assert_no_leaked_connections(stack)
 
 
@@ -630,7 +665,7 @@ def test_commit_aborted_by_server_is_known_rollback_dependency_unavailable(
     cancel_postgres: Engine, stack: Stack, sqlstate: str
 ) -> None:
     fixture = _seed(cancel_postgres)
-    transaction = _staged_cancel(stack, fixture)
+    transaction, _correlation_id = _staged_cancel(stack, fixture)
     session = transaction._session
     assert session is not None
 
@@ -681,7 +716,12 @@ def test_transaction_is_single_use_and_requires_lock_order(cancel_postgres: Engi
         with pytest.raises(RuntimeError):
             tx.lock_job(job_id=job_id)  # Job before Listing is a programming error
         with pytest.raises(RuntimeError):
-            tx.cancel_queued(job_id=job_id, listing_id=listing_id, client_id=uuid.UUID(fixture.client_user_id))
+            tx.cancel_queued(
+                job_id=job_id,
+                listing_id=listing_id,
+                client_id=uuid.UUID(fixture.client_user_id),
+                correlation_id=uuid.uuid4(),
+            )
     with pytest.raises(RuntimeError):
         transaction.__enter__()
     assert read_persisted_snapshot(cancel_postgres, fixture).job_row[6] == "QUEUED"
