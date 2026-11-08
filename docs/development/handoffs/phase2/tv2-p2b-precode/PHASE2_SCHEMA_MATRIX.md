@@ -47,7 +47,7 @@ Cross-row rule: `allocations.gpu_count = jobs.requested_gpu_count` and counter r
 | `event_id` | `uuid` | NN, `gen_random_uuid()` | PK |
 | `attempt_id` | `uuid` | NN | FK → `execution_attempts(attempt_id)` guarded cascade; `uq_execution_outbox_attempt_id_event_type (attempt_id, event_type)` |
 | `event_type` | `varchar(16)` | NN, `'EXECUTE_JOB'` | `ck_execution_outbox_event_type` |
-| `dispatch_payload` | `jsonb` | NN | immutable; **contents are owner-pending (D-05)** |
+| `dispatch_payload` | `jsonb` | NN | immutable; proposal P1 (D-05): exactly the ten wire keys, `ck_execution_outbox_payload_shape` (key set, `outbox_event_id = event_id`, `attempt_id` match, fixed `simulation_input`); fallback P2: eight-key core. See `P2B_UOW_INTERFACES.md` B-IF-06. Owner ACK pending (TV1 + TV5) |
 | `state` | `varchar(12)` | NN, `'PENDING'` | `ck_execution_outbox_state` (`PENDING`,`CLAIMED`,`ACKED`,`EXHAUSTED`) |
 | `delivery_attempts` | `integer` | NN, `0` | `>= 0` |
 | `next_retry_at` | `timestamptz(6)` | NN | due time |
@@ -58,7 +58,7 @@ Cross-row rule: `allocations.gpu_count = jobs.requested_gpu_count` and counter r
 
 Index: `ix_execution_outbox_due (next_retry_at, event_id) WHERE state IN ('PENDING','CLAIMED','ACKED')` (§9.4).
 [Δ] Coherence CHECK `ck_execution_outbox_lease_pair`: `(lease_owner IS NULL) = (lease_until IS NULL)`. A CLAIMED row must carry a lease: `state <> 'CLAIMED' OR lease_owner IS NOT NULL`. Needs TV1 ACK because it constrains how the dispatcher clears a lease after ACK/RETRY. **Decision D-06.**
-[Δ] `ck_execution_outbox_payload_object`: `jsonb_typeof(dispatch_payload) = 'object'`.
+[Δ] `ck_execution_outbox_payload_object` is subsumed by `ck_execution_outbox_payload_shape` (object, exact key set, fixed `simulation_input`, id equalities). The shape CHECK uses only immutable jsonb operators; it never casts payload text to `timestamptz` (that cast is not immutable), so timestamp equality with the `execution_attempts` columns is a transaction rule plus test (`P2B-DRT-18`).
 
 ## 5. `result_inbox`
 
@@ -100,7 +100,7 @@ Open: unbound rejected rows (`bound_job_id IS NULL`, `state='REJECTED'`). Baseli
 
 Extra unique `uq_signed_results_job_id_result_id (job_id, result_id)` for the Phase 3 dispute FK. `uq_signed_results_job_id` already guarantees one result per Job.
 [Δ] `ck_signed_results_outcome_reason`: `(outcome = 'SUCCESS') = (failure_reason IS NULL)`.
-[Δ] The Inbox row that produced an accepted result keeps its own copy of the bytes; `signed_results.original_envelope_raw` equals it. A CHECK cannot compare across tables; `TX-FINALIZE` copies the Inbox bytes in the same statement set and the test asserts equality (**D-10**: do we store the bytes twice or reference the Inbox row; the design chooses twice because Inbox rows can purge on their own schedule).
+[Δ] The Inbox row that produced an accepted result keeps its own copy of the bytes; `signed_results.original_envelope_raw` equals it. A CHECK cannot compare across tables; `TX-FINALIZE` copies the Inbox bytes in the same statement set and the test asserts equality (**D-10**: do we store the bytes twice or reference the Inbox row; the design chooses twice because Inbox rows can purge on their own schedule; **TV5 ACK_COMPATIBLE**: keep the independent byte-exact copy, copy it in the same UoW from the selected Inbox row, assert byte and hash equality and `UNIQUE(job_id)`, never overwrite on replay or after an unknown `COMMIT`).
 
 ## 7. `job_reputation_contributions`
 
