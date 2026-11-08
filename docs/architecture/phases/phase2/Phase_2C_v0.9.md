@@ -1,9 +1,11 @@
 # Phase 2C - Internal Authentication and Signed Result Verification (TV3)
 
 > **Current review snapshot (2026-11-08):** Phase 1 PR #39 is merged; accepted `main` is `bee832eaf5463df20f6c6815174322871eb6685a` (see DR-C1). This revision is **SELF_REVIEWED / AWAITING_CROSS_REVIEW**: it corrects stale baseline text and links and records the TV3 self-review in §6. It is not an owner/consumer ACK or a coding authorization. The 2026-11-07 deep review (Appendix DR-C) stays `PROPOSED_FOR_ACK`.
+>
+> **Cross-review revision (2026-11-09):** answers TV5's review of PR #49 (Q1–Q8) and aligns with TV2 PR #46 @ `342497c` and TV3's reviews on #46, #47 and #50. New §6.6 proposes the frozen verdict contract, rejection-code enum, verification location and key-rotation sequence; §6.7 lists two **conditional errata** to approved text that apply only if the lead decides `D-01`/`D-02`. Everything new is `PROPOSED_FOR_ACK`.
 
 > **Repository:** `SE2026-BC-04/gpu-resource-marketplace`  
-> **Document version:** `v0.9-docs-review-20261108` (stable filename retained; inherited `P2C-GATE-01 = APPROVED_DESIGN_CONDITIONAL`), updated 2026-11-08  
+> **Document version:** `v0.9-docs-review-20261109` (stable filename retained; inherited `P2C-GATE-01 = APPROVED_DESIGN_CONDITIONAL`), updated 2026-11-09  
 > **Status:** `APPROVED_DESIGN_CONDITIONAL / DOCUMENTATION_ONLY / NOT_APPROVED_FOR_IMPLEMENTATION` (owner-approved P2C-GATE-01; technical prerequisites below remain `PENDING`)  
 > **Important:** These five Phase 2A-2E files are *design work packages for five team members*. Assignment below proposes documentation ownership; it does not approve new implementation rights, modify the architectural ownership of API/Manager/Simulator, or authorize coding.  
 > **Phase 2 start gate (team process, 2026-11-08):** self-review and revise design → docs PR into `main` and cross-review → leader decision and merge of the docs → code one task = one branch = one PR. No Phase 2 code before the docs and the dependencies a task needs are approved.
@@ -79,6 +81,8 @@ Keep end-user HS256 JWT authentication separate from two directional internal se
 **Required proposed test matrix (`NOT_RUN`; no execution evidence):** `P2C-REPLAY-01` exact duplicate while RUNNING; `02` exact duplicate after terminal commit; `03` same ID changed raw body; `04` two concurrent identical submissions; `05` concurrent changed-body collision; `06` replay with wrong service credential; `07` brand-new late callback at hard deadline; `08` valid on-time Inbox processed after deadline; `09` semantically equivalent JSON with different raw bytes must **not** be silently treated as byte-identical; `10` no unlimited dedup promise after retention purge.
 
 **Review gate:** the durable algorithm is accepted as the Phase 2C/2B/2E *design* handoff. Before implementation, independently approve exact interfaces/DB SQL and obtain TV1, TV2, TV3, TV5 ACKs under inter-phase change control. Required tests remain `NOT_RUN`; no data-layer ownership or ADR contract is silently changed.
+
+*(2026-11-09: two sentences of this approved section, the SHA-256 "prefilter" and the "loser must roll back", have proposed conditional errata `E-C1`/`E-C2` in §6.7. They take effect only after the lead decides #46 `D-01`/`D-02`; until then the text above stands.)*
 
 ## 2.4. Approved `P2C-OPEN-04` - quiescent Worker public-key rotation
 
@@ -179,8 +183,8 @@ The following are **design acceptance requirements** for later implementation, *
 | `S-06` | No callback body bound exists in API Contract §13.2; #46 `D-07` asks TV3 for the maximum size | Proposal in §6.3 (no new HTTP status) | TV1 + TV5 ACK (`C-IF-02`) |
 | `S-07` | Whether 401/404/409/422 paths store an unbound REJECTED Inbox row is unclear: Database Design allows retained rejected rows and an unbound purge, the API path does not need them; #46 `D-08` | TV3 position in §6.3 | TV5 ACK; TV2 records in `D-08` |
 | `S-08` | Duplicate detection: DR-C2 here says SHA-256 is "only a prefilter, never the sole equality oracle"; #46 `D-01` asks the lead to accept SHA-256 equality with a stored-hash CHECK | TV3 security input in §6.3; DR-C2 text is **not** changed until the lead decides | Lead decides `D-01` |
-| `S-09` | Where the signature is verified: Database Design `TX-FINALIZE` verifies inside the finalize UoW; DR-C3 allows provisional verification outside it | Clarified in §6.3: both are compatible because the verifier is pure CPU on bounded bytes | TV1 + TV5 ACK (`C-IF-06`) |
-| `S-10` | Database Design table 5 lists `worker_public_keys` as "Registry / API provision", while Appendix C2 requires a controlled provisioning identity that the `gpm_api_app` request path cannot use | Recorded as a question; no grant chosen here | TV2 (+ `D-12` provisioning) |
+| `S-09` | Where the signature is verified: Database Design `TX-FINALIZE` verifies inside the finalize UoW; DR-C3 allows provisional verification outside it | Clarified in §6.3: both are compatible because the verifier is pure CPU on bounded bytes. 2026-11-09: TV3 preference is inside the UoW (§6.6.4) | TV1 + TV5 ACK (`C-IF-06`) |
+| `S-10` | Database Design table 5 lists `worker_public_keys` as "Registry / API provision", while Appendix C2 requires a controlled provisioning identity that the `gpm_api_app` request path cannot use | Recorded as a question; no grant chosen here. 2026-11-09 correction (TV5): this is **not** #46 `D-12` (which is about `worker_reputation_aggregates` rows); key provisioning is tracked with #46 `D-03` / `C-IF-07` | TV2 + lead name the provisioning identity |
 | `S-11` | Signer readiness used by TV4 `TX-ALLOCATE` (`D-IF-07`) had no TV3 proposal | Proposal in §6.4 | TV2 + TV4 + TV5 ACK (`C-IF-07/08`) |
 
 ### 6.2. Proposed callback outcome mapping (`C-IF-02`, `C-IF-03`; `PROPOSED_FOR_ACK`)
@@ -196,18 +200,20 @@ HTTP names come from API Contract §13.2 and are not changed. Port names are TV2
 | In UoW | Claimed Job/Attempt unknown or not bindable | `Ineligible(unbound)` | `404 RESULT_CONTEXT_NOT_FOUND` | none |
 | In UoW | Job not `RUNNING`, stale attempt, or `received_at >= hard_deadline_at` | `Ineligible(not_running \| late)` | `409 RESULT_NOT_ACCEPTABLE` | none |
 | In UoW | New, bound, on-time candidate committed | `Stored` | `202 STORED` | one `PENDING` row |
-| Commit | Outcome unknown, reconcile probe says `SAME` | `CommitOutcomeUnknown` → reconcile | `202 STORED` | the committed row |
+| Commit | Outcome unknown, reconcile probe (new transaction) says `SAME` | `CommitOutcomeUnknown` → reconcile | `202 STORED` (see note) | the committed row; no write by the reconcile |
 | Commit / DB | Outcome unknown and not reconciled, or DB unavailable | `CommitOutcomeUnknown` / `DependencyUnavailable` | `503` (no false durable success; ADR-005 retry) | unknown → sender retries the same bytes |
 
 A schema-valid envelope with a wrong Ed25519 signature is **not** rejected at ingress (`202 STORED`, later `REJECTED` by the Manager), as already approved.
+
+**Note on the reconciled row (TV5 Q1, 2026-11-09):** after an unknown commit the probe can only tell that a row with the same `result_id`, same bytes and same bound context exists; it cannot tell whether this request's own insert or an identical concurrent retry wrote it, and the difference has no observable effect. The response is therefore `202` with `receipt_status = STORED`: the receipt sent in this request is durable. `DUPLICATE` is used only when the probe ran **before** this request's insert (the normal `ExactDuplicate` path). The reconcile writes nothing and never changes `received_at`. `ABSENT` → `503`, never `202`.
 
 ### 6.3. TV3 positions on open questions (proposals, not decisions)
 
 1. **Body bound (`S-06`, #46 `D-07`).** A V1 envelope is a fixed 3-key object around an 11-field payload, depth 2, a few hundred bytes. Proposal: reuse the Phase 1 approved mechanism (declared and streamed byte count, strict parser) with **16,384 raw bytes inclusive** and **at most 4 object/array levels counting the root**, and map every bound or parse failure to the existing `422 INVALID_SIGNED_ENVELOPE`. This needs **no API Contract change**: §13.2 already defines `422`, and §13.3 already tells the sender not to repeat an unchanged `422` payload. Using Phase 1's `413`/`400` instead would add callback statuses and requires change control. Values are `PROPOSED_FOR_ACK` by TV1 + TV5.
 2. **Unbound rejected rows (`S-07`, #46 `D-08`).** Proposal: **no Inbox row** for `401`, `422`, `404` or `409`; a redacted structured log only (route, status, stable reason, request ID; never body, token or key). Reason: the Manager cannot use such rows, they add an API write path and retention work, and rejection is already deterministic from the response. `TX-UNBOUND-INBOX-PURGE` then stays a no-op safeguard. TV5 ACK needed.
 3. **SHA-256 equality (`S-08`, #46 `D-01`).** Security input for the lead: with the API hashing the exact received bytes and a DB `CHECK` binding `envelope_sha256` to `original_envelope_raw`, a different body with the same SHA-256 would require a second-preimage attack, and the sender must already hold `SIMULATOR_CALLBACK_TOKEN`. TV3 therefore **does not object** to option C. If the lead accepts it, the DR-C2 sentence "the SHA-256 is only a prefilter, never the sole equality oracle" must be updated in the same docs cycle. Decision: lead.
-4. **Same-`result_id` race (#46 `D-02`).** TV3 accepts TV2's `INSERT ... ON CONFLICT (result_id) WHERE result_id IS NOT NULL DO NOTHING` followed by a probe in a new statement. It needs no extra privilege, and the unknown-commit rule (probe in a new transaction, never re-insert blindly) is kept.
-5. **Verification location (`S-09`).** The TV3 verifier is a pure function over bounded bytes (≤ the bound above) and a trusted 32-byte key, without I/O. TV1/TV5 may call it **inside** the finalize UoW, as in Database Design `TX-FINALIZE`; if they call it outside, the result is provisional and the finalizer rechecks bytes, hash, bound context and `received_at < hard_deadline_at` from the DB, as `B-IF-07` already states.
+4. **Same-`result_id` race (#46 `D-02`).** TV3 accepts TV2's `INSERT ... ON CONFLICT DO NOTHING RETURNING id, received_at` followed by a probe in a new statement. 2026-11-09: TV2 moved to the **target-less** form because an explicit `(result_id) WHERE ...` target needs `SELECT(result_id)`; TV3 re-ACKed it on #46 @ `342497c` with one action: a catalog test that `result_inbox` has exactly two unique constraints (PK and `uq_result_inbox_result_id`), so a future unique index cannot be swallowed silently. `ABSENT` after a suppressed conflict → `503`. The unknown-commit rule (probe in a new transaction, never re-insert blindly) is kept. This replaces the approved "loser rolls back and re-reads" text only through erratum `E-C2` (§6.7).
+5. **Verification location (`S-09`).** The TV3 verifier is a pure function over bounded bytes (≤ the bound above) and a trusted 32-byte key, without network I/O. TV3 prefers the call **inside** the finalize UoW (§6.6.4), as in Database Design `TX-FINALIZE`; if TV1/TV5 call it outside, the result is provisional and the finalizer rechecks the identity fields, bytes, hash, bound context and `received_at < hard_deadline_at` from the DB, as #46 `B-IF-05/07` state.
 
 ### 6.4. Signer readiness for allocation (`C-IF-07/08`, TV4 `D-IF-07`; `PROPOSED_FOR_ACK`)
 
@@ -216,19 +222,108 @@ A schema-valid envelope with a wrong Ed25519 signature is **not** rejected at in
 - Planned K1→K2 rotation needs one **per-Worker serialization point** shared by Listing create/resume, `TX-ALLOCATE` for that Worker and key activation; pausing a discovered set of Listings alone leaves a read-then-update gap. TV2 proposes the lock and its place in the global order; no new table or status.
 - K1 is retired, never deleted, while evidence references it (`P2C-KEY-03/04`).
 - Suspected compromise stays `NEEDS_OWNER_DECISION` (`C-IF-09`); TV3 does not choose an incident policy here.
+- TV5 (Q5) noted that one active DB key is necessary but not sufficient; the delivery of the key identity to the Simulator, the K2 readiness point and the allocate-vs-rotate gap are answered in §6.6.5.
 
 ### 6.5. Questions to close during cross-review (still `PENDING`)
 
-| # | Question | Who answers |
-|---|---|---|
-| Q1 | Accept the outcome mapping in §6.2, and align `B-IF-02` wording to `RESULT_ID_COLLISION` / `RESULT_CONTEXT_NOT_FOUND` / `RESULT_NOT_ACCEPTABLE`? | TV2, TV5 |
-| Q2 | Accept the body bound in §6.3 item 1 (16,384 bytes, depth 4, all failures `422`)? | TV1, TV5 |
-| Q3 | Accept "no Inbox row for rejected callbacks" (§6.3 item 2)? | TV5, TV2 |
-| Q4 | Accept SHA-256 equality for duplicate detection (`D-01`)? | Lead |
-| Q5 | Accept the readiness rule in §6.4 and name the per-Worker serialization lock? | TV2, TV4, TV5 |
-| Q6 | Which identity provisions `worker_public_keys` (`S-10`, `D-12`)? | TV2, lead |
-| Q7 | Freeze `VerifiedV1Receipt` / `RejectedV1Receipt` fields and the rejection-code enum (`C-IF-06`)? | TV1, TV2, TV5 |
-| Q8 | Key-compromise incident policy (`C-IF-09`) and the cold-restart cache gap (`P2E-CACHE-GAP-01`, #46 `D-16`) | Lead (with TV1, TV5) |
+| # | Question | Who answers | Status 2026-11-09 |
+|---|---|---|---|
+| Q1 | Accept the outcome mapping in §6.2, and align `B-IF-02` wording to `RESULT_ID_COLLISION` / `RESULT_CONTEXT_NOT_FOUND` / `RESULT_NOT_ACCEPTABLE`? | TV2, TV5 | TV5 `ACK_WITH_ACTIONS` (reconcile status clarified in §6.2 note); TV2 aligned `B-IF-02` in #46 |
+| Q2 | Accept the body bound in §6.3 item 1 (16,384 bytes, depth 4, all failures `422`)? | TV1, TV5 | TV5 `ACK_WITH_ACTIONS` (boundary tests); TV1 pending |
+| Q3 | Accept "no Inbox row for rejected callbacks" (§6.3 item 2)? | TV5, TV2 | TV5 `ACK_COMPATIBLE`; TV2 recorded in `D-08` |
+| Q4 | Accept SHA-256 equality for duplicate detection (`D-01`)? | Lead | `NEEDS_LEAD_DECISION`; conditional erratum `E-C1` in §6.7 |
+| Q5 | Accept the readiness rule in §6.4 and name the per-Worker serialization lock? | TV2, TV4, TV5 | TV5 `ACK_WITH_ACTIONS`; answers in §6.6.5; lock name pending TV2 |
+| Q6 | Which identity provisions `worker_public_keys` (`S-10`)? Not #46 `D-12` | TV2, lead | Pending; tracked with #46 `D-03` |
+| Q7 | Freeze `VerifiedV1Receipt` / `RejectedV1Receipt` fields and the rejection-code enum (`C-IF-06`)? | TV1, TV2, TV5 | Proposal §6.6.1–6.6.3, aligned with #46 @ `342497c`; ACKs pending |
+| Q8 | Key-compromise incident policy (`C-IF-09`) and the cold-restart cache gap (`P2E-CACHE-GAP-01`, #46 `D-16`) | Lead (with TV1, TV5) | `NEEDS_OWNER_DECISION`; TV3 input on the cache gap given on #50 |
+
+### 6.6. Cross-review responses (2026-11-09; `PROPOSED_FOR_ACK`)
+
+Sources: TV5's review of this PR at `b147e66`; TV2 #46 @ `342497c` (`P2B_UOW_INTERFACES.md` `B-IF-05/07`, `P2E-VERDICT-CONTRACT-01`); TV3 comments on #46, #47 and #50. Field names follow #46 so that both files describe one contract.
+
+#### 6.6.1. Verdict types (`C-IF-06`, `P2E-VERDICT-CONTRACT-01`)
+
+Both types are immutable and can only be built by the TV3 verifier (private constructor/factory). Neither carries raw envelope bytes, private material, a DB Session or a bare `verified=true` flag.
+
+```text
+VerifiedV1Receipt(
+    inbox_id, result_id, envelope_sha256,
+    job_id, attempt_id, worker_id, listing_id, key_id,
+    schema_version='1', outcome, failure_reason, result_digest,
+    finished_at_wire,            # signed string; never used for admission
+    payload_jcs_raw,             # UTF-8(JCS(payload)), WITHOUT the domain prefix
+    signature_raw                # 64 bytes, decoded from the 86-char base64url
+)
+RejectedV1Receipt(
+    inbox_id, result_id, envelope_sha256,   # hash of the bytes actually examined
+    job_id, attempt_id,                     # bound pair of the examined row
+    rejection_code                          # closed enum, §6.6.2
+)
+```
+
+- `inbox_id` replaces the earlier `inbox_row_id` (Appendix C3, DR-C3).
+- `result_id` is non-NULL in both: ingress stores only envelopes whose `result_id` passed strict parsing.
+- TV2 rechecks every identity field from the database under the locks, for **both** acceptance (`finalize_one`) and rejection (`reject_candidate`). A mismatch is a no-op (`BindingMismatchNoop` / `RejectedCandidate(BINDING_MISMATCH)`), never a verdict on another row (#46 `P2B-DRT-23`).
+
+#### 6.6.2. Closed rejection-code enum
+
+Verifier codes, the only values a `RejectedV1Receipt` may carry:
+
+| Code | Meaning |
+|---|---|
+| `INVALID_STRUCTURE` | Stored bytes fail the strict V1 parser (should not happen after ingress; kept for parser-version drift) |
+| `UNSUPPORTED_SCHEMA_VERSION` | `schema_version` is not `"1"` |
+| `UNKNOWN_KEY` | No registered `(worker_id, key_id)` row |
+| `KEY_WORKER_MISMATCH` | The `key_id` exists but belongs to another Worker |
+| `CONTEXT_MISMATCH` | Signed `job_id`/`attempt_id`/`worker_id`/`listing_id` differ from the bound context |
+| `INVALID_SIGNATURE` | Ed25519 verification of prefix + JCS bytes fails |
+
+TV2's housekeeping codes for non-winners (`NOT_SELECTED`, `ALREADY_TERMINAL`) are **not** verifier verdicts and never travel in a `RejectedV1Receipt`. Proposed DB guard (TV2): a CHECK on `result_inbox.rejection_code` that allows only the union of the two sets.
+
+#### 6.6.3. Definitive vs transient
+
+Only the six definitive codes above may reject. These are **not** rejections: key row unreadable because of a DB error, a broken key invariant (zero or two active keys where one is required), extractor failure on bytes that ingress already accepted, timeout or `DependencyUnavailable`. They fail closed: no state change, the Inbox row stays `PENDING` (so `deadline_fallback` keeps answering `ContinueCandidateScan`), redacted alert. This prevents a transient fault from turning a valid on-time result into a false `SYSTEM_FAULT`.
+
+A key retired **after** a candidate was stored is not `UNKNOWN_KEY`: the verifier still checks the retained K1 row (DR-C4 "Old K1 evidence"; #46 `B-IF-08`).
+
+#### 6.6.4. Where verification runs, and `extract_signed_parts_v1`
+
+- **TV3 preference:** call the full verifier **inside** the `TX-FINALIZE` / `reject_candidate` UoW, after the Listing → Job → Allocation → Inbox locks, on the **locked** Inbox bytes and the key row read in the same transaction. One Ed25519 check on ≤ 16 KiB costs far less than the lock budget, and it removes the stale-verdict class of bugs. Then `payload_jcs_raw`/`signature_raw` come from that same call.
+- **Fallback (if TV1/TV5 keep verification outside the locks):** TV3 also provides the pure, I/O-free `extract_signed_parts_v1(original_envelope_raw) -> (payload_jcs_raw, signature_raw)` used by #46 `finalize_one` to check byte equality with the carrier. Same strict parser as ingress (three envelope keys, exactly eleven payload keys, duplicate members rejected, canonical base64url). `payload_jcs_raw` excludes the `GPU-MARKETPLACE:SIGNED-RESULT:V1\n` prefix, which is added only for verification. An extractor failure is a transient/invariant fault (§6.6.3), not `BINDING_MISMATCH` and not a rejection.
+- Final choice: TV1 + TV2 + TV5.
+
+#### 6.6.5. Key identity, K2 readiness and the allocate-vs-rotate gap (answer to TV5 Q5)
+
+1. **Delivery without DB access.** One controlled provisioning step (identity per `S-10`) generates the Ed25519 pair, registers `(worker_id, key_id, public_key_raw)` in `worker_public_keys`, and writes a secret bundle `{worker_id, key_id, private key}` to the Simulator's untracked secret storage. The Simulator learns its active identity only from that bundle; it never reads the DB.
+2. **Simulator startup self-check** (TV5): derive the public key from the private key, sign and verify a fixed test message, and refuse to sign (readiness failure, redacted log) on any error. The Simulator cannot know whether the DB row is active; that is enforced by step 4.
+3. **Allocation rule (§6.4):** `TX-ALLOCATE` allocates only if the Worker has exactly one active key row, read under the locks.
+4. **Planned K1 → K2 sequence**, all DB steps under the one per-Worker serialization point (TV2 names it):
+   1. Quiesce: under the per-Worker lock, mark the Worker as rotating so `TX-ALLOCATE`, Listing create and resume for that Worker return `Blocked` (mechanism from existing columns, e.g. pausing all its Listings in the same transaction; TV2/TV4 choose, no new table).
+   2. Drain: wait until every attempt of that Worker reaches a committed terminal state, including the hard-deadline fallback.
+   3. Deploy the K2 bundle and restart the Simulator; self-check passes.
+   4. Activate: in one transaction under the per-Worker lock, recheck "no RUNNING attempt", set `retired_at` on K1 and insert K2 as active.
+   5. Resume admission.
+
+   **Signer ready after K2** = step 3 passed **and** step 4 committed. Between 3 and 4 the Simulator holds K2 while the DB still shows K1, but no attempt can exist because of steps 1–2. A late callback signed with K1 from before step 2 is still verified against the retained K1 row.
+5. **Lock order:** the per-Worker point must have one fixed position in the global order (`database-design.md` §11.1) used identically by Listing create/resume, `TX-ALLOCATE` and step 4. TV2 proposes it; if it changes the approved order, L2 review.
+6. **Tests (after coding authorization, `NOT_RUN`):** two-session allocate-vs-activate barrier in both commit orders; Listing resume during rotation; Simulator restart with missing/mismatched bundle; K1 receipt verified after K2 activation.
+
+#### 6.6.6. Alignment with #46 @ `342497c` (`C-IF-04`, `C-IF-10`)
+
+- **Admission instant:** `INSERT ... RETURNING id, received_at` and rollback as `Ineligible(late)` when `received_at >= hard_deadline_at` (#46 `D-17`, TV3 ACK); boundary tests T-D2 (b)/(c) are the technique for `P2C-DRT-10`.
+- **Earliest winner:** `finalize_one` answers `PrecedingPending` while an earlier on-time `PENDING` row exists; invalid-first/valid-second works for any batch size.
+- **Fallback:** `deadline_fallback(job_id)` takes no caller-supplied proof; under Listing → Job locks it re-reads that no on-time `PENDING` row remains. A transiently unverifiable row stays `PENDING` and blocks fallback (§6.6.3).
+- **Processing after the deadline:** finalization tests only the **stored** `received_at`, never the current time, so an on-time row is still processed after a restart.
+- Status: proposed by TV2, `PENDING_ACK` TV1 + TV3 + TV5; DR-C5 is read together with these points.
+
+### 6.7. Conditional errata to approved text (apply only after the lead's decision)
+
+These do not change approved text now. They state exactly what would change, so the lead can decide once for Phase 2B, 2C and 2E (TV5 Q4).
+
+| ID | Approved text affected | Change if the lead decides | Unchanged either way |
+|---|---|---|---|
+| `E-C1` (`D-01`) | §2.3 "SHA-256 as an efficient prefilter and exact byte equality for the final decision"; DR-C2 "only a prefilter, never the sole equality oracle" | If **option C** is chosen: equality of the API-computed SHA-256 of the received bytes with the stored `envelope_sha256`, which a DB CHECK binds to `sha256(original_envelope_raw)`, is the duplicate test (cryptographic equivalence, not literal byte comparison). If **option B**: text unchanged, byte comparison in a reviewed probe function | Bytes are stored exactly as received; no re-serialization; `P2C-REPLAY-09` (equivalent JSON, different bytes ⇒ `409`) still holds; the API never gets general raw `SELECT` |
+| `E-C2` (`D-02`) | §2.3 "a concurrent loser of the unique insertion **must roll back** its transaction and re-read the winner"; DR-C2 same | Accepted equivalent: target-less `INSERT ... ON CONFLICT DO NOTHING RETURNING id, received_at`, zero rows ⇒ fresh probe statement; `ABSENT` ⇒ `503` | PostgreSQL UNIQUE decides; no in-memory authority; unknown commit reconciled in a new transaction; `P2C-REPLAY-04/05` cover both commit orders |
 
 Nothing in §6 changes an approved decision, adds a table, service, status code or dependency, or claims an executed test.
 
@@ -264,6 +359,8 @@ PR #39 wires user HS256 JWT and shared Auth principal. These tokens are **not** 
 This is a **proposed handoff specification**, not a newly approved provisioning mechanism or authorization to add secret volumes/credentials. Normal rotation waits for related RUNNING work to quiesce, retains archived public keys, and resumes scheduling only after K2 availability is checked. Emergency compromise response is still explicitly open.
 
 ### C3. Typed verifier contract, proposed freeze for cross-owner ACK
+
+*(2026-11-09: field names and the rejection enum are superseded by the proposal in §6.6.1–6.6.2; `inbox_row_id` is now `inbox_id`.)*
 
 `VerifiedV1Receipt` is an **internal, non-HTTP** immutable result containing at least: `inbox_row_id`, archived raw-envelope SHA-256 and stable evidence identity, `result_id`, `job_id`, `attempt_id`, `worker_id`, `listing_id`, `key_id`, verified `outcome`, `failure_reason`, `result_digest` and verification scheme/version. It is produced only after strict 11-field V1 parse, fixed domain-prefixed RFC 8785/JCS canonicalization, Ed25519 verification against a trusted `(worker_id,key_id)` public key, and basic immutable contextual checks. It does not contain oracle fields, signing private material, or a mutable `verified=true` flag as sole authority.
 
@@ -307,7 +404,7 @@ All Phase 2 cryptographic and HTTP runtime tests remain `NOT_RUN`. Existing Phas
 
 **Ingestion must not pre-judge cryptography:** a well-formed, context-bound receipt can be stored with `202 STORED` even if its signature later fails. The API must not invent a `COMPLETED` or `FAILED` effect from `202`; Manager verifies later. Rejecting an invalid signature is a **Manager Inbox** processing outcome, not an instruction to penalize the Worker immediately. Response codes/meanings come from API Contract §13.2: wrong token `401`; malformed V1 envelope `422`; unknown Job `404` without cross-user leakage; new late/stale/terminal candidate `409`; same `result_id` changed original bytes `409`; committed new candidate or exact retained duplicate `202`.
 
-**Replay lookup is scoped to the authenticated callback and retained trusted binding.** For an existing `result_id`, require same original raw bytes and same persisted binding/identity, then `202 DUPLICATE` even if its Job is now terminal; preserve the original `received_at`. Same ID with changed bytes yields `409 RESULT_ID_COLLISION`. If two inserts race, PostgreSQL UNIQUE decides the winner: the losing writer **rolls back** its UoW, opens a new read transaction and compares the committed winner's exact bytes and binding. The SHA-256 stored alongside the bytes is only a prefilter, never the sole equality oracle. A freshly received, different `result_id` is a separate candidate, not a replay.
+**Replay lookup is scoped to the authenticated callback and retained trusted binding.** For an existing `result_id`, require same original raw bytes and same persisted binding/identity, then `202 DUPLICATE` even if its Job is now terminal; preserve the original `received_at`. Same ID with changed bytes yields `409 RESULT_ID_COLLISION`. If two inserts race, PostgreSQL UNIQUE decides the winner: the losing writer **rolls back** its UoW, opens a new read transaction and compares the committed winner's exact bytes and binding. The SHA-256 stored alongside the bytes is only a prefilter, never the sole equality oracle. A freshly received, different `result_id` is a separate candidate, not a replay. *(Both sentences are subject to the conditional errata `E-C1`/`E-C2` in §6.7, effective only after the lead decides #46 `D-01`/`D-02`.)*
 
 **No false commit acknowledgment:** `202 STORED` is sent only after the Inbox COMMIT is known successful. For ambiguous COMMIT/connection loss, do not claim durable success, do not blindly retry mutations inside the same transaction and do not alter trusted admission time. The sender may retry the *same original bytes and `result_id`* and reconcile against committed PostgreSQL state. All new admission uses `clock_timestamp()` **after** Listing→Job locks and strictly tests `received_at < hard_deadline_at`; signed `finished_at` never overrides this.
 
@@ -326,6 +423,8 @@ VerifiedV1Receipt(
 RejectedV1Receipt(inbox_row_id, rejection_code)
 ```
 
+*(2026-11-09: superseded by §6.6.1, which renames `inbox_row_id` to `inbox_id`, adds `result_id`, `envelope_sha256`, `job_id`, `attempt_id` to the rejection and replaces `signed_payload_fingerprint` with `payload_jcs_raw`/`signature_raw`.)*
+
 Only TV3's trusted verifier produces a `VerifiedV1Receipt` after signature, wire and registered-key checks. It must not be constructible from untrusted HTTP JSON as a sufficient authorization object. No raw signing private key, protected reference, direct SQLAlchemy Session, ORM-managed lock or mutable `verified=True` claim crosses the TV3→TV5 boundary. If verification happens outside the Finalizer transaction, its result is **provisional**: TV5 and TV2 must re-read the **committed** Inbox evidence after Listing→Job→Allocation→Inbox locks, compare candidate identity/hash and exact persisted binding, recheck `RUNNING`, immutable Attempt, `received_at < hard_deadline_at`, key eligibility, and prior accepted result. No network calls under these domain locks. If evidence/context diverges, no finalization or reputation update is allowed.
 
 **Signature != oracle truth:** a signed but inaccurate `result_digest`, `outcome` or failure class remains a valid *signed claim* when wire, signature and context validate. It can be accepted once and later evaluated against the protected deterministic reference by the approved Phase 3 Dispute flow. TV3 must not query reference data or silently reject a cryptographically valid receipt only because the public mock oracle would differ. The approved `demo-v1-public1` reference is public/recomputable; it is not an anti-cheat guarantee or evidence of real GPU execution.
@@ -339,6 +438,8 @@ Only TV3's trusted verifier produces a `VerifiedV1Receipt` after signature, wire
 - **Suspected private-key compromise:** quiescent planned rotation is **not** an emergency incident response. Fail closed on new use and record the security hold; do not decide silently whether already-received signed candidates are trustworthy, how RUNNING work resolves, or how affected references/evidence are retained. Those are `OPEN_SECURITY_POLICY / NEEDS_OWNER_DECISION`. Do not introduce a third credential/token meaning or a key-management service without approval.
 
 ### DR-C5. Multiple result IDs, ordering, deadline and reconciliation
+
+*(2026-11-09: read together with §6.6.3 and §6.6.6, which align this section with TV2's `B-IF-05/07` proposal on #46 @ `342497c`: `PrecedingPending`, fallback without caller proof, stored-instant admission, transient faults keep rows `PENDING`. Still `PENDING_ACK`.)*
 
 - The same logical `attempt_id` and one durable Outbox event may yield **multiple different** `result_id` after a cold Simulator restart. Accept each *new* correctly bound and on-time candidate into durable Inbox while Job remains RUNNING. Do not treat different IDs as exact replay and do not assume an in-memory Simulator cache survives a crash.
 - Manager must process eligible committed on-time candidates in deterministic `(received_at, result_inbox.id)` order. Invalid candidates become `REJECTED` with a stable redacted reason; first cryptographically valid and context-eligible candidate wins `signed_results` with `UNIQUE(job_id)`, then TV5's one atomic Finalization releases GPUs and records the eligible contribution. Later candidates cause **zero** extra business effects. The exact terminal/non-winning Inbox status (from existing `PENDING/ACCEPTED/REJECTED`) and bounded cleanup behavior are `PENDING TV1/TV2/TV3/TV5 ACK`, not auto-approved.
@@ -362,11 +463,11 @@ Only TV3's trusted verifier produces a `VerifiedV1Receipt` after signature, wire
 | `C-IF-03` | Narrow DB read/compare of original Inbox bytes, unique-collision retry and commitment/unknown-commit handling | TV2 + TV3 + TV5 |
 | `C-IF-04` | Trusted DB admission clock after Listing→Job locks, original timestamp on replay, exact-deadline cutoff | TV1 + TV2 + TV3 |
 | `C-IF-05` | RFC8785/Ed25519 cross-language fixture, registered-key binding, strict V1 verifier API | TV2 + TV3 + TV5 |
-| `C-IF-06` | Immutable `VerifiedV1Receipt`/`RejectedV1Receipt`, evidence recheck and provenance in Finalizer UoW | TV1 + TV2 + TV3 + TV5 |
-| `C-IF-07` | One active Worker public key, private signer provisioning, restart reload and missing-key fail closed | TV1 + TV2 + TV3 + TV5 |
-| `C-IF-08` | Quiescent key rotation serialized with new Listing allocation and historical key read | TV1 + TV2 + TV3 + TV4 + TV5 |
+| `C-IF-06` | Immutable `VerifiedV1Receipt`/`RejectedV1Receipt`, evidence recheck and provenance in Finalizer UoW (proposal §6.6.1–6.6.4) | TV1 + TV2 + TV3 + TV5 |
+| `C-IF-07` | One active Worker public key, private signer provisioning, restart reload and missing-key fail closed (§6.4, §6.6.5) | TV1 + TV2 + TV3 + TV5 |
+| `C-IF-08` | Quiescent key rotation serialized with new Listing allocation and historical key read (sequence §6.6.5) | TV1 + TV2 + TV3 + TV4 + TV5 |
 | `C-IF-09` | Emergency compromise incident disposition; no implicit revocation, deletion, acceptance or automatic rotation | TV1 + TV3 + TV5; owner L2 if changing normative rules |
-| `C-IF-10` | Multi-result-id Inbox ordering/nonwinner handling, after-deadline recovery, test crash barriers | TV1 + TV2 + TV3 + TV5 |
+| `C-IF-10` | Multi-result-id Inbox ordering/nonwinner handling, after-deadline recovery, test crash barriers (alignment §6.6.6) | TV1 + TV2 + TV3 + TV5 |
 | `C-IF-11` | Phase 1 accepted `main` + Alembic head/roles, PR #42 impact, Phase 2 code authorization | TV1 + TV2 + TV3 |
 
 ### DR-C8. Future executable verification checklist (all `NOT_RUN`)
