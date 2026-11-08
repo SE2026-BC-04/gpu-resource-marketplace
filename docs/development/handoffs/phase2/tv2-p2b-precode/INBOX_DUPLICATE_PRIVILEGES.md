@@ -11,7 +11,7 @@ For one `(result_id, received bytes, derived bound_job_id, bound_attempt_id)`:
 |---|---|---|
 | `ABSENT` | no stored row with that `result_id` | continue to the new-candidate path |
 | `SAME` | stored bytes identical **and** stored `bound_job_id/bound_attempt_id` equal the freshly derived pair | `202 DUPLICATE`, no write, original `received_at` kept |
-| `DIFFERENT` | same `result_id`, different bytes or different bound context | `409 RESULT_ID_CONFLICT`, no write |
+| `DIFFERENT` | same `result_id`, different bytes or different bound context | `409 RESULT_ID_COLLISION` (API Contract §13.2; `RESULT_ID_CONFLICT` appears only in the Database Design pseudocode), no write |
 
 It must work after the Job is terminal and while it is still `RUNNING`, and it must never return the stored bytes to the caller.
 
@@ -41,7 +41,8 @@ New-candidate path, READ COMMITTED, after the Auth token is checked outside the 
 2. Two callbacks with the **same `result_id` but different Jobs** do not share a Job lock. They collide at the partial unique index `uq_result_inbox_result_id`. Use `INSERT ... ON CONFLICT (result_id) WHERE result_id IS NOT NULL DO NOTHING RETURNING id`: PostgreSQL makes the second inserter wait for the first to commit or abort, then returns no row; the adapter then probes in a **new statement** (READ COMMITTED sees the winner) and maps to `SAME`/`DIFFERENT`, which for different Jobs is `DIFFERENT` (different bound context) → `409`. This removes the "catch `23505`, roll back the whole UoW, re-read in a new transaction" detour the handoff describes. Either mechanism satisfies the contract; the `ON CONFLICT` form needs TV3/TV2 ACK because it changes the error-mapping table in `B-IF-02` (**D-02**).
 3. `ON CONFLICT DO NOTHING` needs only `INSERT` on the table, no extra privilege.
 4. Unknown COMMIT (`40003`, connection loss): do not insert again; run the probe in a new transaction. `SAME` ⇒ the first insert committed ⇒ answer `202`. `ABSENT` ⇒ it did not ⇒ the sender will retry. This is the only retry of a mutation and it is decided from DB state.
-5. A replay after the Job reached a terminal state must not change `received_at`, add an Outbox event or create any business effect (`P2B-DRT-05`).
+5. **One instant for the deadline test and for the stored value (TV3 review, action 3).** If the adapter read `t = clock_timestamp()`, tested `t < hard_deadline_at`, and the column default then called `clock_timestamp()` again at `INSERT`, the stored `received_at` would be a later instant than the tested one: a callback tested at `deadline − 1 µs` could be stored at or after the deadline, answered `202`, and then ignored by fallback as late. The adapter therefore tests the **stored** instant: `INSERT ... RETURNING id, received_at`; if `received_at >= hard_deadline_at` it rolls the UoW back and returns `Ineligible(late)`. This needs `SELECT(id, received_at)` for the API on `result_inbox` (timestamps and ids only, no bytes; see `PHASE2_ROLE_GRANTS.md`). A stronger alternative is a `BEFORE INSERT` trigger that sets `received_at := clock_timestamp()` and raises when it is not before the attempt's `hard_deadline_at`; it needs no extra grant but adds a third trigger (decision **D-17**).
+6. A replay after the Job reached a terminal state must not change `received_at`, add an Outbox event or create any business effect (`P2B-DRT-05`).
 
 ## 5. Bound-context equality
 
@@ -49,4 +50,8 @@ New-candidate path, READ COMMITTED, after the Auth token is checked outside the 
 
 ## 6. Tests this decision must satisfy (all `NOT_RUN`)
 
-`P2B-DRT-03` (two concurrent identical callbacks → one row, both `202`), `P2B-DRT-04` (same id, different bytes or different context → `409`, no overwrite), `P2B-DRT-05` (retained duplicate after terminal / lost ACK → `202`, no new event/effect/timestamp), plus `G-02` (API cannot read raw bytes outside the approved path) and a two-session barrier test for the cross-Job same-`result_id` collision.
+`P2B-DRT-03` (two concurrent identical callbacks → one row, both `202`), `P2B-DRT-04` (same id, different bytes or different context → `409`, no overwrite), `P2B-DRT-05` (retained duplicate after terminal / lost ACK → `202`, no new event/effect/timestamp), plus `G-02` (API cannot read raw bytes outside the approved path), a two-session barrier test for the cross-Job same-`result_id` collision, and `P2B-DRT-17` (the stored `received_at` is never at or after `hard_deadline_at` for a `202` response; boundary test next to TV3's `P2C-DRT-10`).
+
+## 7. Cross-review status
+
+TV3 (`ACK_WITH_ACTIONS` on `517942f`, PR #46 comment 2026-11-08): agrees with rejecting option A, the three-value probe, `SAME` requiring equal bound context, and D-02 (`ON CONFLICT ... DO NOTHING` then probe); does not object to option C for D-01 (the lead decides); proposes the D-07 body bound and D-08 "no unbound row". Actions 1–3 are applied above and in `P2B_UOW_INTERFACES.md`.

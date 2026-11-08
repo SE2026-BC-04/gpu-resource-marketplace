@@ -20,13 +20,23 @@ Provides: accepted `main` SHA, Alembic head, expected native roles/grants, a rea
 
 ### `B-IF-02` — TV2 ↔ TV3 ↔ TV5: duplicate and collision semantics
 `ingest_signed_result(raw: bytes, ctx: UntrustedContext, listing_hint: UUID) -> Stored(inbox_id, received_at) | ExactDuplicate | Collision | Ineligible(reason) | CommitOutcomeUnknown`.
-Pre-conditions (outside the UoW, TV3): service token valid and direction correct, body within bound, envelope parses, claimed ids are UUIDv4. Inside: Listing → Job lock; probe (`INBOX_DUPLICATE_PRIVILEGES.md`); recheck Job `RUNNING` and the current attempt; `received_at < hard_deadline_at` (equality is late). Mapping: `Stored|ExactDuplicate → 202`, `Collision → 409`, `Ineligible(late|not_running|unbound) → no row, redacted log`. Unauthenticated or unparseable input never reaches the UoW.
+Pre-conditions (outside the UoW, TV3): service token valid and direction correct, body within bound, envelope parses, claimed ids are UUIDv4. Inside: Listing → Job lock; probe (`INBOX_DUPLICATE_PRIVILEGES.md`); recheck Job `RUNNING` and the current attempt; insert with `RETURNING id, received_at` and require the **stored** `received_at < hard_deadline_at` (equality is late), otherwise roll back as `Ineligible(late)` (one instant for the test and the stored value, see `INBOX_DUPLICATE_PRIVILEGES.md` §4 item 5). HTTP mapping, names from API Contract §13.2 (TV3 review):
+
+| Port result | HTTP | Persistence |
+|---|---|---|
+| `Stored`, `ExactDuplicate` | `202` | row stored / unchanged |
+| `Collision` (port name; includes `DIFFERENT`) | `409 RESULT_ID_COLLISION` | none |
+| `Ineligible(unbound)` | `404 RESULT_CONTEXT_NOT_FOUND` | none, redacted log |
+| `Ineligible(not_running)`, `Ineligible(late)` | `409 RESULT_NOT_ACCEPTABLE` | none, redacted log |
+| `DependencyUnavailable`; `CommitOutcomeUnknown` the probe cannot reconcile | `503` (sender retries, ADR-005; no false durable success) | none claimed |
+
+Body bound, JSON depth and every parse failure (`422 INVALID_SIGNED_ENVELOPE`) belong to TV3 before the UoW (D-07: TV3 proposes 16,384 raw bytes inclusive and at most 4 JSON levels, pending TV1 + TV5 ACK). Unauthenticated or unparseable input never reaches the UoW.
 
 ### `B-IF-03` — TV2 ↔ TV3: restricted raw comparison
 The probe path, grants and the SHA-256 vs function decision are in `INBOX_DUPLICATE_PRIVILEGES.md`. The port exposes only `ABSENT | SAME | DIFFERENT`; it never returns stored bytes.
 
 ### `B-IF-04` — TV2 ↔ TV3: `received_at` and trusted identity
-`received_at` is a column default `clock_timestamp()` evaluated on insert after the Job lock; the API has no INSERT grant on it. Identity of the caller is the Simulator service token handled by TV3; the worker/listing identity comes from the locked Job row, never from the body. A replay never rewrites `received_at`.
+`received_at` is a column default `clock_timestamp()` evaluated on insert after the Job lock; the API has no INSERT grant on it, and reads back only `id` and `received_at` through `RETURNING` (column `SELECT` on those two) so the deadline test uses the stored instant, not a second clock read. Identity of the caller is the Simulator service token handled by TV3; the worker/listing identity comes from the locked Job row, never from the body. A replay never rewrites `received_at`.
 
 ### `B-IF-05` — TV1 ↔ TV2 ↔ TV3 ↔ TV5: candidates, batches, progress
 `iter_eligible_inbox(job_id, cursor: (received_at, inbox_id) | None, bound: int) -> Batch(candidates, has_more, scanned_through)`. Order `(received_at, id)`, only `state='PENDING'` and `received_at < hard_deadline_at`; the read runs **after** the Listing/Job locks of the calling finalization UoW or in a locator-only read followed by a recheck. `has_more=True` forbids fallback. The progress marker is the cursor value (data, not process memory) so a restart resumes. After a terminal commit a housekeeping call marks remaining non-winner rows `REJECTED` (reason `NOT_SELECTED`/`ALREADY_TERMINAL`) without any business effect.
