@@ -335,6 +335,7 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
   const selectedIdRef = useRef(selectedId);
   const detailGenerationRef = useRef(0);
   const stopDetailPollingRef = useRef<(() => void) | null>(null);
+  const resumePendingPollingForKeyRef = useRef<string | null>(null);
   const cancelLifecyclesRef = useRef(new Map<string, CancelActionLifecycle>());
   const [, refreshCancelLifecycles] = useState(0);
   detailRequestKeyRef.current = detailRequestKey;
@@ -362,6 +363,11 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
     const requestKey = detailRequestKey;
     const requestGeneration = ++detailGenerationRef.current;
     let currentJob = detailResult?.key === requestKey ? detailResult.job : null;
+    const resumePendingPolling = resumePendingPollingForKeyRef.current === requestKey &&
+      currentJob !== null && isPendingJobStatus(currentJob.status);
+    if (resumePendingPollingForKeyRef.current !== null && resumePendingPollingForKeyRef.current !== requestKey) {
+      resumePendingPollingForKeyRef.current = null;
+    }
     let consecutiveFailures = 0;
     let scheduledPoll: number | undefined;
     let disposed = false;
@@ -387,6 +393,7 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
       if (disposed || controller.signal.aborted || scheduledPoll !== undefined) return;
       scheduledPoll = window.setTimeout(() => {
         scheduledPoll = undefined;
+        if (resumePendingPollingForKeyRef.current === requestKey) resumePendingPollingForKeyRef.current = null;
         void readDetail();
       }, delay);
     }
@@ -449,7 +456,8 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
       }
     }
 
-    void readDetail();
+    if (resumePendingPolling) schedulePoll(JOB_STATUS_POLL_INTERVAL_MS);
+    else void readDetail();
     return () => {
       if (stopDetailPollingRef.current === stopPolling) stopDetailPollingRef.current = null;
       stopPolling();
@@ -503,16 +511,32 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
 
   function reconciled(job: JobResponse, context: DetailRequestContext) {
     if (job.id === context.jobId && isCurrentDetailRequest(context)) {
+      if (isPendingJobStatus(job.status)) {
+        restartPendingPollingAfterReconciliation(job);
+        return;
+      }
       setDetailResult({ key: context.requestKey, job, error: null });
-      if (!isPendingJobStatus(job.status)) stopDetailPollingRef.current?.();
+      stopDetailPollingRef.current?.();
     }
   }
 
   function beginReconciliation(context: DetailRequestContext): DetailRequestContext {
     if (!isCurrentDetailRequest(context)) return context;
+    stopDetailPollingRef.current?.();
     const generation = ++detailGenerationRef.current;
     setDetailGeneration(generation);
     return { ...context, generation };
+  }
+
+  function restartPendingPollingAfterReconciliation(job: JobResponse) {
+    const nextVersion = detailReloadVersion + 1;
+    const nextKey = JSON.stringify([user.id, user.role, job.id, nextVersion]);
+    const generation = ++detailGenerationRef.current;
+    setDetailGeneration(generation);
+    detailRequestKeyRef.current = nextKey;
+    resumePendingPollingForKeyRef.current = nextKey;
+    setDetailResult({ key: nextKey, job, error: null, pollingMessage: null });
+    setDetailReloadVersion(nextVersion);
   }
 
   function cancelLifecycleFor(jobId: string): CancelActionLifecycle {
