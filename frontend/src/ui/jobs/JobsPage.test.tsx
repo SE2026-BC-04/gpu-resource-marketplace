@@ -575,6 +575,21 @@ describe("VT-090 async status tracking and retry safety", () => {
     expect(getJob).toHaveBeenCalledTimes(2);
   });
 
+  it("stops the scheduled poll when the explicit Cancel response is terminal", async () => {
+    vi.useFakeTimers();
+    const getJob = vi.fn().mockResolvedValue(job("QUEUED"));
+    const cancelJob = vi.fn().mockResolvedValue(job("CANCELLED"));
+    setup("CLIENT", { getJob, cancelJob });
+    await selectJob();
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Hủy công việc" }));
+    await flushReactPromises();
+    expect(detailStatus()).toHaveTextContent("Đã hủy");
+    await advanceClock(10000);
+    expect(getJob).toHaveBeenCalledTimes(1);
+  });
+
   it("never starts an overlapping poll while the previous GET is pending", async () => {
     vi.useFakeTimers();
     const pendingPoll = deferred<JobResponse>();

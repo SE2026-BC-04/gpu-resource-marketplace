@@ -334,6 +334,7 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
   const detailRequestKeyRef = useRef(detailRequestKey);
   const selectedIdRef = useRef(selectedId);
   const detailGenerationRef = useRef(0);
+  const stopDetailPollingRef = useRef<(() => void) | null>(null);
   const cancelLifecyclesRef = useRef(new Map<string, CancelActionLifecycle>());
   const [, refreshCancelLifecycles] = useState(0);
   detailRequestKeyRef.current = detailRequestKey;
@@ -371,6 +372,16 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
       selectedIdRef.current === jobId &&
       detailRequestKeyRef.current === requestKey &&
       detailGenerationRef.current === requestGeneration;
+
+    function stopPolling() {
+      disposed = true;
+      if (scheduledPoll !== undefined) {
+        window.clearTimeout(scheduledPoll);
+        scheduledPoll = undefined;
+      }
+      controller.abort();
+    }
+    stopDetailPollingRef.current = stopPolling;
 
     function schedulePoll(delay: number) {
       if (disposed || controller.signal.aborted || scheduledPoll !== undefined) return;
@@ -411,6 +422,7 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
         consecutiveFailures = 0;
         setDetailResult({ key: requestKey, job, error: null, pollingMessage: null });
         if (isPendingJobStatus(job.status)) schedulePoll(JOB_STATUS_POLL_INTERVAL_MS);
+        else stopPolling();
       } catch (error: unknown) {
         if (!isCurrentRequest()) return;
         if (isTransientStatusReadFailure(error)) {
@@ -439,9 +451,8 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
 
     void readDetail();
     return () => {
-      disposed = true;
-      if (scheduledPoll !== undefined) window.clearTimeout(scheduledPoll);
-      controller.abort();
+      if (stopDetailPollingRef.current === stopPolling) stopDetailPollingRef.current = null;
+      stopPolling();
     };
   }, [api, user.id, user.role, selectedId, detailReloadVersion]);
 
@@ -485,6 +496,7 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
   function cancelled(job: JobResponse, context: DetailRequestContext) {
     if (job.id === context.jobId && isCurrentDetailRequest(context)) {
       setDetailResult({ key: context.requestKey, job, error: null });
+      if (!isPendingJobStatus(job.status)) stopDetailPollingRef.current?.();
     }
     setReloadVersion((version) => version + 1);
   }
@@ -492,6 +504,7 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
   function reconciled(job: JobResponse, context: DetailRequestContext) {
     if (job.id === context.jobId && isCurrentDetailRequest(context)) {
       setDetailResult({ key: context.requestKey, job, error: null });
+      if (!isPendingJobStatus(job.status)) stopDetailPollingRef.current?.();
     }
   }
 
