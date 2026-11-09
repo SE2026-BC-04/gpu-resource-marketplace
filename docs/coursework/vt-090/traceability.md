@@ -4,7 +4,7 @@
 
 **Branch:** `bt3/vt-090-async-job-progress`
 
-**PR:** Pending push and Draft PR creation.
+**PR:** [#51 — Draft](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/51), base `main`, HEAD `80a7634c56e269fc12d3d91617ed3ea1abedc195`.
 
 | Criterion/risk | Test ID / check | Test file / artifact | Commit reference | Result and evidence |
 |---|---|---|---|---|

@@ -5,7 +5,8 @@
 - **Variant:** VT-090
 - **Baseline full SHA:** `bee832eaf5463df20f6c6815174322871eb6685a`
 - **Branch:** `bt3/vt-090-async-job-progress`
-- **Draft PR:** pending creation; no merge or self-approval.
+- **Branch HEAD:** `80a7634c56e269fc12d3d91617ed3ea1abedc195`
+- **Draft PR:** [#51](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/51) — draft; no merge or self-approval.
 
 ## Scope
 
