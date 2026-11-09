@@ -1,0 +1,522 @@
+{
+  "label": "SIMULATED_ONLY",
+  "metric": "client-observed GET response latency, request start through response body",
+  "percentile": "nearest-rank p95: sorted[ceil(0.95*n)-1], successful HTTP responses only",
+  "endpoint_path": "/api/v1/jobs/<JOB_ID>",
+  "environment": {
+    "commit_sha": "836dae7c211f3df56494d3a6b0e6764b8873d8ea",
+    "working_tree_dirty": false,
+    "runtime": "v22.13.0",
+    "platform": "win32/x64",
+    "logical_cpu_count": 12,
+    "cpu_model": "Intel(R) Core(TM) i7-8850H CPU @ 2.60GHz",
+    "memory_total_bytes": 16943120384,
+    "memory_free_before_bytes": 773939200,
+    "concurrency": 60,
+    "requests_per_user": 1,
+    "dataset_jobs": 1
+  },
+  "database_mode": "MOCK_NO_DATABASE",
+  "started_at": "2026-11-09T17:10:45.354Z",
+  "elapsed_ms": 247.47,
+  "results": {
+    "users_started": 60,
+    "successful_requests": 60,
+    "http_errors": 0,
+    "transport_errors": 0,
+    "response_schema_errors": 0,
+    "p95_ms": 215.261,
+    "latency_samples_ms": [
+      228.536,
+      215.329,
+      214.66,
+      213.648,
+      211.99,
+      211.255,
+      210.699,
+      210.136,
+      209.568,
+      208.494,
+      208.348,
+      208.519,
+      208.822,
+      209.338,
+      209.973,
+      210.536,
+      210.907,
+      211.408,
+      211.743,
+      212.218,
+      212.305,
+      212.355,
+      212.427,
+      212.604,
+      213.063,
+      213.681,
+      213.977,
+      214.505,
+      214.876,
+      215.015,
+      215.261,
+      215.318,
+      170.419,
+      171.802,
+      172.119,
+      172.915,
+      174.057,
+      175.181,
+      176.864,
+      178.545,
+      180.957,
+      181.886,
+      182.213,
+      182.471,
+      182.97,
+      185.138,
+      185.719,
+      185.895,
+      186.12,
+      184.117,
+      184.146,
+      184.198,
+      184.338,
+      184.583,
+      184.788,
+      184.936,
+      185.118,
+      185.375,
+      185.585,
+      185.802
+    ],
+    "outcomes": [
+      {
+        "user": 1,
+        "http_status": 200,
+        "latency_ms": 228.536,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 2,
+        "http_status": 200,
+        "latency_ms": 215.329,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 3,
+        "http_status": 200,
+        "latency_ms": 214.66,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 4,
+        "http_status": 200,
+        "latency_ms": 213.648,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 5,
+        "http_status": 200,
+        "latency_ms": 211.99,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 6,
+        "http_status": 200,
+        "latency_ms": 211.255,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 7,
+        "http_status": 200,
+        "latency_ms": 210.699,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 8,
+        "http_status": 200,
+        "latency_ms": 210.136,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 9,
+        "http_status": 200,
+        "latency_ms": 209.568,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 10,
+        "http_status": 200,
+        "latency_ms": 208.494,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 11,
+        "http_status": 200,
+        "latency_ms": 208.348,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 12,
+        "http_status": 200,
+        "latency_ms": 208.519,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 13,
+        "http_status": 200,
+        "latency_ms": 208.822,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 14,
+        "http_status": 200,
+        "latency_ms": 209.338,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 15,
+        "http_status": 200,
+        "latency_ms": 209.973,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 16,
+        "http_status": 200,
+        "latency_ms": 210.536,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 17,
+        "http_status": 200,
+        "latency_ms": 210.907,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 18,
+        "http_status": 200,
+        "latency_ms": 211.408,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 19,
+        "http_status": 200,
+        "latency_ms": 211.743,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 20,
+        "http_status": 200,
+        "latency_ms": 212.218,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 21,
+        "http_status": 200,
+        "latency_ms": 212.305,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 22,
+        "http_status": 200,
+        "latency_ms": 212.355,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 23,
+        "http_status": 200,
+        "latency_ms": 212.427,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 24,
+        "http_status": 200,
+        "latency_ms": 212.604,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 25,
+        "http_status": 200,
+        "latency_ms": 213.063,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 26,
+        "http_status": 200,
+        "latency_ms": 213.681,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 27,
+        "http_status": 200,
+        "latency_ms": 213.977,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 28,
+        "http_status": 200,
+        "latency_ms": 214.505,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 29,
+        "http_status": 200,
+        "latency_ms": 214.876,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 30,
+        "http_status": 200,
+        "latency_ms": 215.015,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 31,
+        "http_status": 200,
+        "latency_ms": 215.261,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 32,
+        "http_status": 200,
+        "latency_ms": 215.318,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 33,
+        "http_status": 200,
+        "latency_ms": 170.419,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 34,
+        "http_status": 200,
+        "latency_ms": 171.802,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 35,
+        "http_status": 200,
+        "latency_ms": 172.119,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 36,
+        "http_status": 200,
+        "latency_ms": 172.915,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 37,
+        "http_status": 200,
+        "latency_ms": 174.057,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 38,
+        "http_status": 200,
+        "latency_ms": 175.181,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 39,
+        "http_status": 200,
+        "latency_ms": 176.864,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 40,
+        "http_status": 200,
+        "latency_ms": 178.545,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 41,
+        "http_status": 200,
+        "latency_ms": 180.957,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 42,
+        "http_status": 200,
+        "latency_ms": 181.886,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 43,
+        "http_status": 200,
+        "latency_ms": 182.213,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 44,
+        "http_status": 200,
+        "latency_ms": 182.471,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 45,
+        "http_status": 200,
+        "latency_ms": 182.97,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 46,
+        "http_status": 200,
+        "latency_ms": 185.138,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 47,
+        "http_status": 200,
+        "latency_ms": 185.719,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 48,
+        "http_status": 200,
+        "latency_ms": 185.895,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 49,
+        "http_status": 200,
+        "latency_ms": 186.12,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 50,
+        "http_status": 200,
+        "latency_ms": 184.117,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 51,
+        "http_status": 200,
+        "latency_ms": 184.146,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 52,
+        "http_status": 200,
+        "latency_ms": 184.198,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 53,
+        "http_status": 200,
+        "latency_ms": 184.338,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 54,
+        "http_status": 200,
+        "latency_ms": 184.583,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 55,
+        "http_status": 200,
+        "latency_ms": 184.788,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 56,
+        "http_status": 200,
+        "latency_ms": 184.936,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 57,
+        "http_status": 200,
+        "latency_ms": 185.118,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 58,
+        "http_status": 200,
+        "latency_ms": 185.375,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 59,
+        "http_status": 200,
+        "latency_ms": 185.585,
+        "public_job_dto_valid": true,
+        "error": null
+      },
+      {
+        "user": 60,
+        "http_status": 200,
+        "latency_ms": 185.802,
+        "public_job_dto_valid": true,
+        "error": null
+      }
+    ],
+    "mock_server": {
+      "request_count": 60,
+      "max_active_requests": 60
+    }
+  },
+  "limitations": [
+    "In-process mock only; not application, database, or production p95 evidence.",
+    "All 60 requests read one synthetic QUEUED Job; no state transition or GPU work is simulated."
+  ]
+}

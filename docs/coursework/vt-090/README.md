@@ -5,8 +5,9 @@
 - **Variant:** VT-090
 - **Baseline full SHA:** `bee832eaf5463df20f6c6815174322871eb6685a`
 - **Branch:** `bt3/vt-090-async-job-progress`
-- **Branch HEAD:** `80a7634c56e269fc12d3d91617ed3ea1abedc195`
+- **Branch URL:** [bt3/vt-090-async-job-progress](https://github.com/SE2026-BC-04/gpu-resource-marketplace/tree/bt3/vt-090-async-job-progress)
 - **Draft PR:** [#51](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/51) — draft; no merge or self-approval.
+- To identify the checked-out revision at any time, run `git rev-parse HEAD`; this document records the immutable baseline and evidence-stage commits, not a moving branch HEAD.
 
 ## Scope
 
@@ -28,6 +29,15 @@ Set-Location ..\frontend
 
 # Focused polling tests
 & 'D:\Application\node.exe' node_modules/vitest/vitest.mjs run src/ui/jobs/JobsPage.test.tsx -t VT-090
+
+# Generated pairwise rows (28 polling component cases + 8 API-client cases)
+& 'D:\Application\node.exe' node_modules/vitest/vitest.mjs run src/ui/jobs/JobsPage.pairwise.test.tsx src/api/jobs.pairwise.test.ts --reporter=dot
+
+# Pairwise generation and p95/DTO harness unit checks
+Set-Location ..
+& 'D:\Application\node.exe' docs/coursework/vt-090/generate-pairwise.mjs
+& 'D:\Application\node.exe' --test docs/coursework/vt-090/performance/run-status-load.test.mjs
+Set-Location frontend
 
 # All frontend Vitest tests
 & 'D:\Application\node.exe' node_modules/vitest/vitest.mjs run
@@ -57,7 +67,8 @@ Set-Location ..
 
 - Audit, assumptions and rejected proposals: `repository-audit.md`, `implementation-plan.md`.
 - Requirements and test design: `specification.md`, `test-strategy.md`, `pairwise-cases.json`.
-- RED/GREEN, build, backend, pairwise and repeated-run logs: `evidence/`.
+- Review remediation evidence: `evidence/review-p1-red.log`, `review-p1-green.log`, `review-p2-pairwise.log`, `review-final-frontend.log`, `review-p3-backend.log`, `review-p3-mutation-final.log`, `review-p3-coverage.log`, `review-p3-audit.log`, and `review-p3-performance-run.log`.
+- Earlier RED/GREEN, build, backend, performance, mutation and repeated-run evidence remains in `evidence/`.
 - Two AI test reviews: `ai-test-review.md`.
 - Mutation `>`→`>=`: `mutation-report.md` and `evidence/mutation-*.log`.
 - 60-task experiment and limitations: `performance-report.md`, `performance/results-local.json`.
