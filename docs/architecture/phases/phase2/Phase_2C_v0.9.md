@@ -3,6 +3,8 @@
 > **Current review snapshot (2026-11-08):** Phase 1 PR #39 is merged; accepted `main` is `bee832eaf5463df20f6c6815174322871eb6685a` (see DR-C1). This revision is **SELF_REVIEWED / AWAITING_CROSS_REVIEW**: it corrects stale baseline text and links and records the TV3 self-review in §6. It is not an owner/consumer ACK or a coding authorization. The 2026-11-07 deep review (Appendix DR-C) stays `PROPOSED_FOR_ACK`.
 >
 > **Cross-review revision (2026-11-09):** answers TV5's review of PR #49 (Q1–Q8) and aligns with TV2 PR #46 @ `342497c` and TV3's reviews on #46, #47 and #50. New §6.6 proposes the frozen verdict contract, rejection-code enum, verification location and key-rotation sequence; §6.7 lists two **conditional errata** to approved text that apply only if the lead decides `D-01`/`D-02`. Everything new is `PROPOSED_FOR_ACK`.
+>
+> **TV2 follow-up (2026-11-09, second revision):** adopts TV2's review of this PR at `942383f` and #46 @ `f315400`: per-Worker advisory lock first in the lock order, rotation gated at `TX-ALLOCATE` with `Blocked(SIGNER_NOT_READY)`, four-step K1→K2 sequence (§6.4, §6.6.5), V-IN constraints (§6.6.4). The two-active-rows quiesce marker conflicts with approved §2.4 wording, so it is a third conditional erratum `E-C3` (§6.7) for the lead.
 
 > **Repository:** `SE2026-BC-04/gpu-resource-marketplace`  
 > **Document version:** `v0.9-docs-review-20261109` (stable filename retained; inherited `P2C-GATE-01 = APPROVED_DESIGN_CONDITIONAL`), updated 2026-11-09  
@@ -217,9 +219,9 @@ A schema-valid envelope with a wrong Ed25519 signature is **not** rejected at in
 
 ### 6.4. Signer readiness for allocation (`C-IF-07/08`, TV4 `D-IF-07`; `PROPOSED_FOR_ACK`)
 
-- Readiness inside `TX-ALLOCATE` is decided **only from committed DB state**: the Worker has **exactly one** `worker_public_keys` row with `retired_at IS NULL`, read under the existing locks. Zero or ambiguous → fail closed: no allocation, typed `Blocked` outcome, no secret in logs.
+- Readiness inside `TX-ALLOCATE` is decided **only from committed DB state**: the Worker has **exactly one** `worker_public_keys` row with `retired_at IS NULL`, read under the existing locks. Zero or ambiguous → fail closed: no allocation, typed `Blocked(SIGNER_NOT_READY)` outcome (TV2 adds it to #46 `B-IF-06`; TV4's `D-IF-07` category list in #48 needs the same entry), no secret in logs.
 - That the Simulator's private key matches that public key is proven by TV5 at provisioning and at Simulator startup (sign-and-verify self-check against the registered public key), **not** by an HTTP call during allocation.
-- Planned K1→K2 rotation needs one **per-Worker serialization point** shared by Listing create/resume, `TX-ALLOCATE` for that Worker and key activation; pausing a discovered set of Listings alone leaves a read-then-update gap. TV2 proposes the lock and its place in the global order; no new table or status.
+- Planned K1→K2 rotation needs one **per-Worker serialization point** between `TX-ALLOCATE` for that Worker and key registration/retirement; pausing a discovered set of Listings alone leaves a read-then-update gap. TV2 named it on this PR (review at `942383f`): a transaction-scoped advisory lock keyed by the Worker, **first** in the global order, shared for `TX-ALLOCATE`, exclusive for key registration and retirement (§6.6.5). No new table, status or grant.
 - K1 is retired, never deleted, while evidence references it (`P2C-KEY-03/04`).
 - Suspected compromise stays `NEEDS_OWNER_DECISION` (`C-IF-09`); TV3 does not choose an incident policy here.
 - TV5 (Q5) noted that one active DB key is necessary but not sufficient; the delivery of the key identity to the Simulator, the K2 readiness point and the allocate-vs-rotate gap are answered in §6.6.5.
@@ -232,14 +234,14 @@ A schema-valid envelope with a wrong Ed25519 signature is **not** rejected at in
 | Q2 | Accept the body bound in §6.3 item 1 (16,384 bytes, depth 4, all failures `422`)? | TV1, TV5 | TV5 `ACK_WITH_ACTIONS` (boundary tests); TV1 pending |
 | Q3 | Accept "no Inbox row for rejected callbacks" (§6.3 item 2)? | TV5, TV2 | TV5 `ACK_COMPATIBLE`; TV2 recorded in `D-08` |
 | Q4 | Accept SHA-256 equality for duplicate detection (`D-01`)? | Lead | `NEEDS_LEAD_DECISION`; conditional erratum `E-C1` in §6.7 |
-| Q5 | Accept the readiness rule in §6.4 and name the per-Worker serialization lock? | TV2, TV4, TV5 | TV5 `ACK_WITH_ACTIONS`; answers in §6.6.5; lock name pending TV2 |
+| Q5 | Accept the readiness rule in §6.4 and name the per-Worker serialization lock? | TV2, TV4, TV5 | TV5 `ACK_WITH_ACTIONS`; TV2 named the lock and sequence at `942383f`, adopted in §6.6.5; quiesce marker needs lead decision `E-C3` (§6.7); TV4 to ACK `SIGNER_NOT_READY` |
 | Q6 | Which identity provisions `worker_public_keys` (`S-10`)? Not #46 `D-12` | TV2, lead | Pending; tracked with #46 `D-03` |
 | Q7 | Freeze `VerifiedV1Receipt` / `RejectedV1Receipt` fields and the rejection-code enum (`C-IF-06`)? | TV1, TV2, TV5 | Proposal §6.6.1–6.6.3, aligned with #46 @ `342497c`; ACKs pending |
 | Q8 | Key-compromise incident policy (`C-IF-09`) and the cold-restart cache gap (`P2E-CACHE-GAP-01`, #46 `D-16`) | Lead (with TV1, TV5) | `NEEDS_OWNER_DECISION`; TV3 input on the cache gap given on #50 |
 
 ### 6.6. Cross-review responses (2026-11-09; `PROPOSED_FOR_ACK`)
 
-Sources: TV5's review of this PR at `b147e66`; TV2 #46 @ `342497c` (`P2B_UOW_INTERFACES.md` `B-IF-05/07`, `P2E-VERDICT-CONTRACT-01`); TV3 comments on #46, #47 and #50. Field names follow #46 so that both files describe one contract.
+Sources: TV5's review of this PR at `b147e66`; TV2's review of this PR at `942383f` (`ACK_WITH_ACTIONS`); TV2 #46 @ `342497c` and follow-up `f315400` (`P2B_UOW_INTERFACES.md` `B-IF-05/07`, `P2E-VERDICT-CONTRACT-01`); TV3 comments on #46, #47 and #50. Field names follow #46 so that both files describe one contract.
 
 #### 6.6.1. Verdict types (`C-IF-06`, `P2E-VERDICT-CONTRACT-01`)
 
@@ -278,7 +280,7 @@ Verifier codes, the only values a `RejectedV1Receipt` may carry:
 | `CONTEXT_MISMATCH` | Signed `job_id`/`attempt_id`/`worker_id`/`listing_id` differ from the bound context |
 | `INVALID_SIGNATURE` | Ed25519 verification of prefix + JCS bytes fails |
 
-TV2's housekeeping codes for non-winners (`NOT_SELECTED`, `ALREADY_TERMINAL`) are **not** verifier verdicts and never travel in a `RejectedV1Receipt`. Proposed DB guard (TV2): a CHECK on `result_inbox.rejection_code` that allows only the union of the two sets.
+TV2's housekeeping codes for non-winners (`NOT_SELECTED`, `ALREADY_TERMINAL`) are **not** verifier verdicts and never travel in a `RejectedV1Receipt`. DB guard: TV2 added `ck_result_inbox_rejection_code` in #46 @ `f315400` (`PHASE2_SCHEMA_MATRIX.md` §5), which allows only the union of the two sets and ties a non-NULL code to `state = 'REJECTED'`; `P2B-MIG-06` tests it.
 
 #### 6.6.3. Definitive vs transient
 
@@ -290,23 +292,25 @@ A key retired **after** a candidate was stored is not `UNKNOWN_KEY`: the verifie
 
 - **TV3 preference:** call the full verifier **inside** the `TX-FINALIZE` / `reject_candidate` UoW, after the Listing → Job → Allocation → Inbox locks, on the **locked** Inbox bytes and the key row read in the same transaction. One Ed25519 check on ≤ 16 KiB costs far less than the lock budget, and it removes the stale-verdict class of bugs. Then `payload_jcs_raw`/`signature_raw` come from that same call.
 - **Fallback (if TV1/TV5 keep verification outside the locks):** TV3 also provides the pure, I/O-free `extract_signed_parts_v1(original_envelope_raw) -> (payload_jcs_raw, signature_raw)` used by #46 `finalize_one` to check byte equality with the carrier. Same strict parser as ingress (three envelope keys, exactly eleven payload keys, duplicate members rejected, canonical base64url). `payload_jcs_raw` excludes the `GPU-MARKETPLACE:SIGNED-RESULT:V1\n` prefix, which is added only for verification. An extractor failure is a transient/invariant fault (§6.6.3), not `BINDING_MISMATCH` and not a rejection.
-- Final choice: TV1 + TV2 + TV5.
+- **Constraints if V-IN is chosen (TV2, review at `942383f`):** the verifier is injected into the finalize and reject ports as a pure callable (no Session, no I/O except the key row read in the same UoW), and the candidate scan is bounded per UoW. Under V-IN the carrier drops `payload_jcs_raw`/`signature_raw` and TV2 updates `B-IF-07`; the extractor equality check is needed only under V-OUT.
+- Final choice: TV1 + TV5 (TV2 can implement either).
 
 #### 6.6.5. Key identity, K2 readiness and the allocate-vs-rotate gap (answer to TV5 Q5)
 
 1. **Delivery without DB access.** One controlled provisioning step (identity per `S-10`) generates the Ed25519 pair, registers `(worker_id, key_id, public_key_raw)` in `worker_public_keys`, and writes a secret bundle `{worker_id, key_id, private key}` to the Simulator's untracked secret storage. The Simulator learns its active identity only from that bundle; it never reads the DB.
-2. **Simulator startup self-check** (TV5): derive the public key from the private key, sign and verify a fixed test message, and refuse to sign (readiness failure, redacted log) on any error. The Simulator cannot know whether the DB row is active; that is enforced by step 4.
-3. **Allocation rule (§6.4):** `TX-ALLOCATE` allocates only if the Worker has exactly one active key row, read under the locks.
-4. **Planned K1 → K2 sequence**, all DB steps under the one per-Worker serialization point (TV2 names it):
-   1. Quiesce: under the per-Worker lock, mark the Worker as rotating so `TX-ALLOCATE`, Listing create and resume for that Worker return `Blocked` (mechanism from existing columns, e.g. pausing all its Listings in the same transaction; TV2/TV4 choose, no new table).
-   2. Drain: wait until every attempt of that Worker reaches a committed terminal state, including the hard-deadline fallback.
-   3. Deploy the K2 bundle and restart the Simulator; self-check passes.
-   4. Activate: in one transaction under the per-Worker lock, recheck "no RUNNING attempt", set `retired_at` on K1 and insert K2 as active.
-   5. Resume admission.
+2. **Simulator startup self-check** (TV5): derive the public key from the private key, sign and verify a fixed test message, and refuse to sign (readiness failure, redacted log) on any error. The Simulator cannot know whether the DB row is active; that is enforced by the allocation rule and step 4 below.
+3. **Allocation rule (§6.4):** `TX-ALLOCATE` allocates only if the Worker has exactly one active key row, read under the locks; otherwise `Blocked(SIGNER_NOT_READY)`.
+4. **Per-Worker lock (TV2 proposal at `942383f`, TV3 `ACK`):** `pg_advisory_xact_lock_shared(hashtextextended('gpm:worker-key:' || :worker_id, 0))` in `TX-ALLOCATE`, the exclusive `pg_advisory_xact_lock(...)` with the same key for key registration and retirement. Executable by `PUBLIC`, so no grant change; a hash collision only causes false waiting. To be proven as native `gpm_manager_app` and as the provisioning identity (`G-01`, `S-10`).
+5. **Lock order:** the Worker lock is **first**: `Worker (advisory) → Listing → Job → Allocation → Inbox → …`. `TX-ALLOCATE` reads `gpu_listings.worker_id` in its unlocked locator step (immutable under the D7 identity guard), takes the shared Worker lock, locks the Listing and rechecks `worker_id`. Submit, Cancel, Pause, Resume and Listing create never take it, so no cycle exists. A new first position in `database-design.md` §11.1 is a lock-order change: **L2 review** before coding.
+6. **Planned K1 → K2 sequence (TV2, four steps; replaces the five-step draft of the first 2026-11-09 revision):**
+   1. **Register K2 (quiesce).** Under the exclusive Worker lock, insert K2 with `retired_at IS NULL`. The Worker now has **two** active rows, so every later `TX-ALLOCATE` for it answers `Blocked(SIGNER_NOT_READY)`; the exclusive lock waits for in-flight allocations, which hold the shared lock until commit. Listings are not paused, so Listing create and resume need no serialization with rotation.
+   2. **Drain.** Wait until every attempt of that Worker reaches a committed terminal state, including the hard-deadline fallback. Callbacks signed with K1 are verified against the K1 row as usual.
+   3. **Deploy K2.** Install the K2 bundle, restart the Simulator; self-check passes.
+   4. **Retire K1.** In one transaction under the exclusive Worker lock, recheck "no `RUNNING` attempt" for the Worker (abort if any) and set `retired_at` on K1. One active row again; allocation resumes.
 
-   **Signer ready after K2** = step 3 passed **and** step 4 committed. Between 3 and 4 the Simulator holds K2 while the DB still shows K1, but no attempt can exist because of steps 1–2. A late callback signed with K1 from before step 2 is still verified against the retained K1 row.
-5. **Lock order:** the per-Worker point must have one fixed position in the global order (`database-design.md` §11.1) used identically by Listing create/resume, `TX-ALLOCATE` and step 4. TV2 proposes it; if it changes the approved order, L2 review.
-6. **Tests (after coding authorization, `NOT_RUN`):** two-session allocate-vs-activate barrier in both commit orders; Listing resume during rotation; Simulator restart with missing/mismatched bundle; K1 receipt verified after K2 activation.
+   **Signer ready after K2** = step 3 passed **and** step 4 committed. **Abort path:** if step 3 fails, set `retired_at` on K2 under the exclusive lock (K1 stays the single active key); K2 is never deleted by the application. A late callback signed with K1 is still verified against the retained K1 row (§6.6.3). A bug that leaves two active rows fails closed (blocked, alert), never allocates with an ambiguous signer.
+7. **No partial unique index on the active key.** A `UNIQUE (worker_id) WHERE retired_at IS NULL` index (`database-design.md` §9.2-05 "Proposed policy", Phase 1B `D4`) would forbid step 1. Keeping it out, and the wording of approved §2.4 ("preserves the at-most-one-active-key invariant"), is conditional erratum `E-C3` (§6.7), lead decision.
+8. **Tests (after coding authorization, `NOT_RUN`; TV2 adds the DB ones to #46):** allocate vs K2 registration barrier in both commit orders; two allocations for different Listings of one Worker run concurrently under the shared lock; allocation with two active rows answers `Blocked(SIGNER_NOT_READY)`; K1 retirement aborts while a `RUNNING` attempt exists; native-role `EXECUTE` proof of the advisory functions; Simulator restart with missing/mismatched bundle; K1 receipt verified after K1 retirement; abort path leaves exactly K1 active.
 
 #### 6.6.6. Alignment with #46 @ `342497c` (`C-IF-04`, `C-IF-10`)
 
@@ -318,12 +322,13 @@ A key retired **after** a candidate was stored is not `UNKNOWN_KEY`: the verifie
 
 ### 6.7. Conditional errata to approved text (apply only after the lead's decision)
 
-These do not change approved text now. They state exactly what would change, so the lead can decide once for Phase 2B, 2C and 2E (TV5 Q4).
+These do not change approved text now. They state exactly what would change, so the lead can decide once for Phase 2B, 2C, 2D and 2E (TV5 Q4; TV2 key-rotation proposal).
 
 | ID | Approved text affected | Change if the lead decides | Unchanged either way |
 |---|---|---|---|
 | `E-C1` (`D-01`) | §2.3 "SHA-256 as an efficient prefilter and exact byte equality for the final decision"; DR-C2 "only a prefilter, never the sole equality oracle" | If **option C** is chosen: equality of the API-computed SHA-256 of the received bytes with the stored `envelope_sha256`, which a DB CHECK binds to `sha256(original_envelope_raw)`, is the duplicate test (cryptographic equivalence, not literal byte comparison). If **option B**: text unchanged, byte comparison in a reviewed probe function | Bytes are stored exactly as received; no re-serialization; `P2C-REPLAY-09` (equivalent JSON, different bytes ⇒ `409`) still holds; the API never gets general raw `SELECT` |
 | `E-C2` (`D-02`) | §2.3 "a concurrent loser of the unique insertion **must roll back** its transaction and re-read the winner"; DR-C2 same | Accepted equivalent: target-less `INSERT ... ON CONFLICT DO NOTHING RETURNING id, received_at`, zero rows ⇒ fresh probe statement; `ABSENT` ⇒ `503` | PostgreSQL UNIQUE decides; no in-memory authority; unknown commit reconciled in a new transaction; `P2C-REPLAY-04/05` cover both commit orders |
+| `E-C3` (Phase 1B `D4`, §6.6.5) | §2.4 "make K2 the sole active key via controlled provisioning that preserves the at-most-one-active-key invariant"; DR-C4 "coordinate pauses/admission of **all** affected Listings"; `database-design.md` §9.2-05 "Proposed policy" partial unique index on the active key | If the lead accepts TV2's quiesce marker: "at most one active key per Worker **outside a rotation window**; during rotation two active rows are the quiesce marker and allocation fails closed"; the partial unique index is not added (`D4` closed as "not added"); DR-C4 admission control is met by gating `TX-ALLOCATE`, not by pausing Listings. If rejected: keep the invariant and the index, quiesce by pausing all the Worker's Listings, and Listing create/resume must then also take the shared Worker lock | K1 is never retired while a related attempt is `RUNNING`; K1 is retained for evidence; allocation needs exactly one active key; rotation is serialized by the per-Worker lock |
 
 Nothing in §6 changes an approved decision, adds a table, service, status code or dependency, or claims an executed test.
 
