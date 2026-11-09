@@ -62,7 +62,7 @@ async function startMockServer() {
       active -= 1;
       return;
     }
-    // A fixed local delay makes concurrent in-flight work observable; it is not SUT latency.
+    // A fixed local delay makes 60 concurrent in-flight requests observable; it is not SUT latency.
     setTimeout(() => {
       response.writeHead(200).end(JSON.stringify({
         id: MOCK_JOB_ID,
@@ -73,7 +73,7 @@ async function startMockServer() {
         terminal_at: null,
       }));
       active -= 1;
-    }, 1);
+    }, 50);
   });
   await new Promise((resolveListen, rejectListen) => {
     server.once("error", rejectListen);

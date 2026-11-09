@@ -10,7 +10,7 @@ From the repository root:
 & 'D:\Application\node.exe' docs/coursework/vt-090/performance/run-status-load.mjs
 ```
 
-This starts an in-process HTTP mock bound to `127.0.0.1` on an ephemeral port. It returns one fixed `QUEUED` DTO and delays each reply by 1 ms to make concurrency observable. The report label is `SIMULATED_ONLY`; its p95 is not an application or production result.
+This starts an in-process HTTP mock bound to `127.0.0.1` on an ephemeral port. It returns one fixed `QUEUED` DTO and delays each reply by 50 ms to make 60 in-flight requests observable. The report label is `SIMULATED_ONLY`; its p95 is not an application or production result.
 
 ## Optional local API mode
 
