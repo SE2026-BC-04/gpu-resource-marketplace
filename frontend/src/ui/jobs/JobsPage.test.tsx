@@ -22,7 +22,7 @@ function job(status: JobResponse["status"] = "QUEUED", id = JOB_ID): JobResponse
     status,
     failure_reason: status === "FAILED" ? "WORKER_FAULT" : null,
     submitted_at: "2026-10-26T08:00:00.000000Z",
-    started_at: status === "QUEUED" ? null : "2026-10-26T08:00:30.000000Z",
+    started_at: ["RUNNING", "COMPLETED", "FAILED"].includes(status) ? "2026-10-26T08:00:30.000000Z" : null,
     terminal_at: ["COMPLETED", "FAILED", "CANCELLED"].includes(status) ? "2026-10-26T08:01:00.000000Z" : null,
   };
 }
@@ -61,6 +61,14 @@ afterEach(() => {
 });
 
 describe("GPU-005 Jobs frontend foundation", () => {
+  it("uses a persistence-consistent fixture for a Job cancelled while QUEUED", () => {
+    const cancelledJob = job("CANCELLED");
+    expect(cancelledJob.status).toBe("CANCELLED");
+    expect(cancelledJob.started_at).toBeNull();
+    expect(cancelledJob.terminal_at).not.toBeNull();
+    expect(cancelledJob.failure_reason).toBeNull();
+  });
+
   it("shows loading then empty state and keeps retry available on list error", async () => {
     let resolve!: (value: JobCollectionResponse) => void;
     const listJobs = vi.fn(() => new Promise<JobCollectionResponse>((done) => { resolve = done; }));
@@ -254,7 +262,7 @@ describe("GPU-005 Jobs frontend foundation", () => {
 
     expect(await within(screen.getByRole("region", { name: "Chi tiết công việc" })).findByText("Đang chạy")).toBeInTheDocument();
     expect(getJob).toHaveBeenCalledTimes(2);
-    expect(listJobs).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(listJobs).toHaveBeenCalledTimes(2));
     expect(cancelJob).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Hủy công việc" })).not.toBeInTheDocument();
   });
@@ -563,10 +571,14 @@ describe("VT-090 async status tracking and retry safety", () => {
     ["CANCELLED", "Đã hủy"],
   ] as const)("stops polling when the server reports terminal status %s", async (terminalStatus, label) => {
     vi.useFakeTimers();
+    const priorStatus = terminalStatus === "CANCELLED" ? "QUEUED" : "RUNNING";
     const getJob = vi.fn()
-      .mockResolvedValueOnce(job("QUEUED"))
+      .mockResolvedValueOnce(job(priorStatus))
       .mockResolvedValueOnce(job(terminalStatus));
-    setup("CLIENT", { getJob });
+    setup("CLIENT", {
+      listJobs: vi.fn().mockResolvedValue({ items: [job(priorStatus)], next_cursor: null }),
+      getJob,
+    });
     await selectJob();
 
     await advanceClock(2000);
