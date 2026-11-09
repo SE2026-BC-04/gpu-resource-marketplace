@@ -590,6 +590,107 @@ describe("VT-090 async status tracking and retry safety", () => {
     expect(getJob).toHaveBeenCalledTimes(1);
   });
 
+  it("VT090-P1-01 resumes status polling after Cancel 409 reconciliation returns RUNNING", async () => {
+    vi.useFakeTimers();
+    let activeGets = 0;
+    let maxActiveGets = 0;
+    const responses = [job("QUEUED", JOB_A), job("RUNNING", JOB_A), job("COMPLETED", JOB_A)];
+    const getJob = vi.fn(async () => {
+      activeGets += 1;
+      maxActiveGets = Math.max(maxActiveGets, activeGets);
+      try {
+        return responses.shift()!;
+      } finally {
+        activeGets -= 1;
+      }
+    });
+    const cancelJob = vi.fn().mockRejectedValue(new JobsApiError("JOB_NOT_CANCELLABLE", 409));
+    const api = setup("CLIENT", {
+      listJobs: vi.fn().mockResolvedValue({ items: [job("QUEUED", JOB_A)], next_cursor: null }),
+      getJob,
+      cancelJob,
+    });
+    await selectJob(JOB_A);
+    expect(getJob).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Hủy công việc" }));
+    await flushReactPromises();
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+    expect(getJob).toHaveBeenCalledTimes(2);
+    expect(cancelJob).toHaveBeenCalledTimes(1);
+
+    await advanceClock(1999);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await advanceClock(1);
+    expect(getJob).toHaveBeenCalledTimes(3);
+    expect(detailStatus()).toHaveTextContent("Hoàn tất");
+    await advanceClock(10000);
+
+    expect(getJob).toHaveBeenCalledTimes(3);
+    expect(maxActiveGets).toBe(1);
+    expect(api.submitJob).not.toHaveBeenCalled();
+  });
+
+  it("VT090-P1-02 aborts and ignores a late poll response during Cancel reconciliation, then resumes", async () => {
+    vi.useFakeTimers();
+    const latePoll = deferred<JobResponse>();
+    let latePollSignal: AbortSignal | undefined;
+    let activeGets = 0;
+    let maxActiveGets = 0;
+    let readCount = 0;
+    const getJob = vi.fn((jobId: string, signal?: AbortSignal) => {
+      readCount += 1;
+      activeGets += 1;
+      maxActiveGets = Math.max(maxActiveGets, activeGets);
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        activeGets -= 1;
+        signal?.removeEventListener("abort", release);
+      };
+      signal?.addEventListener("abort", release, { once: true });
+      const response = readCount === 1
+        ? Promise.resolve(job("QUEUED", jobId))
+        : readCount === 2
+          ? (latePollSignal = signal, latePoll.promise)
+          : Promise.resolve(job(readCount === 3 ? "RUNNING" : "COMPLETED", jobId));
+      return response.finally(release);
+    });
+    const cancelJob = vi.fn().mockRejectedValue(new JobsApiError("JOB_NOT_CANCELLABLE", 409));
+    const api = setup("CLIENT", {
+      listJobs: vi.fn().mockResolvedValue({ items: [job("QUEUED", JOB_A)], next_cursor: null }),
+      getJob,
+      cancelJob,
+    });
+    await selectJob(JOB_A);
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    expect(latePollSignal?.aborted).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Hủy công việc" }));
+    await flushReactPromises();
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+    expect(latePollSignal?.aborted).toBe(true);
+    expect(activeGets).toBe(0);
+    expect(getJob).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      latePoll.resolve(job("QUEUED", JOB_A));
+      await latePoll.promise;
+    });
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(4);
+    expect(detailStatus()).toHaveTextContent("Hoàn tất");
+    await advanceClock(10000);
+
+    expect(getJob).toHaveBeenCalledTimes(4);
+    expect(maxActiveGets).toBe(1);
+    expect(cancelJob).toHaveBeenCalledTimes(1);
+    expect(api.submitJob).not.toHaveBeenCalled();
+  });
+
   it("never starts an overlapping poll while the previous GET is pending", async () => {
     vi.useFakeTimers();
     const pendingPoll = deferred<JobResponse>();
