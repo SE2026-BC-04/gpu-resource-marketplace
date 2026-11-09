@@ -22,6 +22,6 @@
 | AC-05 60 concurrent read experiment | 60 tasks, 60 responses, nearest-rank p95 | `performance/run-status-load.mjs`, `performance/results-local.json` | `774a2f9`, `ec9f4dc` | Harness PASS, `SIMULATED_ONLY`; 60/60, zero errors, p95 151.155 ms; not production/API evidence |
 | Pairwise requirement | Deterministic constrained covering array | `generate-pairwise.mjs`, `pairwise-cases.json` | `59e6e49` and follow-up pairwise coverage update | PASS: polling 50/50 pairs, submit/retry 30/30; deterministic regeneration hash in `evidence/pairwise-regeneration.log` |
 | Human review of AI tests | Delete weak duplicate; replace vacuous no-POST assertion | `ai-test-review.md`, `frontend/src/ui/jobs/JobsPage.test.tsx` | `972071f` | PASS; visible deletion/replacement diff; revised focused case PASS |
-| Coverage and flaky risk | Provider availability check; five repeated race/timer runs | `coverage-flaky-review.md`, `evidence/flaky-repeats.log` | Current branch | 25/25 selected executions PASS; line/branch coverage NOT_RUN because coverage provider absent |
+| Coverage and flaky risk | Seven selected race/timer tests repeated five times | `coverage-flaky-review.md`, `evidence/flaky-repeats.log` | Current branch | 35/35 selected executions PASS; line/branch coverage NOT_RUN because coverage provider absent |
 
 No production database, migration, API contract, ADR, Manager or Simulator implementation is changed by this slice.
