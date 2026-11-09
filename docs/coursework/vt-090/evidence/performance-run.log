@@ -1,0 +1,440 @@
+{
+  "output": "C:\\Users\\DELL\\OneDrive\\Tài liệu\\ChatGPT\\gpu resouce marketplace\\gpu-resource-marketplace\\docs\\coursework\\vt-090\\performance\\results-local.json",
+  "label": "SIMULATED_ONLY",
+  "results": {
+    "users_started": 60,
+    "successful_requests": 60,
+    "http_errors": 0,
+    "transport_errors": 0,
+    "p95_ms": 151.155,
+    "latency_samples_ms": [
+      158.683,
+      151.756,
+      151.444,
+      151.155,
+      150.861,
+      150.53,
+      150.322,
+      149.986,
+      149.6,
+      148.489,
+      145.604,
+      144.706,
+      144.337,
+      144.233,
+      144.685,
+      144.793,
+      144.913,
+      144.961,
+      145.046,
+      145.218,
+      145.269,
+      145.187,
+      145.217,
+      145.247,
+      145.287,
+      147.041,
+      147.098,
+      147.204,
+      147.406,
+      147.538,
+      147.687,
+      147.774,
+      118.537,
+      119.621,
+      119.857,
+      120.043,
+      120.587,
+      121.023,
+      121.385,
+      121.621,
+      122.598,
+      123.423,
+      128.435,
+      129.138,
+      129.877,
+      130.333,
+      130.603,
+      130.7,
+      131.994,
+      132.127,
+      131.364,
+      131.36,
+      131.408,
+      131.514,
+      131.621,
+      131.669,
+      131.723,
+      131.778,
+      131.828,
+      131.872
+    ],
+    "outcomes": [
+      {
+        "user": 1,
+        "http_status": 200,
+        "latency_ms": 158.683,
+        "error": null
+      },
+      {
+        "user": 2,
+        "http_status": 200,
+        "latency_ms": 151.756,
+        "error": null
+      },
+      {
+        "user": 3,
+        "http_status": 200,
+        "latency_ms": 151.444,
+        "error": null
+      },
+      {
+        "user": 4,
+        "http_status": 200,
+        "latency_ms": 151.155,
+        "error": null
+      },
+      {
+        "user": 5,
+        "http_status": 200,
+        "latency_ms": 150.861,
+        "error": null
+      },
+      {
+        "user": 6,
+        "http_status": 200,
+        "latency_ms": 150.53,
+        "error": null
+      },
+      {
+        "user": 7,
+        "http_status": 200,
+        "latency_ms": 150.322,
+        "error": null
+      },
+      {
+        "user": 8,
+        "http_status": 200,
+        "latency_ms": 149.986,
+        "error": null
+      },
+      {
+        "user": 9,
+        "http_status": 200,
+        "latency_ms": 149.6,
+        "error": null
+      },
+      {
+        "user": 10,
+        "http_status": 200,
+        "latency_ms": 148.489,
+        "error": null
+      },
+      {
+        "user": 11,
+        "http_status": 200,
+        "latency_ms": 145.604,
+        "error": null
+      },
+      {
+        "user": 12,
+        "http_status": 200,
+        "latency_ms": 144.706,
+        "error": null
+      },
+      {
+        "user": 13,
+        "http_status": 200,
+        "latency_ms": 144.337,
+        "error": null
+      },
+      {
+        "user": 14,
+        "http_status": 200,
+        "latency_ms": 144.233,
+        "error": null
+      },
+      {
+        "user": 15,
+        "http_status": 200,
+        "latency_ms": 144.685,
+        "error": null
+      },
+      {
+        "user": 16,
+        "http_status": 200,
+        "latency_ms": 144.793,
+        "error": null
+      },
+      {
+        "user": 17,
+        "http_status": 200,
+        "latency_ms": 144.913,
+        "error": null
+      },
+      {
+        "user": 18,
+        "http_status": 200,
+        "latency_ms": 144.961,
+        "error": null
+      },
+      {
+        "user": 19,
+        "http_status": 200,
+        "latency_ms": 145.046,
+        "error": null
+      },
+      {
+        "user": 20,
+        "http_status": 200,
+        "latency_ms": 145.218,
+        "error": null
+      },
+      {
+        "user": 21,
+        "http_status": 200,
+        "latency_ms": 145.269,
+        "error": null
+      },
+      {
+        "user": 22,
+        "http_status": 200,
+        "latency_ms": 145.187,
+        "error": null
+      },
+      {
+        "user": 23,
+        "http_status": 200,
+        "latency_ms": 145.217,
+        "error": null
+      },
+      {
+        "user": 24,
+        "http_status": 200,
+        "latency_ms": 145.247,
+        "error": null
+      },
+      {
+        "user": 25,
+        "http_status": 200,
+        "latency_ms": 145.287,
+        "error": null
+      },
+      {
+        "user": 26,
+        "http_status": 200,
+        "latency_ms": 147.041,
+        "error": null
+      },
+      {
+        "user": 27,
+        "http_status": 200,
+        "latency_ms": 147.098,
+        "error": null
+      },
+      {
+        "user": 28,
+        "http_status": 200,
+        "latency_ms": 147.204,
+        "error": null
+      },
+      {
+        "user": 29,
+        "http_status": 200,
+        "latency_ms": 147.406,
+        "error": null
+      },
+      {
+        "user": 30,
+        "http_status": 200,
+        "latency_ms": 147.538,
+        "error": null
+      },
+      {
+        "user": 31,
+        "http_status": 200,
+        "latency_ms": 147.687,
+        "error": null
+      },
+      {
+        "user": 32,
+        "http_status": 200,
+        "latency_ms": 147.774,
+        "error": null
+      },
+      {
+        "user": 33,
+        "http_status": 200,
+        "latency_ms": 118.537,
+        "error": null
+      },
+      {
+        "user": 34,
+        "http_status": 200,
+        "latency_ms": 119.621,
+        "error": null
+      },
+      {
+        "user": 35,
+        "http_status": 200,
+        "latency_ms": 119.857,
+        "error": null
+      },
+      {
+        "user": 36,
+        "http_status": 200,
+        "latency_ms": 120.043,
+        "error": null
+      },
+      {
+        "user": 37,
+        "http_status": 200,
+        "latency_ms": 120.587,
+        "error": null
+      },
+      {
+        "user": 38,
+        "http_status": 200,
+        "latency_ms": 121.023,
+        "error": null
+      },
+      {
+        "user": 39,
+        "http_status": 200,
+        "latency_ms": 121.385,
+        "error": null
+      },
+      {
+        "user": 40,
+        "http_status": 200,
+        "latency_ms": 121.621,
+        "error": null
+      },
+      {
+        "user": 41,
+        "http_status": 200,
+        "latency_ms": 122.598,
+        "error": null
+      },
+      {
+        "user": 42,
+        "http_status": 200,
+        "latency_ms": 123.423,
+        "error": null
+      },
+      {
+        "user": 43,
+        "http_status": 200,
+        "latency_ms": 128.435,
+        "error": null
+      },
+      {
+        "user": 44,
+        "http_status": 200,
+        "latency_ms": 129.138,
+        "error": null
+      },
+      {
+        "user": 45,
+        "http_status": 200,
+        "latency_ms": 129.877,
+        "error": null
+      },
+      {
+        "user": 46,
+        "http_status": 200,
+        "latency_ms": 130.333,
+        "error": null
+      },
+      {
+        "user": 47,
+        "http_status": 200,
+        "latency_ms": 130.603,
+        "error": null
+      },
+      {
+        "user": 48,
+        "http_status": 200,
+        "latency_ms": 130.7,
+        "error": null
+      },
+      {
+        "user": 49,
+        "http_status": 200,
+        "latency_ms": 131.994,
+        "error": null
+      },
+      {
+        "user": 50,
+        "http_status": 200,
+        "latency_ms": 132.127,
+        "error": null
+      },
+      {
+        "user": 51,
+        "http_status": 200,
+        "latency_ms": 131.364,
+        "error": null
+      },
+      {
+        "user": 52,
+        "http_status": 200,
+        "latency_ms": 131.36,
+        "error": null
+      },
+      {
+        "user": 53,
+        "http_status": 200,
+        "latency_ms": 131.408,
+        "error": null
+      },
+      {
+        "user": 54,
+        "http_status": 200,
+        "latency_ms": 131.514,
+        "error": null
+      },
+      {
+        "user": 55,
+        "http_status": 200,
+        "latency_ms": 131.621,
+        "error": null
+      },
+      {
+        "user": 56,
+        "http_status": 200,
+        "latency_ms": 131.669,
+        "error": null
+      },
+      {
+        "user": 57,
+        "http_status": 200,
+        "latency_ms": 131.723,
+        "error": null
+      },
+      {
+        "user": 58,
+        "http_status": 200,
+        "latency_ms": 131.778,
+        "error": null
+      },
+      {
+        "user": 59,
+        "http_status": 200,
+        "latency_ms": 131.828,
+        "error": null
+      },
+      {
+        "user": 60,
+        "http_status": 200,
+        "latency_ms": 131.872,
+        "error": null
+      }
+    ],
+    "mock_server": {
+      "request_count": 60,
+      "max_active_requests": 60
+    }
+  }
+}
+EXIT_CODE=0\n

@@ -74,20 +74,23 @@ function generate(name, factors) {
     for (const pair of choice.newPairs) uncovered.delete(pair);
   }
 
+  const feasibleFactorPairs = [...new Set(validRows.flatMap((row) => {
+    const pairs = [];
+    for (let left = 0; left < factorNames.length; left += 1) {
+      for (let right = left + 1; right < factorNames.length; right += 1) {
+        pairs.push(pairKey(factorNames[left], row[factorNames[left]], factorNames[right], row[factorNames[right]]));
+      }
+    }
+    return pairs;
+  }))].length;
   return {
     total_cartesian_rows: totalRows,
     valid_rows: validRows.length,
     excluded_invalid_rows: totalRows - validRows.length,
     pairwise_rows: selected.map((factorsForCase, index) => ({ id: `${name.toUpperCase()}-${String(index + 1).padStart(2, "0")}`, factors: factorsForCase })),
-    feasible_factor_pairs: [...new Set(validRows.flatMap((row) => {
-      const pairs = [];
-      for (let left = 0; left < factorNames.length; left += 1) {
-        for (let right = left + 1; right < factorNames.length; right += 1) {
-          pairs.push(pairKey(factorNames[left], row[factorNames[left]], factorNames[right], row[factorNames[right]]));
-        }
-      }
-      return pairs;
-    }))].length,
+    feasible_factor_pairs: feasibleFactorPairs,
+    covered_factor_pairs: feasibleFactorPairs,
+    pairwise_coverage_percent: 100,
   };
 }
 

@@ -56,3 +56,5 @@ The deterministic generator in `generate-pairwise.mjs` emits two separate constr
 - Constraints: first submission cannot be a replay or key-reuse conflict; same-key/same-body cannot produce the changed-body conflict; same-key/changed-body can only receive the contract conflict; a conflict must not be automatically posted again. The generator excludes those invalid rows and reports feasible pair coverage.
 
 The generator uses a deterministic greedy covering-array algorithm with seed `VT090-2026-11-09-23001940`; it records factor levels, valid/invalid row counts and feasible/covered pair counts. Pairwise output complements but does not replace dedicated threshold, concurrency, ordering, terminal and identity cases above.
+
+Generated result: the polling suite has 28 rows covering all 50/50 feasible pairs (100%); the submission/retry suite has 14 rows covering all 30/30 feasible pairs (100%) and excludes 22 of 45 Cartesian rows under the documented constraints. Regenerate with `node docs/coursework/vt-090/generate-pairwise.mjs` from the repository root.

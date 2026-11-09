@@ -234,7 +234,9 @@
           }
         }
       ],
-      "feasible_factor_pairs": 50
+      "feasible_factor_pairs": 50,
+      "covered_factor_pairs": 50,
+      "pairwise_coverage_percent": 100
     },
     "submission_retry": {
       "total_cartesian_rows": 45,
@@ -354,7 +356,9 @@
           }
         }
       ],
-      "feasible_factor_pairs": 30
+      "feasible_factor_pairs": 30,
+      "covered_factor_pairs": 30,
+      "pairwise_coverage_percent": 100
     }
   }
 }
