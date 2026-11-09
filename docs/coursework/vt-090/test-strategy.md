@@ -43,18 +43,20 @@ The deterministic generator in `generate-pairwise.mjs` emits two separate constr
 
 ### Polling matrix
 
-- `known_status`: `QUEUED`, `RUNNING`.
+- `prior_status`: `QUEUED`, `RUNNING`.
 - `get_result`: `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`, `TIMEOUT`, `HTTP_503`.
 - `ui_context`: `SAME_JOB`, `SWITCH_JOB`, `UNMOUNT`, `CHANGE_IDENTITY`.
-- Constraint: all combinations are reachable: an in-flight read may complete, fail, or be invalidated by any UI context. Terminal statuses are response outcomes; terminal rows test stop behavior.
+- Persisted business transitions are constrained to `QUEUED → QUEUED/RUNNING/CANCELLED` and `RUNNING → RUNNING/COMPLETED/FAILED`. `TIMEOUT` and `HTTP_503` are transient GET outcomes, not Job states. Invalid persisted edges are excluded row by row with a reason and mapped to the PostgreSQL lifecycle guard test; that database-backed test is `NOT_RUN` here because no disposable cluster was verified. A late `QUEUED` response after `RUNNING` is a stale response, covered separately by the component race tests rather than treated as a valid state transition.
+- Every generated row executes as one Vitest case in `frontend/src/ui/jobs/JobsPage.pairwise.test.tsx`. The test checks UI/lifecycle outcome, stale response handling, bounded request activity, and that polling emits no POST.
 
 ### Submission/retry matrix
 
 - `attempt`: `FIRST_SUBMISSION`, `SAME_KEY_SAME_BODY`, `SAME_KEY_CHANGED_BODY`.
 - `post_result`: `201_CREATED`, `200_REPLAY`, `NETWORK_LOST_AFTER_COMMIT`, `503_BEFORE_COMMIT`, `409_KEY_REUSED`.
 - `recovery`: `NO_AUTOMATIC_POST`, `RETRY_SAME_ATTEMPT`, `EDIT_AND_NEW_ATTEMPT`.
-- Constraints: first submission cannot be a replay or key-reuse conflict; same-key/same-body cannot produce the changed-body conflict; same-key/changed-body can only receive the contract conflict; a conflict must not be automatically posted again. The generator excludes those invalid rows and reports feasible pair coverage.
+- Constraints exclude outcomes that violate the API semantics: a first submit cannot be a replay/conflict; same-key/same-body cannot be a second create or changed-body conflict; same-key/changed-body must return the key-reuse conflict; success cannot cause another submit; uncertain outcomes must preserve the frozen key/body; and a changed-body conflict cannot retry the same attempt.
+- Every generated row executes as one API-client test in `frontend/src/api/jobs.pairwise.test.ts`. It verifies the client request/result mapping with mocked HTTP; it does **not** prove PostgreSQL idempotency. Backend/DB behavior remains supported only by the existing service/guard tests.
 
-The generator uses a deterministic greedy covering-array algorithm with seed `VT090-2026-11-09-23001940`; it records factor levels, valid/invalid row counts and feasible/covered pair counts. Pairwise output complements but does not replace dedicated threshold, concurrency, ordering, terminal and identity cases above.
+The deterministic greedy covering-array generator (seed `VT090-2026-11-09-23001940`) records the complete Cartesian count, executable configurations, excluded rows and reasons, generated rows, explicit execution target, feasible pair set and measured covered pair set. It throws if generated rows fail to cover every feasible pair; the percentage is calculated from these sets, not hardcoded. Each suite's `execution_target` is exercised with one test per emitted row. Run `node docs/coursework/vt-090/generate-pairwise.mjs` to regenerate and validate the JSON.
 
-Generated result: the polling suite has 28 rows covering all 50/50 feasible pairs (100%); the submission/retry suite has 14 rows covering all 30/30 feasible pairs (100%) and excludes 22 of 45 Cartesian rows under the documented constraints. Regenerate with `node docs/coursework/vt-090/generate-pairwise.mjs` from the repository root.
+Current generated result: polling has 28 selected rows from 40 executable configurations (16/56 invalid rows excluded), covering 46/46 feasible pairs. Submission/retry has 8 selected rows from 12 executable configurations (33/45 invalid rows excluded), covering 21/21 feasible pairs. The final recorded execution runs all 28 polling rows and all 8 API-client rows; pairwise coverage does not mean all valid configurations were individually executed. See `evidence/review-p2-pairwise.log` for regeneration and test counts. Dedicated boundary, concurrency, ordering, terminal and identity tests remain in the component suite.

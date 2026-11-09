@@ -5,243 +5,649 @@
   "generated_from": "generate-pairwise.mjs",
   "suites": {
     "polling": {
+      "execution_target": "frontend/src/ui/jobs/JobsPage.pairwise.test.tsx (one Vitest case per generated row)",
+      "excluded_case_mapping": "Invalid persisted lifecycle edges map to backend/tests/test_jobs_guard_update.py::test_only_the_four_lifecycle_edges_exist_even_for_the_owner; PostgreSQL guard test is NOT_RUN locally without a verified disposable cluster. Late QUEUED responses after RUNNING are exercised separately as stale-response cases, not valid transitions.",
       "total_cartesian_rows": 56,
-      "valid_rows": 56,
-      "excluded_invalid_rows": 0,
+      "valid_rows": 40,
+      "excluded_invalid_rows": 16,
+      "excluded_rows": [
+        {
+          "factors": {
+            "prior_status": "QUEUED",
+            "get_result": "COMPLETED",
+            "ui_context": "SAME_JOB"
+          },
+          "reason": "invalid persisted Job transition QUEUED -> COMPLETED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "QUEUED",
+            "get_result": "COMPLETED",
+            "ui_context": "SWITCH_JOB"
+          },
+          "reason": "invalid persisted Job transition QUEUED -> COMPLETED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "QUEUED",
+            "get_result": "COMPLETED",
+            "ui_context": "UNMOUNT"
+          },
+          "reason": "invalid persisted Job transition QUEUED -> COMPLETED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "QUEUED",
+            "get_result": "COMPLETED",
+            "ui_context": "CHANGE_IDENTITY"
+          },
+          "reason": "invalid persisted Job transition QUEUED -> COMPLETED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "QUEUED",
+            "get_result": "FAILED",
+            "ui_context": "SAME_JOB"
+          },
+          "reason": "invalid persisted Job transition QUEUED -> FAILED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "QUEUED",
+            "get_result": "FAILED",
+            "ui_context": "SWITCH_JOB"
+          },
+          "reason": "invalid persisted Job transition QUEUED -> FAILED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "QUEUED",
+            "get_result": "FAILED",
+            "ui_context": "UNMOUNT"
+          },
+          "reason": "invalid persisted Job transition QUEUED -> FAILED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "QUEUED",
+            "get_result": "FAILED",
+            "ui_context": "CHANGE_IDENTITY"
+          },
+          "reason": "invalid persisted Job transition QUEUED -> FAILED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "RUNNING",
+            "get_result": "QUEUED",
+            "ui_context": "SAME_JOB"
+          },
+          "reason": "invalid persisted Job transition RUNNING -> QUEUED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "RUNNING",
+            "get_result": "QUEUED",
+            "ui_context": "SWITCH_JOB"
+          },
+          "reason": "invalid persisted Job transition RUNNING -> QUEUED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "RUNNING",
+            "get_result": "QUEUED",
+            "ui_context": "UNMOUNT"
+          },
+          "reason": "invalid persisted Job transition RUNNING -> QUEUED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "RUNNING",
+            "get_result": "QUEUED",
+            "ui_context": "CHANGE_IDENTITY"
+          },
+          "reason": "invalid persisted Job transition RUNNING -> QUEUED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "RUNNING",
+            "get_result": "CANCELLED",
+            "ui_context": "SAME_JOB"
+          },
+          "reason": "invalid persisted Job transition RUNNING -> CANCELLED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "RUNNING",
+            "get_result": "CANCELLED",
+            "ui_context": "SWITCH_JOB"
+          },
+          "reason": "invalid persisted Job transition RUNNING -> CANCELLED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "RUNNING",
+            "get_result": "CANCELLED",
+            "ui_context": "UNMOUNT"
+          },
+          "reason": "invalid persisted Job transition RUNNING -> CANCELLED; DB lifecycle guard rejects it"
+        },
+        {
+          "factors": {
+            "prior_status": "RUNNING",
+            "get_result": "CANCELLED",
+            "ui_context": "CHANGE_IDENTITY"
+          },
+          "reason": "invalid persisted Job transition RUNNING -> CANCELLED; DB lifecycle guard rejects it"
+        }
+      ],
       "pairwise_rows": [
         {
           "id": "POLLING-01",
           "factors": {
-            "known_status": "QUEUED",
-            "get_result": "CANCELLED",
+            "prior_status": "RUNNING",
+            "get_result": "FAILED",
             "ui_context": "UNMOUNT"
           }
         },
         {
           "id": "POLLING-02",
           "factors": {
-            "known_status": "RUNNING",
-            "get_result": "TIMEOUT",
-            "ui_context": "UNMOUNT"
+            "prior_status": "QUEUED",
+            "get_result": "QUEUED",
+            "ui_context": "SWITCH_JOB"
           }
         },
         {
           "id": "POLLING-03",
           "factors": {
-            "known_status": "QUEUED",
-            "get_result": "HTTP_503",
-            "ui_context": "CHANGE_IDENTITY"
+            "prior_status": "QUEUED",
+            "get_result": "CANCELLED",
+            "ui_context": "UNMOUNT"
           }
         },
         {
           "id": "POLLING-04",
           "factors": {
-            "known_status": "RUNNING",
-            "get_result": "COMPLETED",
-            "ui_context": "SAME_JOB"
+            "prior_status": "QUEUED",
+            "get_result": "TIMEOUT",
+            "ui_context": "CHANGE_IDENTITY"
           }
         },
         {
           "id": "POLLING-05",
           "factors": {
-            "known_status": "QUEUED",
-            "get_result": "QUEUED",
+            "prior_status": "RUNNING",
+            "get_result": "HTTP_503",
             "ui_context": "SWITCH_JOB"
           }
         },
         {
           "id": "POLLING-06",
           "factors": {
-            "known_status": "RUNNING",
-            "get_result": "CANCELLED",
-            "ui_context": "SWITCH_JOB"
+            "prior_status": "QUEUED",
+            "get_result": "HTTP_503",
+            "ui_context": "SAME_JOB"
           }
         },
         {
           "id": "POLLING-07",
           "factors": {
-            "known_status": "RUNNING",
-            "get_result": "QUEUED",
+            "prior_status": "RUNNING",
+            "get_result": "COMPLETED",
             "ui_context": "CHANGE_IDENTITY"
           }
         },
         {
           "id": "POLLING-08",
           "factors": {
-            "known_status": "QUEUED",
-            "get_result": "RUNNING",
+            "prior_status": "RUNNING",
+            "get_result": "TIMEOUT",
             "ui_context": "SAME_JOB"
           }
         },
         {
           "id": "POLLING-09",
           "factors": {
-            "known_status": "RUNNING",
-            "get_result": "HTTP_503",
+            "prior_status": "QUEUED",
+            "get_result": "RUNNING",
             "ui_context": "UNMOUNT"
           }
         },
         {
           "id": "POLLING-10",
           "factors": {
-            "known_status": "QUEUED",
-            "get_result": "COMPLETED",
-            "ui_context": "CHANGE_IDENTITY"
+            "prior_status": "RUNNING",
+            "get_result": "RUNNING",
+            "ui_context": "SWITCH_JOB"
           }
         },
         {
           "id": "POLLING-11",
           "factors": {
-            "known_status": "RUNNING",
-            "get_result": "RUNNING",
-            "ui_context": "CHANGE_IDENTITY"
+            "prior_status": "QUEUED",
+            "get_result": "CANCELLED",
+            "ui_context": "SAME_JOB"
           }
         },
         {
           "id": "POLLING-12",
           "factors": {
-            "known_status": "RUNNING",
-            "get_result": "FAILED",
-            "ui_context": "SAME_JOB"
+            "prior_status": "QUEUED",
+            "get_result": "CANCELLED",
+            "ui_context": "SWITCH_JOB"
           }
         },
         {
           "id": "POLLING-13",
           "factors": {
-            "known_status": "QUEUED",
-            "get_result": "TIMEOUT",
-            "ui_context": "SWITCH_JOB"
+            "prior_status": "RUNNING",
+            "get_result": "HTTP_503",
+            "ui_context": "UNMOUNT"
           }
         },
         {
           "id": "POLLING-14",
           "factors": {
-            "known_status": "QUEUED",
-            "get_result": "FAILED",
-            "ui_context": "SWITCH_JOB"
+            "prior_status": "QUEUED",
+            "get_result": "HTTP_503",
+            "ui_context": "CHANGE_IDENTITY"
           }
         },
         {
           "id": "POLLING-15",
           "factors": {
-            "known_status": "RUNNING",
-            "get_result": "COMPLETED",
-            "ui_context": "UNMOUNT"
+            "prior_status": "RUNNING",
+            "get_result": "FAILED",
+            "ui_context": "CHANGE_IDENTITY"
           }
         },
         {
           "id": "POLLING-16",
           "factors": {
-            "known_status": "QUEUED",
+            "prior_status": "QUEUED",
             "get_result": "CANCELLED",
-            "ui_context": "SAME_JOB"
+            "ui_context": "CHANGE_IDENTITY"
           }
         },
         {
           "id": "POLLING-17",
           "factors": {
-            "known_status": "RUNNING",
-            "get_result": "QUEUED",
-            "ui_context": "UNMOUNT"
+            "prior_status": "QUEUED",
+            "get_result": "RUNNING",
+            "ui_context": "CHANGE_IDENTITY"
           }
         },
         {
           "id": "POLLING-18",
           "factors": {
-            "known_status": "RUNNING",
-            "get_result": "TIMEOUT",
-            "ui_context": "SAME_JOB"
+            "prior_status": "RUNNING",
+            "get_result": "FAILED",
+            "ui_context": "SWITCH_JOB"
           }
         },
         {
           "id": "POLLING-19",
           "factors": {
-            "known_status": "RUNNING",
-            "get_result": "CANCELLED",
-            "ui_context": "CHANGE_IDENTITY"
+            "prior_status": "RUNNING",
+            "get_result": "TIMEOUT",
+            "ui_context": "SWITCH_JOB"
           }
         },
         {
           "id": "POLLING-20",
           "factors": {
-            "known_status": "RUNNING",
+            "prior_status": "RUNNING",
             "get_result": "FAILED",
-            "ui_context": "CHANGE_IDENTITY"
+            "ui_context": "SAME_JOB"
           }
         },
         {
           "id": "POLLING-21",
           "factors": {
-            "known_status": "QUEUED",
-            "get_result": "TIMEOUT",
-            "ui_context": "CHANGE_IDENTITY"
+            "prior_status": "QUEUED",
+            "get_result": "QUEUED",
+            "ui_context": "SAME_JOB"
           }
         },
         {
           "id": "POLLING-22",
           "factors": {
-            "known_status": "QUEUED",
-            "get_result": "HTTP_503",
-            "ui_context": "SWITCH_JOB"
+            "prior_status": "QUEUED",
+            "get_result": "RUNNING",
+            "ui_context": "SAME_JOB"
           }
         },
         {
           "id": "POLLING-23",
           "factors": {
-            "known_status": "RUNNING",
-            "get_result": "COMPLETED",
-            "ui_context": "SWITCH_JOB"
+            "prior_status": "QUEUED",
+            "get_result": "TIMEOUT",
+            "ui_context": "UNMOUNT"
           }
         },
         {
           "id": "POLLING-24",
           "factors": {
-            "known_status": "QUEUED",
-            "get_result": "FAILED",
+            "prior_status": "QUEUED",
+            "get_result": "QUEUED",
             "ui_context": "UNMOUNT"
           }
         },
         {
           "id": "POLLING-25",
           "factors": {
-            "known_status": "QUEUED",
-            "get_result": "HTTP_503",
-            "ui_context": "SAME_JOB"
+            "prior_status": "RUNNING",
+            "get_result": "COMPLETED",
+            "ui_context": "SWITCH_JOB"
           }
         },
         {
           "id": "POLLING-26",
           "factors": {
-            "known_status": "QUEUED",
-            "get_result": "RUNNING",
-            "ui_context": "SWITCH_JOB"
+            "prior_status": "RUNNING",
+            "get_result": "COMPLETED",
+            "ui_context": "SAME_JOB"
           }
         },
         {
           "id": "POLLING-27",
           "factors": {
-            "known_status": "RUNNING",
-            "get_result": "RUNNING",
-            "ui_context": "UNMOUNT"
+            "prior_status": "QUEUED",
+            "get_result": "QUEUED",
+            "ui_context": "CHANGE_IDENTITY"
           }
         },
         {
           "id": "POLLING-28",
           "factors": {
-            "known_status": "RUNNING",
-            "get_result": "QUEUED",
-            "ui_context": "SAME_JOB"
+            "prior_status": "RUNNING",
+            "get_result": "COMPLETED",
+            "ui_context": "UNMOUNT"
           }
         }
       ],
-      "feasible_factor_pairs": 50,
-      "covered_factor_pairs": 50,
-      "pairwise_coverage_percent": 100
+      "feasible_factor_pairs": 46,
+      "covered_factor_pairs": 46,
+      "pairwise_coverage_percent": 100,
+      "excluded_by_reason": {
+        "invalid persisted Job transition QUEUED -> COMPLETED; DB lifecycle guard rejects it": 4,
+        "invalid persisted Job transition QUEUED -> FAILED; DB lifecycle guard rejects it": 4,
+        "invalid persisted Job transition RUNNING -> QUEUED; DB lifecycle guard rejects it": 4,
+        "invalid persisted Job transition RUNNING -> CANCELLED; DB lifecycle guard rejects it": 4
+      }
     },
     "submission_retry": {
+      "execution_target": "frontend/src/api/jobs.pairwise.test.ts (one API-client case per generated row; mocked HTTP only)",
+      "excluded_case_mapping": null,
       "total_cartesian_rows": 45,
-      "valid_rows": 23,
-      "excluded_invalid_rows": 22,
+      "valid_rows": 12,
+      "excluded_invalid_rows": 33,
+      "excluded_rows": [
+        {
+          "factors": {
+            "attempt": "FIRST_SUBMISSION",
+            "post_result": "201_CREATED",
+            "recovery": "RETRY_SAME_ATTEMPT"
+          },
+          "reason": "a successful response must not trigger a retry or another submit (RETRY_SAME_ATTEMPT)"
+        },
+        {
+          "factors": {
+            "attempt": "FIRST_SUBMISSION",
+            "post_result": "201_CREATED",
+            "recovery": "EDIT_AND_NEW_ATTEMPT"
+          },
+          "reason": "a successful response must not trigger a retry or another submit (EDIT_AND_NEW_ATTEMPT)"
+        },
+        {
+          "factors": {
+            "attempt": "FIRST_SUBMISSION",
+            "post_result": "200_REPLAY",
+            "recovery": "NO_AUTOMATIC_POST"
+          },
+          "reason": "a first submission cannot be a replay or same-key conflict (200_REPLAY)"
+        },
+        {
+          "factors": {
+            "attempt": "FIRST_SUBMISSION",
+            "post_result": "200_REPLAY",
+            "recovery": "RETRY_SAME_ATTEMPT"
+          },
+          "reason": "a first submission cannot be a replay or same-key conflict (200_REPLAY)"
+        },
+        {
+          "factors": {
+            "attempt": "FIRST_SUBMISSION",
+            "post_result": "200_REPLAY",
+            "recovery": "EDIT_AND_NEW_ATTEMPT"
+          },
+          "reason": "a first submission cannot be a replay or same-key conflict (200_REPLAY)"
+        },
+        {
+          "factors": {
+            "attempt": "FIRST_SUBMISSION",
+            "post_result": "NETWORK_LOST_AFTER_COMMIT",
+            "recovery": "EDIT_AND_NEW_ATTEMPT"
+          },
+          "reason": "an uncertain attempt must be reconciled with the same frozen key/body before editing"
+        },
+        {
+          "factors": {
+            "attempt": "FIRST_SUBMISSION",
+            "post_result": "503_BEFORE_COMMIT",
+            "recovery": "EDIT_AND_NEW_ATTEMPT"
+          },
+          "reason": "an uncertain attempt must be reconciled with the same frozen key/body before editing"
+        },
+        {
+          "factors": {
+            "attempt": "FIRST_SUBMISSION",
+            "post_result": "409_KEY_REUSED",
+            "recovery": "NO_AUTOMATIC_POST"
+          },
+          "reason": "a first submission cannot be a replay or same-key conflict (409_KEY_REUSED)"
+        },
+        {
+          "factors": {
+            "attempt": "FIRST_SUBMISSION",
+            "post_result": "409_KEY_REUSED",
+            "recovery": "RETRY_SAME_ATTEMPT"
+          },
+          "reason": "a first submission cannot be a replay or same-key conflict (409_KEY_REUSED)"
+        },
+        {
+          "factors": {
+            "attempt": "FIRST_SUBMISSION",
+            "post_result": "409_KEY_REUSED",
+            "recovery": "EDIT_AND_NEW_ATTEMPT"
+          },
+          "reason": "a first submission cannot be a replay or same-key conflict (409_KEY_REUSED)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_SAME_BODY",
+            "post_result": "201_CREATED",
+            "recovery": "NO_AUTOMATIC_POST"
+          },
+          "reason": "same key/body retry cannot be a changed-body conflict or a second create (201_CREATED)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_SAME_BODY",
+            "post_result": "201_CREATED",
+            "recovery": "RETRY_SAME_ATTEMPT"
+          },
+          "reason": "same key/body retry cannot be a changed-body conflict or a second create (201_CREATED)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_SAME_BODY",
+            "post_result": "201_CREATED",
+            "recovery": "EDIT_AND_NEW_ATTEMPT"
+          },
+          "reason": "same key/body retry cannot be a changed-body conflict or a second create (201_CREATED)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_SAME_BODY",
+            "post_result": "200_REPLAY",
+            "recovery": "RETRY_SAME_ATTEMPT"
+          },
+          "reason": "a successful response must not trigger a retry or another submit (RETRY_SAME_ATTEMPT)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_SAME_BODY",
+            "post_result": "200_REPLAY",
+            "recovery": "EDIT_AND_NEW_ATTEMPT"
+          },
+          "reason": "a successful response must not trigger a retry or another submit (EDIT_AND_NEW_ATTEMPT)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_SAME_BODY",
+            "post_result": "NETWORK_LOST_AFTER_COMMIT",
+            "recovery": "EDIT_AND_NEW_ATTEMPT"
+          },
+          "reason": "an uncertain attempt must be reconciled with the same frozen key/body before editing"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_SAME_BODY",
+            "post_result": "503_BEFORE_COMMIT",
+            "recovery": "EDIT_AND_NEW_ATTEMPT"
+          },
+          "reason": "an uncertain attempt must be reconciled with the same frozen key/body before editing"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_SAME_BODY",
+            "post_result": "409_KEY_REUSED",
+            "recovery": "NO_AUTOMATIC_POST"
+          },
+          "reason": "same key/body retry cannot be a changed-body conflict or a second create (409_KEY_REUSED)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_SAME_BODY",
+            "post_result": "409_KEY_REUSED",
+            "recovery": "RETRY_SAME_ATTEMPT"
+          },
+          "reason": "same key/body retry cannot be a changed-body conflict or a second create (409_KEY_REUSED)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_SAME_BODY",
+            "post_result": "409_KEY_REUSED",
+            "recovery": "EDIT_AND_NEW_ATTEMPT"
+          },
+          "reason": "same key/body retry cannot be a changed-body conflict or a second create (409_KEY_REUSED)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_CHANGED_BODY",
+            "post_result": "201_CREATED",
+            "recovery": "NO_AUTOMATIC_POST"
+          },
+          "reason": "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (201_CREATED)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_CHANGED_BODY",
+            "post_result": "201_CREATED",
+            "recovery": "RETRY_SAME_ATTEMPT"
+          },
+          "reason": "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (201_CREATED)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_CHANGED_BODY",
+            "post_result": "201_CREATED",
+            "recovery": "EDIT_AND_NEW_ATTEMPT"
+          },
+          "reason": "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (201_CREATED)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_CHANGED_BODY",
+            "post_result": "200_REPLAY",
+            "recovery": "NO_AUTOMATIC_POST"
+          },
+          "reason": "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (200_REPLAY)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_CHANGED_BODY",
+            "post_result": "200_REPLAY",
+            "recovery": "RETRY_SAME_ATTEMPT"
+          },
+          "reason": "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (200_REPLAY)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_CHANGED_BODY",
+            "post_result": "200_REPLAY",
+            "recovery": "EDIT_AND_NEW_ATTEMPT"
+          },
+          "reason": "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (200_REPLAY)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_CHANGED_BODY",
+            "post_result": "NETWORK_LOST_AFTER_COMMIT",
+            "recovery": "NO_AUTOMATIC_POST"
+          },
+          "reason": "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (NETWORK_LOST_AFTER_COMMIT)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_CHANGED_BODY",
+            "post_result": "NETWORK_LOST_AFTER_COMMIT",
+            "recovery": "RETRY_SAME_ATTEMPT"
+          },
+          "reason": "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (NETWORK_LOST_AFTER_COMMIT)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_CHANGED_BODY",
+            "post_result": "NETWORK_LOST_AFTER_COMMIT",
+            "recovery": "EDIT_AND_NEW_ATTEMPT"
+          },
+          "reason": "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (NETWORK_LOST_AFTER_COMMIT)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_CHANGED_BODY",
+            "post_result": "503_BEFORE_COMMIT",
+            "recovery": "NO_AUTOMATIC_POST"
+          },
+          "reason": "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (503_BEFORE_COMMIT)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_CHANGED_BODY",
+            "post_result": "503_BEFORE_COMMIT",
+            "recovery": "RETRY_SAME_ATTEMPT"
+          },
+          "reason": "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (503_BEFORE_COMMIT)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_CHANGED_BODY",
+            "post_result": "503_BEFORE_COMMIT",
+            "recovery": "EDIT_AND_NEW_ATTEMPT"
+          },
+          "reason": "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (503_BEFORE_COMMIT)"
+        },
+        {
+          "factors": {
+            "attempt": "SAME_KEY_CHANGED_BODY",
+            "post_result": "409_KEY_REUSED",
+            "recovery": "RETRY_SAME_ATTEMPT"
+          },
+          "reason": "a changed-body conflict cannot be retried with the same attempt"
+        }
+      ],
       "pairwise_rows": [
         {
           "id": "SUBMISSION_RETRY-01",
@@ -254,29 +660,13 @@
         {
           "id": "SUBMISSION_RETRY-02",
           "factors": {
-            "attempt": "SAME_KEY_SAME_BODY",
-            "post_result": "201_CREATED",
-            "recovery": "EDIT_AND_NEW_ATTEMPT"
-          }
-        },
-        {
-          "id": "SUBMISSION_RETRY-03",
-          "factors": {
             "attempt": "FIRST_SUBMISSION",
             "post_result": "NETWORK_LOST_AFTER_COMMIT",
             "recovery": "RETRY_SAME_ATTEMPT"
           }
         },
         {
-          "id": "SUBMISSION_RETRY-04",
-          "factors": {
-            "attempt": "SAME_KEY_SAME_BODY",
-            "post_result": "200_REPLAY",
-            "recovery": "RETRY_SAME_ATTEMPT"
-          }
-        },
-        {
-          "id": "SUBMISSION_RETRY-05",
+          "id": "SUBMISSION_RETRY-03",
           "factors": {
             "attempt": "SAME_KEY_CHANGED_BODY",
             "post_result": "409_KEY_REUSED",
@@ -284,10 +674,26 @@
           }
         },
         {
-          "id": "SUBMISSION_RETRY-06",
+          "id": "SUBMISSION_RETRY-04",
           "factors": {
             "attempt": "FIRST_SUBMISSION",
             "post_result": "201_CREATED",
+            "recovery": "NO_AUTOMATIC_POST"
+          }
+        },
+        {
+          "id": "SUBMISSION_RETRY-05",
+          "factors": {
+            "attempt": "SAME_KEY_SAME_BODY",
+            "post_result": "503_BEFORE_COMMIT",
+            "recovery": "RETRY_SAME_ATTEMPT"
+          }
+        },
+        {
+          "id": "SUBMISSION_RETRY-06",
+          "factors": {
+            "attempt": "SAME_KEY_CHANGED_BODY",
+            "post_result": "409_KEY_REUSED",
             "recovery": "NO_AUTOMATIC_POST"
           }
         },
@@ -296,59 +702,11 @@
           "factors": {
             "attempt": "FIRST_SUBMISSION",
             "post_result": "503_BEFORE_COMMIT",
-            "recovery": "EDIT_AND_NEW_ATTEMPT"
+            "recovery": "NO_AUTOMATIC_POST"
           }
         },
         {
           "id": "SUBMISSION_RETRY-08",
-          "factors": {
-            "attempt": "SAME_KEY_SAME_BODY",
-            "post_result": "503_BEFORE_COMMIT",
-            "recovery": "NO_AUTOMATIC_POST"
-          }
-        },
-        {
-          "id": "SUBMISSION_RETRY-09",
-          "factors": {
-            "attempt": "SAME_KEY_CHANGED_BODY",
-            "post_result": "409_KEY_REUSED",
-            "recovery": "NO_AUTOMATIC_POST"
-          }
-        },
-        {
-          "id": "SUBMISSION_RETRY-10",
-          "factors": {
-            "attempt": "SAME_KEY_SAME_BODY",
-            "post_result": "201_CREATED",
-            "recovery": "RETRY_SAME_ATTEMPT"
-          }
-        },
-        {
-          "id": "SUBMISSION_RETRY-11",
-          "factors": {
-            "attempt": "SAME_KEY_SAME_BODY",
-            "post_result": "NETWORK_LOST_AFTER_COMMIT",
-            "recovery": "EDIT_AND_NEW_ATTEMPT"
-          }
-        },
-        {
-          "id": "SUBMISSION_RETRY-12",
-          "factors": {
-            "attempt": "FIRST_SUBMISSION",
-            "post_result": "503_BEFORE_COMMIT",
-            "recovery": "RETRY_SAME_ATTEMPT"
-          }
-        },
-        {
-          "id": "SUBMISSION_RETRY-13",
-          "factors": {
-            "attempt": "SAME_KEY_SAME_BODY",
-            "post_result": "200_REPLAY",
-            "recovery": "EDIT_AND_NEW_ATTEMPT"
-          }
-        },
-        {
-          "id": "SUBMISSION_RETRY-14",
           "factors": {
             "attempt": "SAME_KEY_SAME_BODY",
             "post_result": "200_REPLAY",
@@ -356,9 +714,23 @@
           }
         }
       ],
-      "feasible_factor_pairs": 30,
-      "covered_factor_pairs": 30,
-      "pairwise_coverage_percent": 100
+      "feasible_factor_pairs": 21,
+      "covered_factor_pairs": 21,
+      "pairwise_coverage_percent": 100,
+      "excluded_by_reason": {
+        "a successful response must not trigger a retry or another submit (RETRY_SAME_ATTEMPT)": 2,
+        "a successful response must not trigger a retry or another submit (EDIT_AND_NEW_ATTEMPT)": 2,
+        "a first submission cannot be a replay or same-key conflict (200_REPLAY)": 3,
+        "an uncertain attempt must be reconciled with the same frozen key/body before editing": 4,
+        "a first submission cannot be a replay or same-key conflict (409_KEY_REUSED)": 3,
+        "same key/body retry cannot be a changed-body conflict or a second create (201_CREATED)": 3,
+        "same key/body retry cannot be a changed-body conflict or a second create (409_KEY_REUSED)": 3,
+        "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (201_CREATED)": 3,
+        "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (200_REPLAY)": 3,
+        "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (NETWORK_LOST_AFTER_COMMIT)": 3,
+        "changed body with a retained key must return IDEMPOTENCY_KEY_REUSED (503_BEFORE_COMMIT)": 3,
+        "a changed-body conflict cannot be retried with the same attempt": 1
+      }
     }
   }
 }
