@@ -587,7 +587,7 @@ describe("VT-090 async status tracking and retry safety", () => {
 
     await advanceClock(2000);
     expect(getJob).toHaveBeenCalledTimes(2);
-    await advanceClock(10000);
+    await advanceClock(4999);
     expect(getJob).toHaveBeenCalledTimes(2);
     await act(async () => { pendingPoll.resolve(job("RUNNING")); await pendingPoll.promise; });
     await advanceClock(1999);
@@ -684,6 +684,31 @@ describe("VT-090 async status tracking and retry safety", () => {
     expect(api.submitJob).not.toHaveBeenCalled();
   });
 
+  it("times out a stalled status GET after five seconds and retries GET only", async () => {
+    vi.useFakeTimers();
+    let timedSignal: AbortSignal | undefined;
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED"))
+      .mockImplementationOnce((_jobId: string, signal?: AbortSignal) => new Promise<JobResponse>((_, reject) => {
+        timedSignal = signal;
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      }))
+      .mockResolvedValueOnce(job("RUNNING"));
+    const api = setup("CLIENT", { getJob });
+    await selectJob();
+
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await advanceClock(4999);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await advanceClock(1);
+    expect(timedSignal?.aborted).toBe(true);
+    await advanceClock(1000);
+    expect(getJob).toHaveBeenCalledTimes(3);
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+    expect(api.submitJob).not.toHaveBeenCalled();
+  });
+
   it("allows the fourth poll after exactly three transient failures", async () => {
     vi.useFakeTimers();
     const getJob = vi.fn()
@@ -758,16 +783,26 @@ describe("VT-090 async status tracking and retry safety", () => {
     expect(getJob).toHaveBeenCalledTimes(4);
   });
 
-  it("keeps a lightweight selected-status assertion (AI review: weak duplicate)", async () => {
-    const api = setup("CLIENT", { getJob: vi.fn().mockResolvedValue(job("QUEUED")) });
-    await selectJob();
-    expect(detailStatus()).toHaveTextContent("Đang chờ");
-    expect(api.listJobs).toHaveBeenCalledTimes(1);
-  });
+  it("does not create a second Job or duplicate success notice when polling fails then recovers", async () => {
+    vi.useFakeTimers();
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED"))
+      .mockRejectedValueOnce(new JobsApiError("NETWORK_ERROR", 0))
+      .mockResolvedValueOnce(job("COMPLETED"));
+    const submitJob = vi.fn().mockResolvedValue(job("QUEUED"));
+    setup("CLIENT", { getJob, submitJob });
+    fireEvent.change(screen.getByLabelText("Listing ID (UUIDv4)"), { target: { value: LISTING_ID } });
+    fireEvent.click(screen.getByRole("button", { name: "Gửi công việc" }));
+    await flushReactPromises();
 
-  it("does not submit when a status GET fails (AI review: weak oracle)", async () => {
-    const api = setup("CLIENT", { getJob: vi.fn().mockRejectedValue(new JobsApiError("NETWORK_ERROR", 0)) });
-    await selectJob();
-    expect(api.submitJob).not.toHaveBeenCalled();
+    expect(submitJob).toHaveBeenCalledTimes(1);
+    expect(getJob).toHaveBeenCalledTimes(1);
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await advanceClock(1000);
+    expect(getJob).toHaveBeenCalledTimes(3);
+    expect(submitJob).toHaveBeenCalledTimes(1);
+    expect(detailStatus()).toHaveTextContent("Hoàn tất");
+    expect(screen.getAllByText(new RegExp(`Đã gửi công việc ${JOB_ID}`))).toHaveLength(1);
   });
 });
