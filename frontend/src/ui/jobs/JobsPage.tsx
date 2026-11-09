@@ -405,7 +405,8 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
           timeoutPromise,
           lifecycleAbort,
         ]);
-        if (!isCurrentRequest() || job.id !== jobId) return;
+        if (!isCurrentRequest()) return;
+        if (job.id !== jobId) throw new JobsApiError("INVALID_RESPONSE", 502);
         currentJob = job;
         consecutiveFailures = 0;
         setDetailResult({ key: requestKey, job, error: null, pollingMessage: null });

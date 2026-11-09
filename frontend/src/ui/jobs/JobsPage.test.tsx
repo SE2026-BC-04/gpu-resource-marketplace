@@ -764,6 +764,23 @@ describe("VT-090 async status tracking and retry safety", () => {
     expect(getJob).toHaveBeenCalledTimes(2);
   });
 
+  it("retries a malformed response that names a different Job", async () => {
+    vi.useFakeTimers();
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED", JOB_ID))
+      .mockResolvedValueOnce(job("RUNNING", JOB_A))
+      .mockResolvedValueOnce(job("RUNNING", JOB_ID));
+    setup("CLIENT", { getJob });
+    await selectJob(JOB_ID);
+
+    await advanceClock(2000);
+    expect(detailStatus()).toHaveTextContent("Đang chờ");
+    await advanceClock(1000);
+    expect(getJob).toHaveBeenCalledTimes(3);
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+    expect(within(screen.getByRole("region", { name: "Chi tiết công việc" })).getByText(JOB_ID)).toBeInTheDocument();
+  });
+
   it("resets the transient failure counter after a successful poll", async () => {
     vi.useFakeTimers();
     const getJob = vi.fn()
