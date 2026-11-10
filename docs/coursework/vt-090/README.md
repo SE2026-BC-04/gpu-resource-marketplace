@@ -73,7 +73,7 @@ Set-Location ..
 - Latest full frontend verification logs: `evidence/frontend-vitest-full-20261111.log`, `frontend-tsc-project-20261111.log`, `frontend-tsc-e2e-20261111.log`, `frontend-vite-build-20261111.log`; exact installed provider verification: `evidence/dependency-provider-verification.log`.
 - Earlier RED/GREEN, build, backend, performance, mutation and repeated-run evidence remains in `evidence/`.
 - Two AI test reviews: `ai-test-review.md`.
-- Mutation `>`→`>=`: `mutation-report.md` and `evidence/mutation-*.log`.
+- Mutation `>`→`>=`: historical evidence remains in `mutation-report.md` and `evidence/mutation-*.log`; exact command and supplemental replay are in `evidence/mutation-boundary-operator-rerun.log`.
 - Additional E2 mutations (`2000→1000`, remove reconciliation poll stop/abort): `mutation-report.md` and `evidence/mutation-*.log`; each source mutation was restored before continuing.
 - 60-task experiment and limitations: `performance-report.md`, `performance/results-local.json`.
 - AC-to-test links: `traceability.md`.

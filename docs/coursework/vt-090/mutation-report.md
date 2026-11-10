@@ -20,6 +20,10 @@ The operator was then mutated from `>` to `>=` in an uncommitted one-line edit. 
 
 The deliberate mutation has been restored. A source diff check confirms no mutation remains. The mutation was killed by the exact threshold assertion, not by setup or compilation failure.
 
+### Supplemental command-recorded replay (2026-11-11)
+
+The historical evidence above remains unchanged. A supplemental replay on source commit `805a4e53326fc0789654242de288199cf5ff7765` records the exact command: `& 'D:\Application\node.exe' node_modules/vitest/vitest.mjs run src/ui/jobs/JobsPage.test.tsx -t 'allows the fourth poll after exactly three transient failures' --reporter=dot`. With the original predicate, 1 focused test passed (exit 0). With the temporary `>=` mutant, it failed the assertion expecting 5 GETs but observed 4 (exit 1, **KILLED**). The source was restored byte-for-byte; SHA-256 before/after was `A534A3B2B24131F27A91A2F15F6546A1F35A81F33B83867C0C54EFF0BD8A0DC8`. Full output is in `evidence/mutation-boundary-operator-rerun.log`.
+
 ## E2 review-requested mutation trials
 
 Both temporary mutations were applied only to `frontend/src/ui/jobs/JobsPage.tsx` on source commit `6daeea368e6add6aefefe8540e637f938698cba4`, tested separately, and restored byte-for-byte after each run. No mutation is present in the final commit.
