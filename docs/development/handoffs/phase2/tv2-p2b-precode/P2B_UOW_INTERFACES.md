@@ -119,7 +119,7 @@ Statuses here are `PROPOSED_FOR_ACK` until a reviewer posts an ACK that quotes t
 | B-IF-02, 03 | TV2 | TV3, TV5 (+ lead for D-01) | `ACK_WITH_ACTIONS (TV3 @ 342497c)`; TV5 and lead pending |
 | B-IF-04 | TV2 | TV3 | `ACK (TV3 @ f315400)`, D-17 default accepted; SQL proof `NOT_RUN` |
 | B-IF-05 | TV2 | TV1, TV3, TV5 | `PENDING_ACK` |
-| B-IF-06 | TV2 | TV1, TV4, TV5 | `PENDING_ACK` |
+| B-IF-06 | TV2 | TV1, TV4, TV5 (+ TV3 for D-18) | `PENDING_ACK`; D-18 part: `ACK (TV3 @ 1bfb864)`, `ACK_WITH_ACTIONS (TV5 @ 84fe452)` (actions addressed at `8d57bec`, re-ACK pending), lead L2 and `E-C3` pending |
 | B-IF-07 | TV2 | TV1, TV5 | `PENDING_ACK` |
 | B-IF-08 | TV2 | TV3, TV5, lead | `PENDING_ACK / OWNER_DECISION` |
 | P2E-VERDICT-CONTRACT-01 | TV3 (producer), TV2 (consumer ports) | TV1, TV2, TV3, TV5 | `ACK_WITH_ACTIONS (TV3 @ 342497c)`; frozen only after TV3's PR #49 uses the same names and enum and TV1/TV5 ACK the same SHAs |
