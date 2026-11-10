@@ -9,6 +9,8 @@
 > **TV5 follow-up (2026-11-09, third revision):** answers TV5's re-review at `942383f`: Q1 wording (known duplicate vs reconciled unknown commit, §6.2), parser drift is never a definitive rejection after admission (§6.6.2–6.6.3), TV3 now accepts **V-OUT** (verify outside the domain locks, locked recheck by TV2) with V-IN as fallback (§6.6.4) and erratum `E-C4` for the approved `TX-FINALIZE` pseudo-code, and the rotation fence / signer-ready points (§6.6.5).
 >
 > **D-18 sync (2026-11-10, fourth revision):** aligned with #46 @ `8d57bec` (D-18) and TV5's review of #46 @ `84fe452`: exact `{K1, K2}` recheck and abort that restores K1 (§6.6.5 item 6), and a **live-signer gate** with two options for the lead, G1 proof of possession (needs an internal endpoint, change control) or G2 dispatch refusal (§6.6.5 item 9).
+>
+> **Enum sync (2026-11-10):** the rejection-code enum is now the four post-admission verifier codes only; `INVALID_STRUCTURE` / `UNSUPPORTED_SCHEMA_VERSION` removed, matching #46 @ `1bfb864` (§6.6.2).
 
 > **Repository:** `SE2026-BC-04/gpu-resource-marketplace`  
 > **Document version:** `v0.9-docs-review-20261109` (stable filename retained; inherited `P2C-GATE-01 = APPROVED_DESIGN_CONDITIONAL`), updated 2026-11-09  
@@ -244,7 +246,7 @@ The reconcile writes nothing. `ABSENT` (after a suppressed conflict or after an 
 | Q4 | Accept SHA-256 equality for duplicate detection (`D-01`)? | Lead | `NEEDS_LEAD_DECISION`; conditional erratum `E-C1` in §6.7 |
 | Q5 | Accept the readiness rule in §6.4 and name the per-Worker serialization lock? | TV2, TV4, TV5 | TV5 P1 at `942383f` (fence not durable) answered by TV2's lock and sequence, adopted in §6.6.5 with the P1 answers; quiesce marker needs lead decision `E-C3` (§6.7); TV4 to ACK `SIGNER_NOT_READY`; TV2 recorded it as #46 `D-18` @ `8d57bec`; live-signer gate G1/G2 (§6.6.5 item 9) needs TV1 + TV5 ACK and a lead choice |
 | Q6 | Which identity provisions `worker_public_keys` (`S-10`)? Not #46 `D-12` | TV2, lead | Pending; tracked with #46 `D-03` |
-| Q7 | Freeze `VerifiedV1Receipt` / `RejectedV1Receipt` fields and the rejection-code enum (`C-IF-06`)? | TV1, TV2, TV5 | TV5 `ACK_WITH_ACTIONS` at `942383f`; parser drift fixed (§6.6.2–6.6.3), V-OUT accepted (§6.6.4, `E-C4`); TV1 ACK pending |
+| Q7 | Freeze `VerifiedV1Receipt` / `RejectedV1Receipt` fields and the rejection-code enum (`C-IF-06`)? | TV1, TV2, TV5 | TV5 `ACK_WITH_ACTIONS` at `942383f`; parser drift fixed (§6.6.2–6.6.3), V-OUT accepted (§6.6.4, `E-C4`); enum = four verifier codes, matches TV2's CHECK @ `1bfb864`; TV1 ACK pending |
 | Q8 | Key-compromise incident policy (`C-IF-09`) and the cold-restart cache gap (`P2E-CACHE-GAP-01`, #46 `D-16`) | Lead (with TV1, TV5) | `NEEDS_OWNER_DECISION`; TV3 input on the cache gap given on #50 |
 
 ### 6.6. Cross-review responses (2026-11-09; `PROPOSED_FOR_ACK`)
@@ -281,20 +283,18 @@ Verifier codes, the only values a `RejectedV1Receipt` may carry:
 
 | Code | Meaning |
 |---|---|
-| `INVALID_STRUCTURE` | Reserved. **Never emitted for a row stored by ingress** (see below) |
-| `UNSUPPORTED_SCHEMA_VERSION` | Reserved. **Never emitted for a row stored by ingress** (see below) |
 | `UNKNOWN_KEY` | No registered `(worker_id, key_id)` row |
 | `KEY_WORKER_MISMATCH` | The `key_id` exists but belongs to another Worker |
 | `CONTEXT_MISMATCH` | Signed `job_id`/`attempt_id`/`worker_id`/`listing_id` differ from the bound context |
 | `INVALID_SIGNATURE` | Ed25519 verification of prefix + JCS bytes fails |
 
-TV2's housekeeping codes for non-winners (`NOT_SELECTED`, `ALREADY_TERMINAL`) are **not** verifier verdicts and never travel in a `RejectedV1Receipt`. DB guard: TV2 added `ck_result_inbox_rejection_code` in #46 @ `f315400` (`PHASE2_SCHEMA_MATRIX.md` §5), which allows only the union of the two sets and ties a non-NULL code to `state = 'REJECTED'`; `P2B-MIG-06` tests it.
+TV2's housekeeping codes for non-winners (`NOT_SELECTED`, `ALREADY_TERMINAL`) are **not** verifier verdicts and never travel in a `RejectedV1Receipt`. DB guard: TV2's `ck_result_inbox_rejection_code` in #46 (`PHASE2_SCHEMA_MATRIX.md` §5; added @ `f315400`, narrowed @ `1bfb864`) allows only the union of the two sets (four verifier + two housekeeping codes) and ties a non-NULL code to `state = 'REJECTED'`; `P2B-MIG-06` tests it.
 
-**Parser drift is not a verdict (TV5 re-review at `942383f`).** Ingress stores a row only after the same strict V1 parser accepted its bytes, and stored bytes are immutable. So if the verifier later fails to parse, or reads an unsupported `schema_version` from, an ingress-admitted row, the cause is parser/runtime drift or corruption, never a bad receipt: it is an **invariant break** (§6.6.3), fail closed, the row stays `PENDING`, alert. It must never become `REJECTED`, because that could turn a once-admissible receipt into a false `SYSTEM_FAULT`. In Phase 2 the definitive verdicts after admission are therefore only `UNKNOWN_KEY`, `KEY_WORKER_MISMATCH`, `CONTEXT_MISMATCH` and `INVALID_SIGNATURE`. The two reserved codes stay in the closed set so that #46's CHECK needs no change; TV2 may drop them from the CHECK instead (TV2 choice). Regression vector: a stored valid V1 envelope plus a deliberately failing parser ⇒ row stays `PENDING`, no `REJECTED`, fallback blocked, alert raised.
+**Parser drift is not a verdict (TV5 re-review at `942383f`).** Ingress stores a row only after the same strict V1 parser accepted its bytes, and stored bytes are immutable. So if the verifier later fails to parse, or reads an unsupported `schema_version` from, an ingress-admitted row, the cause is parser/runtime drift or corruption, never a bad receipt: it is an **invariant break** (§6.6.3), fail closed, the row stays `PENDING`, alert. It must never become `REJECTED`, because that could turn a once-admissible receipt into a false `SYSTEM_FAULT`. In Phase 2 the definitive verdicts after admission are therefore only `UNKNOWN_KEY`, `KEY_WORKER_MISMATCH`, `CONTEXT_MISMATCH` and `INVALID_SIGNATURE`. `INVALID_STRUCTURE` and `UNSUPPORTED_SCHEMA_VERSION` are therefore **not** in the enum; TV2 dropped them from the CHECK in #46 @ `1bfb864`, and `P2B-DRT-23` covers a `RejectedV1Receipt` carrying a removed or housekeeping code. Regression vector: a stored valid V1 envelope plus a deliberately failing parser ⇒ row stays `PENDING`, no `REJECTED`, fallback blocked, alert raised.
 
 #### 6.6.3. Definitive vs transient
 
-Only the four definitive codes above may reject (the two reserved codes never do after admission, §6.6.2). These are **not** rejections: any parse or schema-version failure on ingress-admitted bytes, key row unreadable because of a DB error, a broken key invariant (zero or two active keys where one is required), extractor failure on bytes that ingress already accepted, timeout or `DependencyUnavailable`. They fail closed: no state change, the Inbox row stays `PENDING` (so `deadline_fallback` keeps answering `ContinueCandidateScan`), redacted alert. This prevents a transient fault from turning a valid on-time result into a false `SYSTEM_FAULT`.
+Only the four definitive codes above may reject (§6.6.2). These are **not** rejections: any parse or schema-version failure on ingress-admitted bytes, key row unreadable because of a DB error, a broken key invariant (zero or two active keys where one is required), extractor failure on bytes that ingress already accepted, timeout or `DependencyUnavailable`. They fail closed: no state change, the Inbox row stays `PENDING` (so `deadline_fallback` keeps answering `ContinueCandidateScan`), redacted alert. This prevents a transient fault from turning a valid on-time result into a false `SYSTEM_FAULT`.
 
 A key retired **after** a candidate was stored is not `UNKNOWN_KEY`: the verifier still checks the retained K1 row (DR-C4 "Old K1 evidence"; #46 `B-IF-08`).
 
