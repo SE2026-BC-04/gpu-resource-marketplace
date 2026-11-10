@@ -25,6 +25,20 @@ const failureLabels: Record<JobFailureReason, string> = {
   SYSTEM_FAULT: "Lỗi hệ thống",
 };
 
+const JOB_STATUS_POLL_INTERVAL_MS = 2000;
+const JOB_STATUS_REQUEST_TIMEOUT_MS = 5000;
+const JOB_STATUS_RETRY_DELAYS_MS = [1000, 2000, 4000] as const;
+const MAX_CONSECUTIVE_STATUS_READ_FAILURES = 3;
+
+function isPendingJobStatus(status: JobStatus): boolean {
+  return status === "QUEUED" || status === "RUNNING";
+}
+
+function isTransientStatusReadFailure(error: unknown): boolean {
+  if (error instanceof JobsApiError) return error.status === 0 || error.status >= 500;
+  return error instanceof Error && error.name === "AbortError";
+}
+
 function safeError(error: unknown): { message: string; requestId?: string } {
   if (error instanceof JobsApiError) return { message: error.message, requestId: error.requestId };
   return { message: "Không thể xử lý yêu cầu lúc này." };
@@ -310,6 +324,7 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
     key: string;
     job: JobResponse | null;
     error: unknown | null;
+    pollingMessage?: string | null;
   } | null>(null);
   const [reloadVersion, setReloadVersion] = useState(0);
   const [detailReloadVersion, setDetailReloadVersion] = useState(0);
@@ -319,6 +334,8 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
   const detailRequestKeyRef = useRef(detailRequestKey);
   const selectedIdRef = useRef(selectedId);
   const detailGenerationRef = useRef(0);
+  const stopDetailPollingRef = useRef<(() => void) | null>(null);
+  const resumePendingPollingForKeyRef = useRef<string | null>(null);
   const cancelLifecyclesRef = useRef(new Map<string, CancelActionLifecycle>());
   const [, refreshCancelLifecycles] = useState(0);
   detailRequestKeyRef.current = detailRequestKey;
@@ -328,6 +345,7 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
   const listLoading = listResult?.key !== listRequestKey;
   const detail = detailResult?.key === detailRequestKey ? detailResult.job : null;
   const detailError = detailResult?.key === detailRequestKey ? detailResult.error : null;
+  const pollingMessage = detailResult?.key === detailRequestKey ? detailResult.pollingMessage ?? null : null;
   const detailLoading = selectedId !== null && detailResult?.key !== detailRequestKey;
 
   useEffect(() => {
@@ -340,29 +358,110 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
 
   useEffect(() => {
     if (!selectedId) return;
+    const jobId = selectedId;
     const controller = new AbortController();
     const requestKey = detailRequestKey;
     const requestGeneration = ++detailGenerationRef.current;
+    let currentJob = detailResult?.key === requestKey ? detailResult.job : null;
+    const resumePendingPolling = resumePendingPollingForKeyRef.current === requestKey &&
+      currentJob !== null && isPendingJobStatus(currentJob.status);
+    if (resumePendingPollingForKeyRef.current !== null && resumePendingPollingForKeyRef.current !== requestKey) {
+      resumePendingPollingForKeyRef.current = null;
+    }
+    let consecutiveFailures = 0;
+    let scheduledPoll: number | undefined;
+    let disposed = false;
     setDetailGeneration(requestGeneration);
-    api.getJob(selectedId, controller.signal)
-      .then((job) => {
-        if (
-          !controller.signal.aborted &&
-          job.id === selectedId &&
-          selectedIdRef.current === selectedId &&
-          detailRequestKeyRef.current === requestKey &&
-          detailGenerationRef.current === requestGeneration
-        ) setDetailResult({ key: requestKey, job, error: null });
-      })
-      .catch((error: unknown) => {
-        if (
-          !controller.signal.aborted &&
-          selectedIdRef.current === selectedId &&
-          detailRequestKeyRef.current === requestKey &&
-          detailGenerationRef.current === requestGeneration
-        ) setDetailResult({ key: requestKey, job: null, error });
-      });
-    return () => controller.abort();
+    const isCurrentRequest = () =>
+      !disposed &&
+      !controller.signal.aborted &&
+      selectedIdRef.current === jobId &&
+      detailRequestKeyRef.current === requestKey &&
+      detailGenerationRef.current === requestGeneration;
+
+    function stopPolling() {
+      disposed = true;
+      if (scheduledPoll !== undefined) {
+        window.clearTimeout(scheduledPoll);
+        scheduledPoll = undefined;
+      }
+      controller.abort();
+    }
+    stopDetailPollingRef.current = stopPolling;
+
+    function schedulePoll(delay: number) {
+      if (disposed || controller.signal.aborted || scheduledPoll !== undefined) return;
+      scheduledPoll = window.setTimeout(() => {
+        scheduledPoll = undefined;
+        if (resumePendingPollingForKeyRef.current === requestKey) resumePendingPollingForKeyRef.current = null;
+        void readDetail();
+      }, delay);
+    }
+
+    async function readDetail() {
+      if (!isCurrentRequest()) return;
+      const requestController = new AbortController();
+      let timeout: number | undefined;
+      let rejectTimeout!: (reason: unknown) => void;
+      let rejectLifecycleAbort!: (reason: unknown) => void;
+      const timeoutPromise = new Promise<never>((_, reject) => { rejectTimeout = reject; });
+      const lifecycleAbort = new Promise<never>((_, reject) => { rejectLifecycleAbort = reject; });
+      const abortRequest = () => {
+        requestController.abort();
+        rejectLifecycleAbort(new Error("Job status request was cancelled."));
+      };
+      controller.signal.addEventListener("abort", abortRequest, { once: true });
+      if (controller.signal.aborted) abortRequest();
+      timeout = window.setTimeout(() => {
+        rejectTimeout(new JobsApiError("NETWORK_ERROR", 0));
+        requestController.abort();
+      }, JOB_STATUS_REQUEST_TIMEOUT_MS);
+
+      try {
+        const job = await Promise.race([
+          api.getJob(jobId, requestController.signal),
+          timeoutPromise,
+          lifecycleAbort,
+        ]);
+        if (!isCurrentRequest()) return;
+        if (job.id !== jobId) throw new JobsApiError("INVALID_RESPONSE", 502);
+        currentJob = job;
+        consecutiveFailures = 0;
+        setDetailResult({ key: requestKey, job, error: null, pollingMessage: null });
+        if (isPendingJobStatus(job.status)) schedulePoll(JOB_STATUS_POLL_INTERVAL_MS);
+        else stopPolling();
+      } catch (error: unknown) {
+        if (!isCurrentRequest()) return;
+        if (isTransientStatusReadFailure(error)) {
+          consecutiveFailures += 1;
+          if (consecutiveFailures > MAX_CONSECUTIVE_STATUS_READ_FAILURES) {
+            setDetailResult({ key: requestKey, job: currentJob, error, pollingMessage: null });
+            return;
+          }
+          const retryDelay = JOB_STATUS_RETRY_DELAYS_MS[consecutiveFailures - 1];
+          setDetailResult({
+            key: requestKey,
+            job: currentJob,
+            error: null,
+            pollingMessage: `Không thể cập nhật trạng thái. Đang thử lại (${consecutiveFailures}/${MAX_CONSECUTIVE_STATUS_READ_FAILURES}).`,
+          });
+          schedulePoll(retryDelay);
+          return;
+        }
+        setDetailResult({ key: requestKey, job: currentJob, error, pollingMessage: null });
+      } finally {
+        if (timeout !== undefined) window.clearTimeout(timeout);
+        controller.signal.removeEventListener("abort", abortRequest);
+        requestController.abort();
+      }
+    }
+
+    if (resumePendingPolling) schedulePoll(JOB_STATUS_POLL_INTERVAL_MS);
+    else void readDetail();
+    return () => {
+      if (stopDetailPollingRef.current === stopPolling) stopDetailPollingRef.current = null;
+      stopPolling();
+    };
   }, [api, user.id, user.role, selectedId, detailReloadVersion]);
 
   function changeFilter(value: JobStatus | "") {
@@ -405,21 +504,39 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
   function cancelled(job: JobResponse, context: DetailRequestContext) {
     if (job.id === context.jobId && isCurrentDetailRequest(context)) {
       setDetailResult({ key: context.requestKey, job, error: null });
+      if (!isPendingJobStatus(job.status)) stopDetailPollingRef.current?.();
     }
     setReloadVersion((version) => version + 1);
   }
 
   function reconciled(job: JobResponse, context: DetailRequestContext) {
     if (job.id === context.jobId && isCurrentDetailRequest(context)) {
+      if (isPendingJobStatus(job.status)) {
+        restartPendingPollingAfterReconciliation(job);
+        return;
+      }
       setDetailResult({ key: context.requestKey, job, error: null });
+      stopDetailPollingRef.current?.();
     }
   }
 
   function beginReconciliation(context: DetailRequestContext): DetailRequestContext {
     if (!isCurrentDetailRequest(context)) return context;
+    stopDetailPollingRef.current?.();
     const generation = ++detailGenerationRef.current;
     setDetailGeneration(generation);
     return { ...context, generation };
+  }
+
+  function restartPendingPollingAfterReconciliation(job: JobResponse) {
+    const nextVersion = detailReloadVersion + 1;
+    const nextKey = JSON.stringify([user.id, user.role, job.id, nextVersion]);
+    const generation = ++detailGenerationRef.current;
+    setDetailGeneration(generation);
+    detailRequestKeyRef.current = nextKey;
+    resumePendingPollingForKeyRef.current = nextKey;
+    setDetailResult({ key: nextKey, job, error: null, pollingMessage: null });
+    setDetailReloadVersion(nextVersion);
   }
 
   function cancelLifecycleFor(jobId: string): CancelActionLifecycle {
@@ -485,6 +602,7 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
       </section>
       <section className="jobs-detail-panel" aria-live="polite">
         {detailLoading && <p role="status">Đang tải chi tiết…</p>}
+        {pollingMessage && <p role="status">{pollingMessage}</p>}
         {detailError !== null && <ErrorNotice error={detailError} retry={reloadSelectedDetail} />}
         {detail && <JobDetail
           key={detail.id}

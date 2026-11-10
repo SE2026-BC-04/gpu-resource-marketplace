@@ -1,0 +1,51 @@
+# Supplemental replay of historical VT-090 retry-boundary mutation
+Timestamp: 2026-11-11 00:25:20 +07:00
+Branch: bt3/vt-090-async-job-progress
+Source commit: 805a4e53326fc0789654242de288199cf5ff7765
+File: frontend/src/ui/jobs/JobsPage.tsx
+Original SHA256: A534A3B2B24131F27A91A2F15F6546A1F35A81F33B83867C0C54EFF0BD8A0DC8
+Test: allows the fourth poll after exactly three transient failures
+Command: & 'D:\Application\node.exe' node_modules/vitest/vitest.mjs run src/ui/jobs/JobsPage.test.tsx -t 'allows the fourth poll after exactly three transient failures' --reporter=dot
+The prior mutation logs remain unchanged; this replay records an explicit command and fresh result.
+
+BASELINE_ORIGINAL_PREDICATE_OUTPUT:
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+-------------------------------------·-----
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 42 skipped (43)
+   Start at  00:25:21
+   Duration  3.68s (environment 73%, tests 10%, setup 9%, import 7%, transform 2%)
+
+BASELINE_EXIT_CODE=0
+MUTANT_PREDICATE (>=) OUTPUT:
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+-------------------------------------x-----
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > allows the fourth poll after exactly three transient failures
+AssertionError: expected "vi.fn()" to be called 5 times, but got 4 times
+ ❯ src/ui/jobs/JobsPage.test.tsx:858:20
+    856|     expect(getJob).toHaveBeenCalledTimes(4);
+    857|     await advanceClock(4000);
+    858|     expect(getJob).toHaveBeenCalledTimes(5);
+       |                    ^
+    859|     expect(detailStatus()).toHaveTextContent("Đang chạy");
+    860|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 42 skipped (43)
+   Start at  00:25:25
+   Duration  3.15s (environment 68%, tests 11%, setup 8%, import 7%, transform 6%)
+
+MUTANT_EXIT_CODE=1
+Source restored byte-for-byte: True
+Restored_SHA256=A534A3B2B24131F27A91A2F15F6546A1F35A81F33B83867C0C54EFF0BD8A0DC8

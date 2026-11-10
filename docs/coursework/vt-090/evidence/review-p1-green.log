@@ -1,0 +1,47 @@
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+---------------------------··-------------
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 40 skipped (42)
+   Start at  23:41:42
+   Duration  3.31s (environment 65%, tests 17%, setup 8%, import 6%, transform 4%)
+
+EXIT_CODE=0
+
+RUN=2 (re-run after test-first commit 49ca30b)
+COMMAND= & D:\Application\node.exe node_modules/vitest/vitest.mjs run src/ui/jobs/JobsPage.test.tsx -t VT090-P1 --reporter=dot
+WORKDIR=frontend
+ENVIRONMENT=Windows; Node.js 22.13.0; Vitest 5.0.5
+SOURCE_HEAD=49ca30b with production fix in working tree
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+---------------------------··-------------
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 40 skipped (42)
+   Start at  23:43:59
+   Duration  3.59s (environment 66%, tests 17%, setup 8%, import 6%, transform 2%)
+
+EXIT_CODE=0
+
+FINAL REGRESSION RUN
+Timestamp: 2026-11-10 00:14:38 +07:00
+Branch: bt3/vt-090-async-job-progress
+Tested checkout SHA: 836dae7c211f3df56494d3a6b0e6764b8873d8ea
+Command: & 'D:\Application\node.exe' node_modules/vitest/vitest.mjs run src/ui/jobs/JobsPage.test.tsx -t 'VT090-P1' --reporter=dot
+Environment: Windows; Node.js v22.13.0; Vitest 5.0.5
+
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+----------------------------··-------------
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 41 skipped (43)
+   Start at  00:14:40
+   Duration  5.09s (environment 64%, tests 20%, setup 7%, import 6%, transform 2%)
+
+EXIT_CODE=0

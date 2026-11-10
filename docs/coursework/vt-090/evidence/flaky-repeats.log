@@ -1,0 +1,60 @@
+RUN=1
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+--------------------------···-·--··--·--
+
+ Test Files  1 passed (1)
+      Tests  7 passed | 33 skipped (40)
+   Start at  22:56:38
+   Duration  3.68s (environment 61%, tests 23%, setup 7%, import 6%, transform 2%)
+
+RUN_1_EXIT_CODE=0
+RUN=2
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+--------------------------···-·--··--·--
+
+ Test Files  1 passed (1)
+      Tests  7 passed | 33 skipped (40)
+   Start at  22:56:42
+   Duration  3.50s (environment 59%, tests 26%, setup 8%, import 6%, transform 2%)
+
+RUN_2_EXIT_CODE=0
+RUN=3
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+--------------------------···-·--··--·--
+
+ Test Files  1 passed (1)
+      Tests  7 passed | 33 skipped (40)
+   Start at  22:56:46
+   Duration  3.53s (environment 61%, tests 24%, setup 7%, import 6%, transform 2%)
+
+RUN_3_EXIT_CODE=0
+RUN=4
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+--------------------------···-·--··--·--
+
+ Test Files  1 passed (1)
+      Tests  7 passed | 33 skipped (40)
+   Start at  22:56:50
+   Duration  3.58s (environment 59%, tests 27%, setup 7%, import 6%, transform 2%)
+
+RUN_4_EXIT_CODE=0
+RUN=5
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+--------------------------···-·--··--·--
+
+ Test Files  1 passed (1)
+      Tests  7 passed | 33 skipped (40)
+   Start at  22:56:55
+   Duration  3.57s (environment 62%, tests 24%, setup 7%, import 6%, transform 2%)
+
+RUN_5_EXIT_CODE=0\n

@@ -22,8 +22,8 @@ function job(status: JobResponse["status"] = "QUEUED", id = JOB_ID): JobResponse
     status,
     failure_reason: status === "FAILED" ? "WORKER_FAULT" : null,
     submitted_at: "2026-10-26T08:00:00.000000Z",
-    started_at: null,
-    terminal_at: status === "CANCELLED" ? "2026-10-26T08:01:00.000000Z" : null,
+    started_at: ["RUNNING", "COMPLETED", "FAILED"].includes(status) ? "2026-10-26T08:00:30.000000Z" : null,
+    terminal_at: ["COMPLETED", "FAILED", "CANCELLED"].includes(status) ? "2026-10-26T08:01:00.000000Z" : null,
   };
 }
 
@@ -55,11 +55,20 @@ function setup(role: UserRole = "CLIENT", overrides: Partial<JobsApi> = {}) {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe("GPU-005 Jobs frontend foundation", () => {
+  it("uses a persistence-consistent fixture for a Job cancelled while QUEUED", () => {
+    const cancelledJob = job("CANCELLED");
+    expect(cancelledJob.status).toBe("CANCELLED");
+    expect(cancelledJob.started_at).toBeNull();
+    expect(cancelledJob.terminal_at).not.toBeNull();
+    expect(cancelledJob.failure_reason).toBeNull();
+  });
+
   it("shows loading then empty state and keeps retry available on list error", async () => {
     let resolve!: (value: JobCollectionResponse) => void;
     const listJobs = vi.fn(() => new Promise<JobCollectionResponse>((done) => { resolve = done; }));
@@ -253,7 +262,7 @@ describe("GPU-005 Jobs frontend foundation", () => {
 
     expect(await within(screen.getByRole("region", { name: "Chi tiết công việc" })).findByText("Đang chạy")).toBeInTheDocument();
     expect(getJob).toHaveBeenCalledTimes(2);
-    expect(listJobs).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(listJobs).toHaveBeenCalledTimes(2));
     expect(cancelJob).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Hủy công việc" })).not.toBeInTheDocument();
   });
@@ -512,5 +521,433 @@ describe("GPU-005 Jobs frontend foundation", () => {
     expect(screen.queryByText("private-client-id")).not.toBeInTheDocument();
     expect(screen.queryByText("secret")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Hủy công việc" })).not.toBeInTheDocument();
+  });
+});
+
+async function flushReactPromises() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+async function selectJob(id = JOB_ID) {
+  await flushReactPromises();
+  fireEvent.click(screen.getByRole("button", { name: new RegExp(id) }));
+  await flushReactPromises();
+}
+
+function detailStatus() {
+  return within(screen.getByRole("region", { name: "Chi tiết công việc" })).getByRole("status");
+}
+
+async function advanceClock(milliseconds: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(milliseconds);
+  });
+}
+
+describe("VT-090 async status tracking and retry safety", () => {
+  it("polls a selected queued Job at the 2-second boundary and displays RUNNING", async () => {
+    vi.useFakeTimers();
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED"))
+      .mockResolvedValueOnce(job("RUNNING"));
+    const api = setup("CLIENT", { getJob });
+    await selectJob();
+
+    expect(getJob).toHaveBeenCalledTimes(1);
+    await advanceClock(1999);
+    expect(getJob).toHaveBeenCalledTimes(1);
+    await advanceClock(1);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+    expect(api.submitJob).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["COMPLETED", "Hoàn tất"],
+    ["FAILED", "Thất bại"],
+    ["CANCELLED", "Đã hủy"],
+  ] as const)("stops polling when the server reports terminal status %s", async (terminalStatus, label) => {
+    vi.useFakeTimers();
+    const priorStatus = terminalStatus === "CANCELLED" ? "QUEUED" : "RUNNING";
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job(priorStatus))
+      .mockResolvedValueOnce(job(terminalStatus));
+    setup("CLIENT", {
+      listJobs: vi.fn().mockResolvedValue({ items: [job(priorStatus)], next_cursor: null }),
+      getJob,
+    });
+    await selectJob();
+
+    await advanceClock(2000);
+    expect(detailStatus()).toHaveTextContent(label);
+    await advanceClock(12000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops the scheduled poll when the explicit Cancel response is terminal", async () => {
+    vi.useFakeTimers();
+    const getJob = vi.fn().mockResolvedValue(job("QUEUED"));
+    const cancelJob = vi.fn().mockResolvedValue(job("CANCELLED"));
+    setup("CLIENT", { getJob, cancelJob });
+    await selectJob();
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Hủy công việc" }));
+    await flushReactPromises();
+    expect(detailStatus()).toHaveTextContent("Đã hủy");
+    await advanceClock(10000);
+    expect(getJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("VT090-P1-01 resumes status polling after Cancel 409 reconciliation returns RUNNING", async () => {
+    vi.useFakeTimers();
+    let activeGets = 0;
+    let maxActiveGets = 0;
+    const responses = [job("QUEUED", JOB_A), job("RUNNING", JOB_A), job("COMPLETED", JOB_A)];
+    const getJob = vi.fn(async () => {
+      activeGets += 1;
+      maxActiveGets = Math.max(maxActiveGets, activeGets);
+      try {
+        return responses.shift()!;
+      } finally {
+        activeGets -= 1;
+      }
+    });
+    const cancelJob = vi.fn().mockRejectedValue(new JobsApiError("JOB_NOT_CANCELLABLE", 409));
+    const api = setup("CLIENT", {
+      listJobs: vi.fn().mockResolvedValue({ items: [job("QUEUED", JOB_A)], next_cursor: null }),
+      getJob,
+      cancelJob,
+    });
+    await selectJob(JOB_A);
+    expect(getJob).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Hủy công việc" }));
+    await flushReactPromises();
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+    expect(getJob).toHaveBeenCalledTimes(2);
+    expect(cancelJob).toHaveBeenCalledTimes(1);
+
+    await advanceClock(1999);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await advanceClock(1);
+    expect(getJob).toHaveBeenCalledTimes(3);
+    expect(detailStatus()).toHaveTextContent("Hoàn tất");
+    await advanceClock(10000);
+
+    expect(getJob).toHaveBeenCalledTimes(3);
+    expect(maxActiveGets).toBe(1);
+    expect(api.submitJob).not.toHaveBeenCalled();
+  });
+
+  it("VT090-P1-02 aborts and ignores a late poll response during Cancel reconciliation, then resumes", async () => {
+    vi.useFakeTimers();
+    const latePoll = deferred<JobResponse>();
+    let latePollSignal: AbortSignal | undefined;
+    let activeGets = 0;
+    let maxActiveGets = 0;
+    let readCount = 0;
+    const getJob = vi.fn((jobId: string, signal?: AbortSignal) => {
+      readCount += 1;
+      activeGets += 1;
+      maxActiveGets = Math.max(maxActiveGets, activeGets);
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        activeGets -= 1;
+        signal?.removeEventListener("abort", release);
+      };
+      signal?.addEventListener("abort", release, { once: true });
+      const response = readCount === 1
+        ? Promise.resolve(job("QUEUED", jobId))
+        : readCount === 2
+          ? (latePollSignal = signal, latePoll.promise)
+          : Promise.resolve(job(readCount === 3 ? "RUNNING" : "COMPLETED", jobId));
+      return response.finally(release);
+    });
+    const cancelJob = vi.fn().mockRejectedValue(new JobsApiError("JOB_NOT_CANCELLABLE", 409));
+    const api = setup("CLIENT", {
+      listJobs: vi.fn().mockResolvedValue({ items: [job("QUEUED", JOB_A)], next_cursor: null }),
+      getJob,
+      cancelJob,
+    });
+    await selectJob(JOB_A);
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    expect(latePollSignal?.aborted).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Hủy công việc" }));
+    await flushReactPromises();
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+    expect(latePollSignal?.aborted).toBe(true);
+    expect(activeGets).toBe(0);
+    expect(getJob).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      latePoll.resolve(job("QUEUED", JOB_A));
+      await latePoll.promise;
+    });
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(4);
+    expect(detailStatus()).toHaveTextContent("Hoàn tất");
+    await advanceClock(10000);
+
+    expect(getJob).toHaveBeenCalledTimes(4);
+    expect(maxActiveGets).toBe(1);
+    expect(cancelJob).toHaveBeenCalledTimes(1);
+    expect(api.submitJob).not.toHaveBeenCalled();
+  });
+
+  it("never starts an overlapping poll while the previous GET is pending", async () => {
+    vi.useFakeTimers();
+    const pendingPoll = deferred<JobResponse>();
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED"))
+      .mockReturnValueOnce(pendingPoll.promise)
+      .mockResolvedValue(job("RUNNING"));
+    setup("CLIENT", { getJob });
+    await selectJob();
+
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await advanceClock(4999);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await act(async () => { pendingPoll.resolve(job("RUNNING")); await pendingPoll.promise; });
+    await advanceClock(1999);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await advanceClock(1);
+    expect(getJob).toHaveBeenCalledTimes(3);
+  });
+
+  it("ignores a delayed response from Job A after the user selects Job B", async () => {
+    vi.useFakeTimers();
+    const delayedA = deferred<JobResponse>();
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED", JOB_A))
+      .mockReturnValueOnce(delayedA.promise)
+      .mockResolvedValueOnce(job("RUNNING", JOB_B));
+    setup("CLIENT", {
+      listJobs: vi.fn().mockResolvedValue({ items: [job("QUEUED", JOB_A), job("QUEUED", JOB_B)], next_cursor: null }),
+      getJob,
+    });
+    await selectJob(JOB_A);
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(JOB_B) }));
+    await flushReactPromises();
+    expect(within(screen.getByRole("region", { name: "Chi tiết công việc" })).getByText(JOB_B)).toBeInTheDocument();
+
+    await act(async () => { delayedA.resolve(job("COMPLETED", JOB_A)); await delayedA.promise; });
+    expect(within(screen.getByRole("region", { name: "Chi tiết công việc" })).getByText(JOB_B)).toBeInTheDocument();
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+  });
+
+  it("clears the scheduled GET when the component unmounts", async () => {
+    vi.useFakeTimers();
+    const getJob = vi.fn().mockResolvedValue(job("QUEUED"));
+    const api: JobsApi = {
+      listJobs: vi.fn().mockResolvedValue({ items: [job()], next_cursor: null }),
+      getJob,
+      submitJob: vi.fn(),
+      cancelJob: vi.fn(),
+    };
+    const view = render(<JobsPage api={api} user={user("CLIENT")} />);
+    await selectJob();
+    expect(getJob).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    view.unmount();
+    await advanceClock(10000);
+    expect(getJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates an in-flight response when identity changes", async () => {
+    vi.useFakeTimers();
+    const delayedPoll = deferred<JobResponse>();
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED"))
+      .mockReturnValueOnce(delayedPoll.promise)
+      .mockResolvedValueOnce(job("RUNNING"));
+    const api: JobsApi = {
+      listJobs: vi.fn().mockResolvedValue({ items: [job()], next_cursor: null }),
+      getJob,
+      submitJob: vi.fn(),
+      cancelJob: vi.fn(),
+    };
+    const view = render(<JobsPage api={api} user={user("CLIENT")} />);
+    await selectJob();
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    const otherIdentity = { ...user("CLIENT"), id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" };
+    view.rerender(<JobsPage api={api} user={otherIdentity} />);
+    await flushReactPromises();
+    await act(async () => { delayedPoll.resolve(job("COMPLETED")); await delayedPoll.promise; });
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+  });
+
+  it.each([
+    ["network timeout", new JobsApiError("NETWORK_ERROR", 0)],
+    ["HTTP 503", new JobsApiError("DEPENDENCY_UNAVAILABLE", 503)],
+  ])("retries a transient %s with GET only", async (_label, transientError) => {
+    vi.useFakeTimers();
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED"))
+      .mockRejectedValueOnce(transientError)
+      .mockResolvedValueOnce(job("RUNNING"));
+    const api = setup("CLIENT", { getJob });
+    await selectJob();
+
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await advanceClock(999);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await advanceClock(1);
+    expect(getJob).toHaveBeenCalledTimes(3);
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+    expect(api.submitJob).not.toHaveBeenCalled();
+  });
+
+  it("times out a stalled status GET after five seconds and retries GET only", async () => {
+    vi.useFakeTimers();
+    let timedSignal: AbortSignal | undefined;
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED"))
+      .mockImplementationOnce((_jobId: string, signal?: AbortSignal) => new Promise<JobResponse>((_, reject) => {
+        timedSignal = signal;
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      }))
+      .mockResolvedValueOnce(job("RUNNING"));
+    const api = setup("CLIENT", { getJob });
+    await selectJob();
+
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await advanceClock(4999);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await advanceClock(1);
+    expect(timedSignal?.aborted).toBe(true);
+    await advanceClock(1000);
+    expect(getJob).toHaveBeenCalledTimes(3);
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+    expect(api.submitJob).not.toHaveBeenCalled();
+  });
+
+  it("allows the fourth poll after exactly three transient failures", async () => {
+    vi.useFakeTimers();
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED"))
+      .mockRejectedValueOnce(new JobsApiError("NETWORK_ERROR", 0))
+      .mockRejectedValueOnce(new JobsApiError("NETWORK_ERROR", 0))
+      .mockRejectedValueOnce(new JobsApiError("NETWORK_ERROR", 0))
+      .mockResolvedValueOnce(job("RUNNING"));
+    setup("CLIENT", { getJob });
+    await selectJob();
+
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await advanceClock(1000);
+    expect(getJob).toHaveBeenCalledTimes(3);
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(4);
+    await advanceClock(4000);
+    expect(getJob).toHaveBeenCalledTimes(5);
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+  });
+
+  it("stops after the fourth consecutive transient failure and keeps explicit reload", async () => {
+    vi.useFakeTimers();
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED"))
+      .mockRejectedValue(new JobsApiError("NETWORK_ERROR", 0));
+    setup("CLIENT", { getJob });
+    await selectJob();
+
+    await advanceClock(2000);
+    await advanceClock(1000);
+    await advanceClock(2000);
+    await advanceClock(4000);
+    expect(getJob).toHaveBeenCalledTimes(5);
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(detailStatus()).toHaveTextContent("Đang chờ");
+    await advanceClock(20000);
+    expect(getJob).toHaveBeenCalledTimes(5);
+  });
+
+  it("does not retry a non-transient 404 automatically", async () => {
+    vi.useFakeTimers();
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED"))
+      .mockRejectedValueOnce(new JobsApiError("JOB_NOT_FOUND", 404));
+    setup("CLIENT", { getJob });
+    await selectJob();
+
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await advanceClock(10000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a malformed response that names a different Job", async () => {
+    vi.useFakeTimers();
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED", JOB_ID))
+      .mockResolvedValueOnce(job("RUNNING", JOB_A))
+      .mockResolvedValueOnce(job("RUNNING", JOB_ID));
+    setup("CLIENT", { getJob });
+    await selectJob(JOB_ID);
+
+    await advanceClock(2000);
+    expect(detailStatus()).toHaveTextContent("Đang chờ");
+    await advanceClock(1000);
+    expect(getJob).toHaveBeenCalledTimes(3);
+    expect(detailStatus()).toHaveTextContent("Đang chạy");
+    expect(within(screen.getByRole("region", { name: "Chi tiết công việc" })).getByText(JOB_ID)).toBeInTheDocument();
+  });
+
+  it("resets the transient failure counter after a successful poll", async () => {
+    vi.useFakeTimers();
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED"))
+      .mockRejectedValueOnce(new JobsApiError("NETWORK_ERROR", 0))
+      .mockResolvedValueOnce(job("RUNNING"))
+      .mockResolvedValueOnce(job("RUNNING"));
+    setup("CLIENT", { getJob });
+    await selectJob();
+
+    await advanceClock(2000);
+    await advanceClock(1000);
+    expect(getJob).toHaveBeenCalledTimes(3);
+    await advanceClock(1999);
+    expect(getJob).toHaveBeenCalledTimes(3);
+    await advanceClock(1);
+    expect(getJob).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not create a second Job or duplicate success notice when polling fails then recovers", async () => {
+    vi.useFakeTimers();
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(job("QUEUED"))
+      .mockRejectedValueOnce(new JobsApiError("NETWORK_ERROR", 0))
+      .mockResolvedValueOnce(job("COMPLETED"));
+    const submitJob = vi.fn().mockResolvedValue(job("QUEUED"));
+    setup("CLIENT", { getJob, submitJob });
+    fireEvent.change(screen.getByLabelText("Listing ID (UUIDv4)"), { target: { value: LISTING_ID } });
+    fireEvent.click(screen.getByRole("button", { name: "Gửi công việc" }));
+    await flushReactPromises();
+
+    expect(submitJob).toHaveBeenCalledTimes(1);
+    expect(getJob).toHaveBeenCalledTimes(1);
+    await advanceClock(2000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+    await advanceClock(1000);
+    expect(getJob).toHaveBeenCalledTimes(3);
+    expect(submitJob).toHaveBeenCalledTimes(1);
+    expect(detailStatus()).toHaveTextContent("Hoàn tất");
+    expect(screen.getAllByText(new RegExp(`Đã gửi công việc ${JOB_ID}`))).toHaveLength(1);
   });
 });

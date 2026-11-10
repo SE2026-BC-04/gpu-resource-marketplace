@@ -1,0 +1,29 @@
+# VT-090 constrained pairwise verification
+Timestamp: 2026-11-10 00:15:10 +07:00
+Branch: bt3/vt-090-async-job-progress
+Tested checkout SHA: 836dae7c211f3df56494d3a6b0e6764b8873d8ea
+Generator source commit: e07275bc72120c4ebfc84bdba3231f481ec1c527
+Node runtime: v22.13.0
+
+Generator command: & 'D:\Application\node.exe' docs/coursework/vt-090/generate-pairwise.mjs
+Generator output:
+wrote C:\Users\DELL\OneDrive\Tài liệu\ChatGPT\gpu resouce marketplace\gpu-resource-marketplace\docs\coursework\vt-090\pairwise-cases.json
+polling: 28 generated rows; 40 executable configurations; 16 excluded; 46/46 feasible pairs (100%)
+submission_retry: 8 generated rows; 12 executable configurations; 33 excluded; 21/21 feasible pairs (100%)
+GENERATOR_EXIT_CODE=0
+
+Vitest command (working directory: frontend): & 'D:\Application\node.exe' node_modules/vitest/vitest.mjs run src/ui/jobs/JobsPage.pairwise.test.tsx src/api/jobs.pairwise.test.ts --reporter=dot
+Vitest output:
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+····································
+
+ Test Files  2 passed (2)
+      Tests  36 passed (36)
+   Start at  00:15:11
+   Duration  7.37s (environment 49%, tests 41%, setup 5%, import 3%, transform 1%)
+
+VITEST_EXIT_CODE=0
+
+Interpretation: generator reports 28 polling rows from 40 valid configurations and 8 submission/retry rows from 12 valid configurations; all emitted rows executed (36 tests). These are selected covering-array tests, not exhaustive execution of every valid configuration. Submission checks exercise the frontend API client with mocked HTTP and do not prove database idempotency. PostgreSQL lifecycle guard testing is NOT_RUN locally because no disposable cluster was verified.

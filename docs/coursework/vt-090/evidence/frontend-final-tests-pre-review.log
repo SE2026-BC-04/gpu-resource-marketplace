@@ -1,0 +1,11 @@
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+···············································································································································································
+
+ Test Files  10 passed (10)
+      Tests  175 passed (175)
+   Start at  22:34:48
+   Duration  14.36s (environment 56%, tests 19%, setup 18%, import 5%, transform 2%, worker 1%)
+
+EXIT_CODE=0\n
