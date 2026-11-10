@@ -1,0 +1,17 @@
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+·······················································································································································································································
+
+ Test Files  12 passed (12)
+      Tests  215 passed (215)
+   Start at  00:12:22
+   Duration  16.51s (environment 61%, tests 24%, setup 6%, import 4%, transform 4%)
+
+EXIT_CODE=0
+
+Run context:
+Branch: bt3/vt-090-async-job-progress
+Source HEAD: 6daeea368e6add6aefefe8540e637f938698cba4
+Node: v22.13.0 (repository expects Node 24)
+Command: & 'D:\Application\node.exe' node_modules/vitest/vitest.mjs run --reporter=dot

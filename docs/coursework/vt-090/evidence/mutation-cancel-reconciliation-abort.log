@@ -1,0 +1,46 @@
+# VT-090 mutation: remove poll abort at Cancel reconciliation
+Timestamp: 2026-11-11 00:05:45 +07:00
+Branch: bt3/vt-090-async-job-progress
+Baseline source commit: 6daeea368e6add6aefefe8540e637f938698cba4
+File: frontend/src/ui/jobs/JobsPage.tsx
+Mutation: remove stopDetailPollingRef.current?.() from beginReconciliation (this stops timer and aborts current poll request)
+Focused test: VT090-P1-02 aborts and ignores a late poll response during Cancel reconciliation, then resumes
+Assertions under test: old poll AbortSignal is aborted; obsolete GET is released/ignored; resumed polling remains single-flight.
+Command: & 'D:\Application\node.exe' node_modules/vitest/vitest.mjs run src/ui/jobs/JobsPage.test.tsx -t 'VT090-P1-02' --reporter=dot
+
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+-----------------------------x-------------
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > VT090-P1-02 aborts and ignores a late poll response during Cancel reconciliation, then resumes
+AssertionError: expected 2 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ src/ui/jobs/JobsPage.test.tsx:701:27
+    699|
+    700|     expect(getJob).toHaveBeenCalledTimes(4);
+    701|     expect(maxActiveGets).toBe(1);
+       |                           ^
+    702|     expect(cancelJob).toHaveBeenCalledTimes(1);
+    703|     expect(api.submitJob).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 42 skipped (43)
+   Start at  00:05:46
+   Duration  4.25s (environment 68%, tests 13%, setup 7%, import 6%, transform 5%)
+
+TEST_EXIT_CODE=1
+MUTATION_RESULT=KILLED
+Source restored byte-for-byte: True
+Restored_SHA256=A534A3B2B24131F27A91A2F15F6546A1F35A81F33B83867C0C54EFF0BD8A0DC8
