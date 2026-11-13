@@ -342,7 +342,11 @@ class FakeReader:
         self.list_calls.append(kwargs)
         principal = kwargs["principal"]
         visible_items = tuple(
-            record for record in self.page.items if self._visible(record, principal)
+            record
+            for record in self.page.items
+            if self._visible(record, principal)
+            and (kwargs.get("listing_id") is None or record.listing_id == kwargs["listing_id"])
+            and (kwargs.get("status") is None or record.status == kwargs["status"])
         )
         return JobPage(items=visible_items, next_position=self.page.next_position)
 
@@ -364,6 +368,11 @@ class FakeReader:
         if role is JobRole.WORKER:
             return self.worker_user_by_profile.get(record.worker_id) == user_id
         return role is JobRole.ADMIN
+
+
+class UnavailableListReader(FakeReader):
+    def list_visible(self, **kwargs: object) -> JobPage:
+        raise DependencyUnavailable()
 
 
 class FakeCursorCodec:
@@ -476,6 +485,185 @@ def test_router_list_asgi_returns_safe_client_projection(
     assert not {"client_id", "seed_value", "expected_digest"}.intersection(
         payload["items"][0]
     )
+
+
+def test_vt089_list_http_filters_listing_before_returning_collection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    matching = make_record(id=JOB_ID, listing_id=LISTING_ID)
+    other_listing_id = UUID("44444444-4444-4444-8444-444444444444")
+    non_matching = make_record(
+        id=UUID("33333333-3333-4333-8333-333333333334"),
+        listing_id=other_listing_id,
+    )
+    reader = FakeReader(page=JobPage(items=(non_matching, matching), next_position=None))
+    service = JobsReadService(
+        reader=reader,
+        cursor_codec=HmacCursorCodec(b"test-only-vt089-red-cursor-key-0001"),
+    )
+    app = FastAPI()
+
+    async def principal_provider():
+        return Principal(CLIENT_ID, "CLIENT")
+
+    app.include_router(
+        create_jobs_router(service=service, principal_provider=principal_provider)
+    )
+
+    response = http_get(
+        app,
+        f"/api/v1/jobs?listing_id={LISTING_ID}&limit=20",
+        monkeypatch=monkeypatch,
+    )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["items"]] == [str(JOB_ID)]
+    assert reader.list_calls[0].get("listing_id") == LISTING_ID
+
+
+def test_vt089_list_http_combines_listing_and_status_and_returns_safe_empty_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancelled_id = UUID("33333333-3333-4333-8333-333333333335")
+    other_listing_id = UUID("44444444-4444-4444-8444-444444444444")
+    records = (
+        make_record(id=JOB_ID, listing_id=LISTING_ID, status=JobStatus.QUEUED),
+        make_record(id=cancelled_id, listing_id=LISTING_ID, status=JobStatus.CANCELLED),
+        make_record(id=UUID("33333333-3333-4333-8333-333333333336"), listing_id=other_listing_id),
+    )
+    reader = FakeReader(page=JobPage(items=records, next_position=None))
+    service = JobsReadService(
+        reader=reader,
+        cursor_codec=HmacCursorCodec(b"test-only-vt089-combined-filter-key-0001"),
+    )
+    app = FastAPI()
+
+    async def principal_provider():
+        return Principal(CLIENT_ID, "CLIENT")
+
+    app.include_router(create_jobs_router(service=service, principal_provider=principal_provider))
+
+    response = http_get(
+        app,
+        f"/api/v1/jobs?listing_id={LISTING_ID}&status=QUEUED",
+        monkeypatch=monkeypatch,
+        headers={"X-Request-ID": "caller-id"},
+    )
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 1
+    assert [item["id"] for item in response.json()["items"]] == [str(JOB_ID)]
+    assert_server_request_headers(response, "caller-id")
+    assert not {"client_id", "seed_value", "expected_digest"}.intersection(
+        response.json()["items"][0]
+    )
+
+    empty_response = http_get(
+        app,
+        "/api/v1/jobs?listing_id=55555555-5555-4555-8555-555555555555",
+        monkeypatch=monkeypatch,
+    )
+    assert empty_response.status_code == 200
+    assert empty_response.json() == {"items": [], "next_cursor": None}
+
+
+@pytest.mark.parametrize("limit", [1, 2, 99, 100])
+def test_vt089_limit_http_accepts_bva_boundaries(
+    limit: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = make_test_app(record=make_record())
+    response = http_get(app, f"/api/v1/jobs?limit={limit}", monkeypatch=monkeypatch)
+    assert response.status_code == 200
+    assert len(app.state.test_reader.list_calls) == 1
+    assert app.state.test_reader.list_calls[0]["limit"] == limit
+
+
+@pytest.mark.parametrize("limit", [0, 101])
+def test_vt089_limit_http_rejects_bva_outside_boundaries(
+    limit: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = make_test_app(record=make_record())
+    response = http_get(app, f"/api/v1/jobs?limit={limit}", monkeypatch=monkeypatch)
+    assert response.status_code == 422
+    assert app.state.test_reader.list_calls == []
+
+
+def test_vt089_filtered_read_dependency_failure_maps_to_safe_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reader = UnavailableListReader()
+    service = JobsReadService(
+        reader=reader,
+        cursor_codec=HmacCursorCodec(b"test-only-vt089-dependency-error-key-01"),
+    )
+    app = FastAPI()
+
+    async def principal_provider():
+        return Principal(CLIENT_ID, "CLIENT")
+
+    app.include_router(create_jobs_router(service=service, principal_provider=principal_provider))
+    response = http_get(
+        app,
+        f"/api/v1/jobs?listing_id={LISTING_ID}",
+        monkeypatch=monkeypatch,
+        headers={"X-Request-ID": "caller-id"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "DEPENDENCY_UNAVAILABLE"
+    assert "database" not in response.text.lower()
+    assert_server_request_headers(response, "caller-id")
+
+
+def test_vt089_baseline_cursor_remains_usable_through_unfiltered_http_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    key = b"VT089-PUBLIC-TEST-KEY-NOT-FOR-PRODUCTION-0001"
+    token = (
+        "eyJjb250ZXh0X3RhZyI6Ijg4ZDdiNzUwNDhjMThlY2UwZGNjNWNkYWZhY2UxOTUyNjBmOGRmNTY3MDY0ZDY3NTk2ODE1YzY5YTlhZDhmMzYiLCJqb2JfaWQiOiIzMzMzMzMzMy0zMzMzLTQzMzMtODMzMy0zMzMzMzMzMzMzMzMiLCJzdWJtaXR0ZWRfYXQiOiIyMDI2LTEwLTI0VDA4OjMwOjAwLjEyMzQ1NloiLCJ2IjoxfQ.XSVEDhc9EBrt7iWJZWsK_3v6-FEXxbZ6ut5QVfDKEBA"
+    )
+    reader = FakeReader(page=JobPage(items=(), next_position=None))
+    service = JobsReadService(reader=reader, cursor_codec=HmacCursorCodec(key))
+    app = FastAPI()
+
+    async def principal_provider():
+        return Principal(CLIENT_ID, "CLIENT")
+
+    app.include_router(create_jobs_router(service=service, principal_provider=principal_provider))
+    response = http_get(app, f"/api/v1/jobs?cursor={token}", monkeypatch=monkeypatch)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"items": [], "next_cursor": None}
+    assert reader.list_calls[0]["listing_id"] is None
+    assert reader.list_calls[0]["after"] == CursorPosition(submitted_at=NOW, job_id=JOB_ID)
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "listing_id=",
+        "listing_id=not-a-uuid",
+        "listing_id=22222222-2222-1222-8222-222222222222",
+        "listing_id=ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",
+        "listing_id=abcdefabcdef4abc8defabcdefabcdef",
+        "listing_id=22222222-2222-4222-8222-222222222222&listing_id=22222222-2222-4222-8222-222222222222",
+    ],
+)
+def test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter(
+    query: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = make_test_app(record=make_record())
+    response = http_get(
+        app,
+        f"/api/v1/jobs?{query}",
+        monkeypatch=monkeypatch,
+        headers={"X-Request-ID": "caller-controlled"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "INVALID_FILTER"
+    assert_server_request_headers(response, "caller-controlled")
+    assert app.state.test_reader.list_calls == []
 
 
 def test_router_detail_asgi_serializes_client_worker_id(
@@ -873,6 +1061,42 @@ def test_hmac_cursor_codec_round_trip_tamper_and_context_binding() -> None:
         )
     with pytest.raises(ValueError):
         HmacCursorCodec(b"short")
+
+
+def test_vt089_legacy_cursor_fixture_is_byte_compatible_without_listing_filter() -> None:
+    key = b"VT089-PUBLIC-TEST-KEY-NOT-FOR-PRODUCTION-0001"
+    token = (
+        "eyJjb250ZXh0X3RhZyI6Ijg4ZDdiNzUwNDhjMThlY2UwZGNjNWNkYWZhY2UxOTUyNjBmOGRmNTY3MDY0ZDY3NTk2ODE1YzY5YTlhZDhmMzYiLCJqb2JfaWQiOiIzMzMzMzMzMy0zMzMzLTQzMzMtODMzMy0zMzMzMzMzMzMzMzMiLCJzdWJtaXR0ZWRfYXQiOiIyMDI2LTEwLTI0VDA4OjMwOjAwLjEyMzQ1NloiLCJ2IjoxfQ.XSVEDhc9EBrt7iWJZWsK_3v6-FEXxbZ6ut5QVfDKEBA"
+    )
+    context = CursorContext(CLIENT_ID, JobRole.CLIENT, "mine", None)
+    position = CursorPosition(submitted_at=NOW, job_id=JOB_ID)
+    codec = HmacCursorCodec(key)
+
+    assert codec.decode(token, context=context) == position
+    assert codec.encode(position, context=context) == token
+
+
+def test_vt089_filtered_cursor_is_bound_to_listing_id() -> None:
+    codec = HmacCursorCodec(b"test-only-vt089-cursor-filter-key-0001")
+    context = CursorContext(
+        CLIENT_ID, JobRole.CLIENT, "mine", None, listing_id=LISTING_ID
+    )
+    token = codec.encode(CursorPosition(NOW, JOB_ID), context=context)
+
+    assert codec.decode(token, context=context) == CursorPosition(NOW, JOB_ID)
+    with pytest.raises(ValueError):
+        codec.decode(
+            token,
+            context=CursorContext(
+                CLIENT_ID,
+                JobRole.CLIENT,
+                "mine",
+                None,
+                listing_id=UUID("44444444-4444-4444-8444-444444444444"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        codec.decode(token, context=CursorContext(CLIENT_ID, JobRole.CLIENT, "mine", None))
 
 
 @pytest.mark.parametrize(

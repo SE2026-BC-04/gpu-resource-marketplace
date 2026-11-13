@@ -1,0 +1,275 @@
+FFFFFFF.F.F                                                              [100%]
+=================================== FAILURES ===================================
+_____ test_vt089_list_http_filters_listing_before_returning_collection_red _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7edb1be77ef0>
+
+    def test_vt089_list_http_filters_listing_before_returning_collection_red(
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        matching = make_record(id=JOB_ID, listing_id=LISTING_ID)
+        other_listing_id = UUID("44444444-4444-4444-8444-444444444444")
+        non_matching = make_record(
+            id=UUID("33333333-3333-4333-8333-333333333334"),
+            listing_id=other_listing_id,
+        )
+        reader = FakeReader(page=JobPage(items=(non_matching, matching), next_position=None))
+        service = JobsReadService(
+            reader=reader,
+            cursor_codec=HmacCursorCodec(b"test-only-vt089-red-cursor-key-0001"),
+        )
+        app = FastAPI()
+
+        async def principal_provider():
+            return Principal(CLIENT_ID, "CLIENT")
+
+        app.include_router(
+            create_jobs_router(service=service, principal_provider=principal_provider)
+        )
+
+        response = http_get(
+            app,
+            f"/api/v1/jobs?listing_id={LISTING_ID}&limit=20",
+            monkeypatch=monkeypatch,
+        )
+
+        assert response.status_code == 200
+>       assert [item["id"] for item in response.json()["items"]] == [str(JOB_ID)]
+E       AssertionError: assert ['33333333-33...333333333333'] == ['33333333-33...333333333333']
+E
+E         At index 0 diff: '33333333-3333-4333-8333-333333333334' != '33333333-3333-4333-8333-333333333333'
+E         Left contains one more item: '33333333-3333-4333-8333-333333333333'
+E         Use -v to get more diff
+
+backend/tests/test_jobs_foundation.py:511: AssertionError
+_ test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red[listing_id=] _
+
+query = 'listing_id='
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7edb1bda79b0>
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "listing_id=",
+            "listing_id=not-a-uuid",
+            "listing_id=22222222-2222-1222-8222-222222222222",
+            "listing_id=ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",
+            "listing_id=abcdefabcdef4abc8defabcdefabcdef",
+            "listing_id=22222222-2222-4222-8222-222222222222&listing_id=22222222-2222-4222-8222-222222222222",
+        ],
+    )
+    def test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red(
+        query: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        app = make_test_app(record=make_record())
+        response = http_get(
+            app,
+            f"/api/v1/jobs?{query}",
+            monkeypatch=monkeypatch,
+        )
+
+>       assert response.status_code == 400
+E       assert 200 == 400
+E        +  where 200 = <Response [200 OK]>.status_code
+
+backend/tests/test_jobs_foundation.py:537: AssertionError
+_ test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red[listing_id=not-a-uuid] _
+
+query = 'listing_id=not-a-uuid'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7edb1be1a540>
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "listing_id=",
+            "listing_id=not-a-uuid",
+            "listing_id=22222222-2222-1222-8222-222222222222",
+            "listing_id=ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",
+            "listing_id=abcdefabcdef4abc8defabcdefabcdef",
+            "listing_id=22222222-2222-4222-8222-222222222222&listing_id=22222222-2222-4222-8222-222222222222",
+        ],
+    )
+    def test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red(
+        query: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        app = make_test_app(record=make_record())
+        response = http_get(
+            app,
+            f"/api/v1/jobs?{query}",
+            monkeypatch=monkeypatch,
+        )
+
+>       assert response.status_code == 400
+E       assert 200 == 400
+E        +  where 200 = <Response [200 OK]>.status_code
+
+backend/tests/test_jobs_foundation.py:537: AssertionError
+_ test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red[listing_id=22222222-2222-1222-8222-222222222222] _
+
+query = 'listing_id=22222222-2222-1222-8222-222222222222'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7edb1bc6a3c0>
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "listing_id=",
+            "listing_id=not-a-uuid",
+            "listing_id=22222222-2222-1222-8222-222222222222",
+            "listing_id=ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",
+            "listing_id=abcdefabcdef4abc8defabcdefabcdef",
+            "listing_id=22222222-2222-4222-8222-222222222222&listing_id=22222222-2222-4222-8222-222222222222",
+        ],
+    )
+    def test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red(
+        query: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        app = make_test_app(record=make_record())
+        response = http_get(
+            app,
+            f"/api/v1/jobs?{query}",
+            monkeypatch=monkeypatch,
+        )
+
+>       assert response.status_code == 400
+E       assert 200 == 400
+E        +  where 200 = <Response [200 OK]>.status_code
+
+backend/tests/test_jobs_foundation.py:537: AssertionError
+_ test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red[listing_id=ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF] _
+
+query = 'listing_id=ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7edb1bd0faa0>
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "listing_id=",
+            "listing_id=not-a-uuid",
+            "listing_id=22222222-2222-1222-8222-222222222222",
+            "listing_id=ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",
+            "listing_id=abcdefabcdef4abc8defabcdefabcdef",
+            "listing_id=22222222-2222-4222-8222-222222222222&listing_id=22222222-2222-4222-8222-222222222222",
+        ],
+    )
+    def test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red(
+        query: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        app = make_test_app(record=make_record())
+        response = http_get(
+            app,
+            f"/api/v1/jobs?{query}",
+            monkeypatch=monkeypatch,
+        )
+
+>       assert response.status_code == 400
+E       assert 200 == 400
+E        +  where 200 = <Response [200 OK]>.status_code
+
+backend/tests/test_jobs_foundation.py:537: AssertionError
+_ test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red[listing_id=abcdefabcdef4abc8defabcdefabcdef] _
+
+query = 'listing_id=abcdefabcdef4abc8defabcdefabcdef'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7edb1bd27d10>
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "listing_id=",
+            "listing_id=not-a-uuid",
+            "listing_id=22222222-2222-1222-8222-222222222222",
+            "listing_id=ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",
+            "listing_id=abcdefabcdef4abc8defabcdefabcdef",
+            "listing_id=22222222-2222-4222-8222-222222222222&listing_id=22222222-2222-4222-8222-222222222222",
+        ],
+    )
+    def test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red(
+        query: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        app = make_test_app(record=make_record())
+        response = http_get(
+            app,
+            f"/api/v1/jobs?{query}",
+            monkeypatch=monkeypatch,
+        )
+
+>       assert response.status_code == 400
+E       assert 200 == 400
+E        +  where 200 = <Response [200 OK]>.status_code
+
+backend/tests/test_jobs_foundation.py:537: AssertionError
+_ test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red[listing_id=22222222-2222-4222-8222-222222222222&listing_id=22222222-2222-4222-8222-222222222222] _
+
+query = 'listing_id=22222222-2222-4222-8222-222222222222&listing_id=22222222-2222-4222-8222-222222222222'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7edb1bd0d550>
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "listing_id=",
+            "listing_id=not-a-uuid",
+            "listing_id=22222222-2222-1222-8222-222222222222",
+            "listing_id=ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",
+            "listing_id=abcdefabcdef4abc8defabcdefabcdef",
+            "listing_id=22222222-2222-4222-8222-222222222222&listing_id=22222222-2222-4222-8222-222222222222",
+        ],
+    )
+    def test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red(
+        query: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        app = make_test_app(record=make_record())
+        response = http_get(
+            app,
+            f"/api/v1/jobs?{query}",
+            monkeypatch=monkeypatch,
+        )
+
+>       assert response.status_code == 400
+E       assert 200 == 400
+E        +  where 200 = <Response [200 OK]>.status_code
+
+backend/tests/test_jobs_foundation.py:537: AssertionError
+______________ test_vt089_filtered_cursor_is_bound_to_listing_id _______________
+
+    def test_vt089_filtered_cursor_is_bound_to_listing_id() -> None:
+        codec = HmacCursorCodec(b"test-only-vt089-cursor-filter-key-0001")
+>       context = CursorContext(
+            CLIENT_ID, JobRole.CLIENT, "mine", None, listing_id=LISTING_ID
+        )
+E       TypeError: CursorContext.__init__() got an unexpected keyword argument 'listing_id'
+
+backend/tests/test_jobs_foundation.py:954: TypeError
+____ test_vt089_listing_filter_is_bound_native_uuid_before_order_and_limit _____
+
+    def test_vt089_listing_filter_is_bound_native_uuid_before_order_and_limit() -> None:
+        session = _RecordingSession()
+        reader = _recording_reader(session)
+        principal = Principal(UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), JobRole.CLIENT)
+        listing_id = UUID("22222222-2222-4222-8222-222222222222")
+
+>       reader.list_visible(
+            principal=principal,
+            status=JobStatus.QUEUED,
+            after=None,
+            limit=20,
+            listing_id=listing_id,
+        )
+E       TypeError: PostgresJobReader.list_visible() got an unexpected keyword argument 'listing_id'
+
+backend/tests/test_jobs_read_adapter_postgres.py:92: TypeError
+=========================== short test summary info ============================
+FAILED backend/tests/test_jobs_foundation.py::test_vt089_list_http_filters_listing_before_returning_collection_red
+FAILED backend/tests/test_jobs_foundation.py::test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red[listing_id=]
+FAILED backend/tests/test_jobs_foundation.py::test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red[listing_id=not-a-uuid]
+FAILED backend/tests/test_jobs_foundation.py::test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red[listing_id=22222222-2222-1222-8222-222222222222]
+FAILED backend/tests/test_jobs_foundation.py::test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red[listing_id=ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF]
+FAILED backend/tests/test_jobs_foundation.py::test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red[listing_id=abcdefabcdef4abc8defabcdefabcdef]
+FAILED backend/tests/test_jobs_foundation.py::test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red[listing_id=22222222-2222-4222-8222-222222222222&listing_id=22222222-2222-4222-8222-222222222222]
+FAILED backend/tests/test_jobs_foundation.py::test_vt089_filtered_cursor_is_bound_to_listing_id
+FAILED backend/tests/test_jobs_read_adapter_postgres.py::test_vt089_listing_filter_is_bound_native_uuid_before_order_and_limit
+9 failed, 2 passed, 91 deselected in 0.55s

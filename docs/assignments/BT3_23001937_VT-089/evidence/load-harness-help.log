@@ -1,0 +1,20 @@
+usage: vt089_load.py [-h] --base-url BASE_URL --listing-id LISTING_ID
+                     --account-count ACCOUNT_COUNT [--vus VUS]
+                     [--requests-per-vu REQUESTS_PER_VU]
+                     [--warmup-requests WARMUP_REQUESTS]
+                     [--timeout-seconds TIMEOUT_SECONDS]
+
+Opt-in 120-VU HTTP harness for a disposable VT-089 environment. Bearer tokens
+are read only from VT089_BEARER_TOKENS_JSON and are never printed. This script
+does not create data or change database state; prepare representative fixtures
+through the repository's disposable-database runbook before using it.
+
+options:
+  -h, --help            show this help message and exit
+  --base-url BASE_URL
+  --listing-id LISTING_ID
+  --account-count ACCOUNT_COUNT
+  --vus VUS
+  --requests-per-vu REQUESTS_PER_VU
+  --warmup-requests WARMUP_REQUESTS
+  --timeout-seconds TIMEOUT_SECONDS
