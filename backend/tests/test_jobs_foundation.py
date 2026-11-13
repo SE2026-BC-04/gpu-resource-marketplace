@@ -342,7 +342,11 @@ class FakeReader:
         self.list_calls.append(kwargs)
         principal = kwargs["principal"]
         visible_items = tuple(
-            record for record in self.page.items if self._visible(record, principal)
+            record
+            for record in self.page.items
+            if self._visible(record, principal)
+            and (kwargs.get("listing_id") is None or record.listing_id == kwargs["listing_id"])
+            and (kwargs.get("status") is None or record.status == kwargs["status"])
         )
         return JobPage(items=visible_items, next_position=self.page.next_position)
 
@@ -510,6 +514,51 @@ def test_vt089_list_http_filters_listing_before_returning_collection_red(
     assert response.status_code == 200
     assert [item["id"] for item in response.json()["items"]] == [str(JOB_ID)]
     assert reader.list_calls[0].get("listing_id") == LISTING_ID
+
+
+def test_vt089_list_http_combines_listing_and_status_and_returns_safe_empty_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancelled_id = UUID("33333333-3333-4333-8333-333333333335")
+    other_listing_id = UUID("44444444-4444-4444-8444-444444444444")
+    records = (
+        make_record(id=JOB_ID, listing_id=LISTING_ID, status=JobStatus.QUEUED),
+        make_record(id=cancelled_id, listing_id=LISTING_ID, status=JobStatus.CANCELLED),
+        make_record(id=UUID("33333333-3333-4333-8333-333333333336"), listing_id=other_listing_id),
+    )
+    reader = FakeReader(page=JobPage(items=records, next_position=None))
+    service = JobsReadService(
+        reader=reader,
+        cursor_codec=HmacCursorCodec(b"test-only-vt089-combined-filter-key-0001"),
+    )
+    app = FastAPI()
+
+    async def principal_provider():
+        return Principal(CLIENT_ID, "CLIENT")
+
+    app.include_router(create_jobs_router(service=service, principal_provider=principal_provider))
+
+    response = http_get(
+        app,
+        f"/api/v1/jobs?listing_id={LISTING_ID}&status=QUEUED",
+        monkeypatch=monkeypatch,
+        headers={"X-Request-ID": "caller-id"},
+    )
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 1
+    assert [item["id"] for item in response.json()["items"]] == [str(JOB_ID)]
+    assert_server_request_headers(response, "caller-id")
+    assert not {"client_id", "seed_value", "expected_digest"}.intersection(
+        response.json()["items"][0]
+    )
+
+    empty_response = http_get(
+        app,
+        "/api/v1/jobs?listing_id=55555555-5555-4555-8555-555555555555",
+        monkeypatch=monkeypatch,
+    )
+    assert empty_response.status_code == 200
+    assert empty_response.json() == {"items": [], "next_cursor": None}
 
 
 @pytest.mark.parametrize(

@@ -273,3 +273,144 @@ def test_jobs_read_service_projects_no_client_identity_or_protected_reference(
     assert "simulation_reference" not in worker_view.model_dump()
     assert "simulation_reference" not in client_view.model_dump()
     assert client_view.model_dump()["worker_id"] == UUID(fixture.worker_id)
+
+
+def test_vt089_pg_listing_filter_status_roles_cursor_ties_and_before_limit(
+    jobs_reader: tuple[Engine, PostgresJobReader],
+) -> None:
+    engine, reader = jobs_reader
+    from test_schema_constraints import add_listing, add_user, add_worker
+
+    with engine.begin() as connection:
+        worker1_user, worker1_id = add_worker(connection)
+        worker2_user, worker2_id = add_worker(connection)
+        listing1 = add_listing(connection, worker1_id, total=8)
+        listing2 = add_listing(connection, worker2_id, total=32)
+        client1 = add_user(connection, "CLIENT")
+        client2 = add_user(connection, "CLIENT")
+        base_time = connection.execute(
+            text("SELECT TIMESTAMPTZ '2026-11-06 12:00:00+00'")
+        ).scalar_one()
+        matching_ids: list[str] = []
+
+        # Three matching QUEUED rows tie on timestamp and span two pages.
+        for client_id in (client1, client2, client1):
+            job_id = str(uuid4())
+            connection.execute(
+                text(
+                    "INSERT INTO jobs (id, client_id, listing_id, worker_id, requested_gpu_count, "
+                    "duration_seconds, submitted_at, correlation_id, status) "
+                    "VALUES (:id, :client, :listing, :worker, 1, 60, :submitted, :corr, 'QUEUED')"
+                ),
+                {
+                    "id": job_id,
+                    "client": client_id,
+                    "listing": listing1,
+                    "worker": worker1_id,
+                    "submitted": base_time,
+                    "corr": str(uuid4()),
+                },
+            )
+            matching_ids.append(job_id)
+
+        # A matching Listing row with another status proves AND semantics.
+        connection.execute(
+            text(
+                "INSERT INTO jobs (id, client_id, listing_id, worker_id, requested_gpu_count, "
+                "duration_seconds, submitted_at, correlation_id, status, terminal_at) "
+                "VALUES (:id, :client, :listing, :worker, 1, 60, :submitted, :corr, 'CANCELLED', :terminal)"
+            ),
+            {
+                "id": str(uuid4()),
+                "client": client1,
+                "listing": listing1,
+                "worker": worker1_id,
+                "submitted": base_time,
+                "corr": str(uuid4()),
+                "terminal": base_time,
+            },
+        )
+
+        # More recent decoys would consume the whole page if filtering happened
+        # after LIMIT. They belong to another Listing and another Worker owner.
+        for _ in range(21):
+            connection.execute(
+                text(
+                    "INSERT INTO jobs (id, client_id, listing_id, worker_id, requested_gpu_count, "
+                    "duration_seconds, submitted_at, correlation_id, status) "
+                    "VALUES (:id, :client, :listing, :worker, 1, 60, :submitted, :corr, 'QUEUED')"
+                ),
+                {
+                    "id": str(uuid4()),
+                    "client": client2,
+                    "listing": listing2,
+                    "worker": worker2_id,
+                    "submitted": base_time,
+                    "corr": str(uuid4()),
+                },
+            )
+
+    listing_uuid = UUID(listing1)
+    admin = Principal(UUID(worker1_user), JobRole.ADMIN)
+    expected_ids = sorted(matching_ids, reverse=True)
+    first_page = reader.list_visible(
+        principal=admin,
+        status=JobStatus.QUEUED,
+        after=None,
+        limit=2,
+        listing_id=listing_uuid,
+    )
+    assert [str(record.id) for record in first_page.items] == expected_ids[:2]
+    assert first_page.next_position is not None
+    second_page = reader.list_visible(
+        principal=admin,
+        status=JobStatus.QUEUED,
+        after=first_page.next_position,
+        limit=2,
+        listing_id=listing_uuid,
+    )
+    assert [str(record.id) for record in second_page.items] == expected_ids[2:]
+    assert second_page.next_position is None
+    assert len(set(expected_ids[:2] + [str(record.id) for record in second_page.items])) == 3
+
+    client1_page = reader.list_visible(
+        principal=Principal(UUID(client1), JobRole.CLIENT),
+        status=JobStatus.QUEUED,
+        after=None,
+        limit=10,
+        listing_id=listing_uuid,
+    )
+    client2_page = reader.list_visible(
+        principal=Principal(UUID(client2), JobRole.CLIENT),
+        status=JobStatus.QUEUED,
+        after=None,
+        limit=10,
+        listing_id=listing_uuid,
+    )
+    worker1_page = reader.list_visible(
+        principal=Principal(UUID(worker1_user), JobRole.WORKER),
+        status=JobStatus.QUEUED,
+        after=None,
+        limit=10,
+        listing_id=listing_uuid,
+    )
+    worker2_page = reader.list_visible(
+        principal=Principal(UUID(worker2_user), JobRole.WORKER),
+        status=JobStatus.QUEUED,
+        after=None,
+        limit=10,
+        listing_id=listing_uuid,
+    )
+    unknown_listing_page = reader.list_visible(
+        principal=Principal(UUID(worker2_user), JobRole.WORKER),
+        status=None,
+        after=None,
+        limit=10,
+        listing_id=UUID("55555555-5555-4555-8555-555555555555"),
+    )
+    assert {str(record.id) for record in client1_page.items} == {
+        matching_ids[0], matching_ids[2]
+    }
+    assert [str(record.id) for record in client2_page.items] == [matching_ids[1]]
+    assert {str(record.id) for record in worker1_page.items} == set(matching_ids)
+    assert worker2_page.items == unknown_listing_page.items == ()
