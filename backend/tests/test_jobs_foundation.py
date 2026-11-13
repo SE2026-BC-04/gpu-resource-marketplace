@@ -478,6 +478,65 @@ def test_router_list_asgi_returns_safe_client_projection(
     )
 
 
+def test_vt089_list_http_filters_listing_before_returning_collection_red(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    matching = make_record(id=JOB_ID, listing_id=LISTING_ID)
+    other_listing_id = UUID("44444444-4444-4444-8444-444444444444")
+    non_matching = make_record(
+        id=UUID("33333333-3333-4333-8333-333333333334"),
+        listing_id=other_listing_id,
+    )
+    reader = FakeReader(page=JobPage(items=(non_matching, matching), next_position=None))
+    service = JobsReadService(
+        reader=reader,
+        cursor_codec=HmacCursorCodec(b"test-only-vt089-red-cursor-key-0001"),
+    )
+    app = FastAPI()
+
+    async def principal_provider():
+        return Principal(CLIENT_ID, "CLIENT")
+
+    app.include_router(
+        create_jobs_router(service=service, principal_provider=principal_provider)
+    )
+
+    response = http_get(
+        app,
+        f"/api/v1/jobs?listing_id={LISTING_ID}&limit=20",
+        monkeypatch=monkeypatch,
+    )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["items"]] == [str(JOB_ID)]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "listing_id=",
+        "listing_id=not-a-uuid",
+        "listing_id=22222222-2222-1222-8222-222222222222",
+        "listing_id=ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",
+        "listing_id=abcdefabcdef4abc8defabcdefabcdef",
+        "listing_id=22222222-2222-4222-8222-222222222222&listing_id=22222222-2222-4222-8222-222222222222",
+    ],
+)
+def test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red(
+    query: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = make_test_app(record=make_record())
+    response = http_get(
+        app,
+        f"/api/v1/jobs?{query}",
+        monkeypatch=monkeypatch,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "INVALID_FILTER"
+
+
 def test_router_detail_asgi_serializes_client_worker_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
