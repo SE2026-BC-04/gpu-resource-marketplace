@@ -17,7 +17,7 @@ TV1/TV5 must define injection mechanism, file/secret lifetime, permissions, star
 
 ## Planned K1 → K2 rotation
 
-The approved design anticipates planned rotation only after quiescing dispatch/signing under K1, preserving K1 public verification for retained receipts, publishing/activating K2 with correct Worker binding, then resuming work. Do not retire the historical public key while retained signed evidence or an in-flight attempt may require it. Exact overlap, activation timestamps, rollback, and in-flight treatment need TV1/TV2/TV3/TV5 ACK and tests. Unknown key/version => fail closed.
+The approved design anticipates planned rotation only after quiescing dispatch/signing under K1, preserving K1 public verification for retained receipts, publishing/activating K2 with correct Worker binding, then resuming work. Do not **delete** a historical public key while retained signed evidence references it; **retire** K1 only after safe quiescence and preserve its row for later verification. Exact overlap, activation timestamps, rollback, and in-flight treatment need TV1/TV2/TV3/TV5 ACK and tests. Unknown key/version => fail closed.
 
 ## Compromise response remains a decision
 
