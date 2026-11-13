@@ -1,0 +1,4 @@
+s                                                                        [100%]
+=========================== short test summary info ============================
+SKIPPED [1] backend/tests/test_phase1_runtime_http_postgres_e2e.py:74: NOT_RUN: PostgreSQL tests need GPU_MARKETPLACE_TEST_DATABASE_URL, GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS=1 and GPU_MARKETPLACE_TEST_CLUSTER_TOKEN for a disposable cluster (schema matrix 9.2/9.3)
+1 skipped in 0.04s

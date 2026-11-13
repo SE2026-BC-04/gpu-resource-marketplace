@@ -1,0 +1,70 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+____________ test_router_rejects_cross_role_scope[CLIENT-assigned] _____________
+
+role = 'CLIENT', scope = 'assigned'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x771563ff9910>
+
+    @pytest.mark.parametrize(
+        ("role", "scope"),
+        [("CLIENT", "assigned"), ("WORKER", "mine"), ("ADMIN", "mine")],
+    )
+    def test_router_rejects_cross_role_scope(
+        role: str, scope: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        app = make_test_app(role=role, record=make_record())
+        response = http_get(
+            app, f"/api/v1/jobs?scope={scope}", monkeypatch=monkeypatch
+        )
+>       assert response.status_code == 403
+E       assert 200 == 403
+E        +  where 200 = <Response [200 OK]>.status_code
+
+backend/tests/test_jobs_foundation.py:917: AssertionError
+______________ test_router_rejects_cross_role_scope[WORKER-mine] _______________
+
+role = 'WORKER', scope = 'mine'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x771563ff8b60>
+
+    @pytest.mark.parametrize(
+        ("role", "scope"),
+        [("CLIENT", "assigned"), ("WORKER", "mine"), ("ADMIN", "mine")],
+    )
+    def test_router_rejects_cross_role_scope(
+        role: str, scope: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        app = make_test_app(role=role, record=make_record())
+        response = http_get(
+            app, f"/api/v1/jobs?scope={scope}", monkeypatch=monkeypatch
+        )
+>       assert response.status_code == 403
+E       assert 200 == 403
+E        +  where 200 = <Response [200 OK]>.status_code
+
+backend/tests/test_jobs_foundation.py:917: AssertionError
+_______________ test_router_rejects_cross_role_scope[ADMIN-mine] _______________
+
+role = 'ADMIN', scope = 'mine'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x771563d5db80>
+
+    @pytest.mark.parametrize(
+        ("role", "scope"),
+        [("CLIENT", "assigned"), ("WORKER", "mine"), ("ADMIN", "mine")],
+    )
+    def test_router_rejects_cross_role_scope(
+        role: str, scope: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        app = make_test_app(role=role, record=make_record())
+        response = http_get(
+            app, f"/api/v1/jobs?scope={scope}", monkeypatch=monkeypatch
+        )
+>       assert response.status_code == 403
+E       assert 200 == 403
+E        +  where 200 = <Response [200 OK]>.status_code
+
+backend/tests/test_jobs_foundation.py:917: AssertionError
+=========================== short test summary info ============================
+FAILED backend/tests/test_jobs_foundation.py::test_router_rejects_cross_role_scope[CLIENT-assigned]
+FAILED backend/tests/test_jobs_foundation.py::test_router_rejects_cross_role_scope[WORKER-mine]
+FAILED backend/tests/test_jobs_foundation.py::test_router_rejects_cross_role_scope[ADMIN-mine]
+3 failed in 0.49s

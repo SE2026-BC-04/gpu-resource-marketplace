@@ -160,20 +160,27 @@ Unit tests tập trung strict query validation, context binding, default behavio
 - RED test commit: `74b5c08` (`test(jobs): capture VT-089 listing filter RED`), based on the pre-feature implementation. Command `uv run --project backend --locked --group dev pytest backend/tests/test_jobs_foundation.py -k vt089_list_http -q` exited `1` as expected: **7 failed, 88 deselected**. The matching-filter test observed the nonmatching Job in the HTTP collection; all six invalid/duplicate query cases returned `200` instead of `400 INVALID_FILTER`. Full sanitized output: [`pytest-red-01.log`](evidence/pytest-red-01.log); run record: [`red-run-01.md`](evidence/red-run-01.md).
 - Extended RED run: `uv run --project backend --locked --group dev pytest backend/tests/test_jobs_foundation.py backend/tests/test_jobs_read_adapter_postgres.py -k vt089 -q` — exit `1` as expected, **9 failed, 2 passed, 91 deselected**. Failures cover ignored filter/invalid query inputs and the not-yet-added cursor/adapter interface; controls confirm the legacy cursor and baseline unfiltered SQL/params. See [`red-run-02.md`](evidence/red-run-02.md) and [`pytest-red-02.log`](evidence/pytest-red-02.log).
 - Expanded RED run: `uv run --project backend --locked --group dev pytest backend/tests/test_jobs_foundation.py backend/tests/test_jobs_read_adapter_postgres.py -k vt089 -q` — exit `1`, **10 failed, 2 passed, 1 skipped, 91 deselected**. The single PostgreSQL test skipped because disposable-cluster opt-in is absent. See [`red-run-03.md`](evidence/red-run-03.md).
-- GREEN: NOT_RUN; application patch is pending.
-- PostgreSQL disposable cluster: NOT_CHECKED.
-- Mutation: NOT_RUN.
-- Coverage/flaky repetition: NOT_RUN.
-- 120-task performance / p95: NOT_RUN.
-- PDF/DOCX: NOT_RUN.
+- Implementation: commit `e90627a1913550a5ea9ea224eff70b04ab99455c` (`feat(jobs): filter job lists by Listing`); modified the Jobs route/service/port/cursor/reader, Jobs API/UI, focused backend/frontend tests, runtime E2E scenario, and this assignment's load harness. No migration, dependency, Auth, Listings service, or shared app registration changed.
+- Focused GREEN: `uv run --project backend --locked --group dev pytest backend/tests/test_jobs_foundation.py backend/tests/test_jobs_read_adapter_postgres.py -q` — **109 passed, 5 skipped**, exit 0. The skips are all real PostgreSQL scenarios gated on disposable DB credentials; the result proves the unit/recording-session suite only. Full output: [`pytest-green-focused.log`](evidence/pytest-green-focused.log).
+- Frontend GREEN: `npm --prefix frontend test -- --reporter=dot` — **10 files, 160 passed**; `npm --prefix frontend run typecheck` and `npm --prefix frontend run build` — **PASS**. Production build completed. These are local feature-branch results.
+- Repeatability: the focused Jobs command was repeated twice more, each **109 passed, 5 skipped**; see [`flaky-review.md`](evidence/flaky-review.md) and the two repeat logs. This is a small repeat sample, not proof of absence of flakiness.
+- Runtime HTTP/PostgreSQL E2E: **SKIPPED / NOT_RUN** (1 scenario) because disposable-cluster opt-in is absent; see [`pytest-runtime-e2e.log`](evidence/pytest-runtime-e2e.log). Docker access is denied by the local daemon socket permission, so no disposable cluster was created.
+- Mutation: **KILLED** for one targeted authorization guard mutation. Removing the role/scope guard caused 3 cross-role requests to return 200 instead of 403; details and exact mutant evidence: [`mutation-scope.md`](evidence/mutation-scope.md), [`mutation-scope.patch`](evidence/mutation-scope.patch), [`pytest-mutation-scope.log`](evidence/pytest-mutation-scope.log). This does not establish coverage of every mutation.
+- Coverage: quantitative line/branch coverage **NOT_RUN**; neither `coverage.py` nor `pytest-cov` is present in the pinned dev environment. Risk-based coverage assessment is in [`evidence/coverage-risk-review.md`](evidence/coverage-risk-review.md); no dependency was added.
+- 120-VU performance acceptance: **NOT_RUN**. The harness `--help` was exercised successfully, but no API+PostgreSQL runtime or representative dataset was available. p50/p95/p99, throughput, observed concurrency and error rate therefore have no measured values; p95 `<=3.5s` is **not established**.
+- Lint: **NOT_RUN**; `ruff` is unavailable in the pinned dev group. Python `compileall` and `git diff --check` were run locally.
+- Full backend regression: **BLOCKED/INCOMPLETE** in the earlier local attempt at an unrelated TestClient/Auth integration deadlock. Exact-head CI for local SHA `e90627a` is not available because the commit has not yet reached GitHub; do not infer full-suite success from focused tests.
+- PDF/DOCX: **BLOCKED** locally; no Pandoc, LibreOffice, browser PDF renderer, `python-docx`, ReportLab or WeasyPrint is installed. Editable Markdown sources and reflection are supplied; the required rendered PDF (<=8 A4 pages) and DOCX remain outstanding rather than fabricated.
 - DEC-VT089-L2-01: APPROVED for the scoped design and atomic same-PR workflow; implementation review/merge approval NOT PROVIDED.
-- TV2: ACK_WITH_ACTIONS for reader/query design at proposal HEAD; implementation review pending exact code HEAD.
+- TV2: ACK_WITH_ACTIONS for reader/query design at proposal HEAD; implementation review pending exact implementation SHA `e90627a1913550a5ea9ea224eff70b04ab99455c`.
 - TV4 ACK: NOT PROVIDED. TV3 ACK: not requested/claimed because auth semantics do not change.
+- Final delivery remains Draft/HOLD: disposable PostgreSQL, exact-head TV2 SQL review, TV4 cross-phase review, exact-head CI, quantitative coverage where tooling becomes available, real 120-VU run, rendered PDF, and two independent human L2 approvals remain open.
 
-## 7. AI use log (initial)
+## 7. AI use log
 
-- Tool: Codex coding agent (model family reported by the active environment as GPT-6); exact model build identifier unavailable.
-- Prompt used: the user-provided VT-089 task specification attached to this conversation.
-- Output used: repository survey, initial acceptance criteria, plan and test matrix in this document.
-- Verification: claims above are tied to source lines at baseline `bee832eaf5463df20f6c6815174322871eb6685a`; no implementation claim is made.
-- Human review: not yet performed; do not say the student independently verified this work.
+- Tool: Codex coding agent; the exact model build identifier is unavailable. Prompt source: user-provided BT3 VT-089 assignment and subsequent TV1/TV2 decision evidence.
+- AI-assisted work used: repository survey, decision/change-record draft, API contract wording, test matrix, test/code suggestions, load-harness draft, evidence summaries and this report. The student remains responsible for the submitted code and claims.
+- Verification examples: (1) a cursor regression test initially used a test key with an extra hyphen, which did not match the published fixed key; the failing signature check exposed this and the test was corrected against the exact baseline fixture. (2) a proposed PostgreSQL fixture initially had a role/client identity mismatch; review caught the fixture inconsistency and it was corrected before final evidence. These are examples of generated work requiring independent checking, not claimed production defects.
+- The authorization mutation was deliberately run in a detached temporary worktree. Its three failing assertions were inspected; the mutant was not pushed, and the submitted branch retains the original guard.
+- Evidence is separated into baseline, RED, local GREEN, skipped PostgreSQL/E2E, mutation and unrun performance. No AI output is treated as owner ACK, runtime evidence, or human approval.
+- Student reflection: [`reflection.md`](reflection.md). A required reviewable PDF/DOCX has not been rendered because this environment lacks a renderer; do not treat Markdown as satisfying that artifact requirement.
