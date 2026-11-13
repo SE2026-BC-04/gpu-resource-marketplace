@@ -270,3 +270,21 @@ The statement in §4 that a Phase 2E design approval exists only locally is supe
 Current pre-code deliverables are under [`tv5-p2e-precode/`](tv5-p2e-precode/). The package preserves approved design choices and leaves outstanding ACKs, decisions and runtime tests explicit; see `TV5_BASELINE.md` and `TV5_INTERFACE_ACK_MATRIX.md`.
 
 The historical “no GitHub writes” sentence describes the earlier handoff-only review scope. This documentation review task authorizes its docs branch/PR workflow only; it does not authorize implementation, migration, merge, or deployment.
+
+---
+
+## 13. Bàn giao đồng bộ Phase 2E — 2026-11-13 (đề xuất, chưa ACK)
+
+Nguồn hiện tại trên GitHub: [TV2 #46 @ ba63466](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46), [TV3 #49 @ 9b337f5](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/49), TV4 #48 @ b8be725; tất cả **chưa merge**. Main vẫn bee832e. Bổ sung này không thay đổi quyết định thiết kế đã được phê duyệt.
+
+| Giao diện | Nội dung TV5 cần thống nhất trước code |
+|---|---|
+| Dispatch/Outbox | Chính xác 10 khóa, demo-v1, không oracle; TV5 ưu tiên P1 full immutable payload; P2 fallback; TV1/lead chốt D-05/D-13 |
+| Rotation | D-18 Worker advisory shared/exclusive, 2 active keys làm quiesce marker, expected K1/K2, rollback K1, K1 public row giữ để verify; E-C3/D4 L2 chờ quyết định |
+| Signer proof | TV5 ưu tiên G1 nonce proof riêng, G2 chưa có cold Manager bootstrap an toàn. Simulator secret bundle + startup self-check không đủ để chứng minh active DB key |
+| Allocation | TV2 đề xuất SignerReadiness(worker_id,key_id,public_key_fingerprint,proof_expires_at) *nội bộ*; dưới Worker+Listing locks đối chiếu sole active key/fingerprint và DB expiry; sai ⇒ Blocked(SIGNER_NOT_READY), không tạo Job/GPU/Outbox; P2B-DRT-29 NOT_RUN |
+| Callback | 202 STORED/DUPLICATE, 401, 404, 409 (collision/not-acceptable), 422, 503; cùng raw envelope/result_id khi retry; stored received_at quyết định deadline; D-01/E-C1, D-02/E-C2 chờ lead |
+| Verifier → Finalizer | TV3 full immutable VerifiedV1Receipt/RejectedV1Receipt, 4 mã rejection; TV5/TV3 ưu tiên V-OUT + TV2 locked recheck/extractor, chưa chốt E-C4 |
+| Terminal/UoW | PrecedingPending; deadline fallback fresh DB scan, không tin caller proof; one UoW signed evidence/Job/release/Listing/Inbox/reputation, SYSTEM_FAULT không phạt Worker |
+
+**Quy trình:** giữ **một nhánh thiết kế docs/phase2e-tv5-design**, **một Draft PR #50**. Sau G1 docs gate và quyền code G2 riêng của nhóm trưởng, mỗi nhiệm vụ triển khai dùng branch/PR độc lập từ main mới nhất, không đưa mã vào PR docs. Chưa có quyền merge hoặc triển khai. TV3 đã comment ACK_WITH_ACTIONS tại SHA #50 cũ 7b5ee16; TV5 đã review #46 @ ed19a51 và #49 @ 9b337f5 (đều ACK_WITH_ACTIONS), không tự chuyển ACK sang SHA mới. Cần TV1/TV2/TV3/TV4/lead và người thật độc lập xác nhận **exact producer/consumer SHA**, hợp đồng, test oracle; mọi test PostgreSQL native-role/concurrency/crypto/5-service E2E Phase 2 đều **NOT_RUN**.
