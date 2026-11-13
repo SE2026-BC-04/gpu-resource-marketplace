@@ -52,3 +52,25 @@ S-2E is the baseline version before its status addendum in this PR.
 ## Change-control for ACK
 
 An ACK must come from the named owner and cite this matrix/document version or SHA, exact DTO/data shape, failure/retry/transaction semantics, and test oracle. A PR being open/Ready, green CI, a Codex review, or this report is not an owner ACK. If a proposal changes an accepted API/ADR/database or Phase 2 design, use formal inter-phase change control before implementation.
+
+---
+
+## E-IF live cross-PR status — 2026-11-13 (no automatic owner ACK)
+
+Initial table above is a baseline snapshot; use these **newer unmerged producer SHAs** when requesting re-review: TV2 [#46 @ ba6346655cc7c7f02619a657d35bd8c5a0ad17b7](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46); TV3 [#49 @ 9b337f5d9b2ccea60dea790d76a2b9420cf94605](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/49); TV4 [#48 @ b8be72527eb1f9a7f485fd4260cbe86e5db40ab9](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/48). TV5 [#46 review @ ed19a51](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46#pullrequestreview-5887153391) and [#49 review @ 9b337f5](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/49#pullrequestreview-5887054059) are **ACK_WITH_ACTIONS**, and do not approve subsequent TV2 changes or this new PR #50 HEAD.
+
+| E-IF | Updated design direction | Status / remaining decision |
+|---|---|---|
+| 01 | TV2 P1 full ten-key immutable Outbox, canonical raw wire; P2 eight-key fallback | PENDING TV1/lead D-05/D-13, PG tests |
+| 02–03 | Volatile cache and cross-restart altered Attempt are separate from signing proof; cap/TTL/shutdown measured | P2E-CACHE-GAP-01 NEEDS_OWNER_DECISION; numeric limits PENDING |
+| 04 | D-18 shared/exclusive Worker lock, two-active-key rotation fence; G1 preferable to G2; internal SignerReadiness proof bound under locks | TV1/TV2/TV3/TV4/TV5 ACK, lead E-C3/D4/L2, G1/G2 and D-03/S-10 |
+| 05 | ADR-004 nine-field mock vs eleven-field Signed V1 and independent canonical/Ed25519 | TV3/TV5 fixture and owner ACK; NOT_RUN |
+| 06 | Callback 202 STORED/DUPLICATE, 401, 404 context, 409 collision/unacceptable, 422 invalid, 503 unresolved; 16,384 B/depth 4 proposed | TV1 budget & TV3/TV5 ACK, NOT_RUN |
+| 07 | TV2 target-less ON CONFLICT + fresh ABSENT/SAME/DIFFERENT probe and trusted stored received_at | Lead D-01/E-C1, D-02/E-C2; real API-role grants/SQL |
+| 08 | TV3 VerifiedV1Receipt + full RejectedV1Receipt with non-NULL result_id/hash; four definitive rejection codes; V-OUT and TV2 locked extractor | TV1/lead E-C4, exact producer-consumer SHA ACK, NOT_RUN |
+| 09 | PrecedingPending, valid-A/valid-B deterministic earliest winner, no premature fallback | TV1/TV2/TV3/TV5 B-IF-05/07 ACK and tests |
+| 10 | One TV2 Finalization UoW; D-11/D-12 first-contribution UPSERT proposed | TV1/TV2/TV5 grants, contribution and unknown-COMMIT PG tests |
+| 11 | TV4 scheduler must supply fresh SignerReadiness for eligible Worker and handle Blocked(SIGNER_NOT_READY), without bypassing FIFO | TV4/TV1 integration ACK and P2B-DRT-29 |
+| 12 | Main bee832e Phase 1 accepted source baseline; #39/#44 merged; TV3 earlier scoped PR #50 feedback exists | New exact #50 SHA reviewer/independent human L2 ACK + lead docs/coding gates |
+
+TV3 [scoped comment on PR #50](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/50) addressed thin rejection DTO, conditional D-01 language, 404/503 mapping and retire-vs-delete at this **proposal** level; re-review is needed on the new SHA. Do not mark approvals or test PASS based on a previous SHA or green foundation CI.
