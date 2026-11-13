@@ -26,3 +26,11 @@ The approved design anticipates planned rotation only after quiescing dispatch/s
 ## Security acceptance checklist
 
 DRT-05/06/08/09/19: wrong/missing key; restart recovery; K1/K2 rotation with historical verify; invalid signature and altered context; wrong/opposite service token; no key/secret in logs, DB, API DTOs, simulator JSON or test artifacts. Runtime/security tests `NOT_RUN`; ACKs `NOT PROVIDED`.
+
+---
+
+## Key rotation, G1/G2 and readiness — 2026-11-13
+
+Source: TV2 #46 @ ba63466 D-18 and TV3 #49 @ 9b337f5 §6.6.5, **all PROPOSED_FOR_ACK**. Registration takes an exclusive Worker advisory transaction lock; TX-ALLOCATE a shared Worker lock, first in lock order. Register K2 as **second active key** to persistently quiesce allocation; drain RUNNING Attempts; deploy K2 secret bundle and self-check; under exclusive lock require exactly expected {K1,K2}, trusted K2 readiness and no RUNNING Attempt, then **retire K1 only**. On failure restore usable K1 bundle **before** retiring K2 removes the fence. Unexpected third key fails closed. **Retire** K1 after safe quiescence is permitted; **delete** historical K1 referenced by signed evidence is not. Partial unique active-key index conflicts with two-row fence; E-C3/D4 and new global lock order require lead L2 approval.
+
+Simulator startup checks its private bundle locally, which is **not** proof of matching the active DB public key. TV5 prefers **G1**, a separate authenticated nonce proof signed with `GPU-MARKETPLACE:SIGNER-PROOF:V1\n` domain, verified by Manager against sole active key *outside* UoW. This needs a new internal endpoint/API L2 change. G2 dispatch-refusal has an unresolved cold-Manager bootstrap contradiction if allocation requires pre-existing readiness; no silent exploratory real-Job allocation. TV2 @ ba63466 proposes `SignerReadiness(worker_id,key_id,public_key_fingerprint,proof_expires_at)` as internal argument; under Worker+Listing locks active key ID/fingerprint, Worker and DB expiry must match or `Blocked(SIGNER_NOT_READY)` with no writes. Stale K1 proof after K2 activation is blocked (P2B-DRT-29 design only). Restart **within** proof TTL remains a residual risk requiring tests/invalidation and cannot be claimed impossible. Provisioning identity D-03/S-10, E-C3, G1/G2, incident response and all runtime tests are pending.
