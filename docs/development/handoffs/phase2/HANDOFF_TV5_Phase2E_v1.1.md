@@ -4,7 +4,7 @@
 **Phiên bản:** `v1.1 — FINAL-DESIGN-ALIGNED / FOR_LEAD_REVIEW`, 2026-11-07.  
 **Trạng thái handoff:** `ACK_WITH_ACTIONS / AWAITING_LEAD_APPROVAL`. Khi nhóm trưởng đồng ý: `APPROVED_HANDOFF_CONDITIONAL`, **không phải quyền code**.  
 **Thiết kế chuẩn:** `Phase_2E_v1.8.md`, `P2E-GATE-01 = APPROVED_DESIGN_CONDITIONAL` và `P2E-GPU005B-GATE-01 = APPROVED_DESIGN_CONDITIONAL`. Các E-IF, tham số cache, quy trình xử lý lộ khóa, typed-contract vẫn `PENDING_ACK`, `PENDING_PARAMS` hoặc `NEEDS_OWNER_DECISION`.  
-**GitHub evidence snapshot:** [PR #39](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39) tại **HEAD `a9d294eb277ca6ed32d7acbbae18ecd2ede0ee76`**, `OPEN / DRAFT / NOT_MERGED` (kiểm tra 2026-11-07, ~22:10 UTC+7); base `main@1d8b1b2c52b759d99a072c3d0d889b375083a8c4`. [PR #42](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/42) đã merge **vào nhánh PR #39**, không đồng nghĩa PR #39 vào `main`. [CI run #42384916449](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42384916449) **FAIL: python job**, Compose/Frontend/PowerShell PASS. Pytest **1 failed, 1222 passed**: `test_postgres_same_key_same_body_replays_after_listing_is_paused` vấp `NameError: name 'key' is not defined` ở `backend/tests/test_jobs_submit_adapter_postgres.py:176`. Đây là **lỗi biến fixture/test code trên Phase1**, không phải bằng chứng owner-approved PAUSED replay policy sai; phải sửa và chạy lại CI/re-review HEAD trước Phase2.  
+**Historical GitHub evidence snapshot (2026-11-07):** the PR #39 status, SHA and failing run described in the original v1.1 snapshot below are historical. Current state and exact-head CI are recorded in the 2026-11-08 addendum at §12; do not use the old snapshot as current status.
 **Phạm vi thực hiện lượt này:** **chỉ sửa tài liệu handoff và báo cáo review**. Không sửa GitHub/code/migration, không chạy Phase 2 test, không tự chốt phương án bảo mật còn mở.
 
 ## 1. Mục tiêu tổng quát và định nghĩa thành công
@@ -52,7 +52,7 @@ TV5 phải (sau khi được cấp coding gate) hoàn thiện **thực thi mô p
 ### 3.2. Đọc mã nguồn thật trên exact accepted-main SHA sau khi baseline được chốt
 
 - `docs/architecture/decisions/ADR-002-postgresql-access-boundaries.md`, `ADR-003-internal-communication.md`, **`ADR-004-signed-result.md`**, **`ADR-005-retry-timeout-internal-auth.md`**, `docs/design/{api-contract,database-design,test-design}.md` (API §13, DB §§9/11).
-- `docs/architecture/phases/phase1e_gpu005_reference_technical_specification.md`: Phase1 `demo-v1-public1`, vectors V1–V4; nguồn GitHub có **phê duyệt Phase1**, phê duyệt *thiết kế* Phase2E v1.8 chỉ nằm trong bộ tài liệu local (chưa sync GitHub).
+- `docs/architecture/phases/phase1e_gpu005_reference_technical_specification.md`: Phase1 `demo-v1-public1`, vectors V1–V4; Phase 2E v1.8's conditional design record is now present on main through PR #44 document intake, while cross-phase ACKs and implementation permission remain separate.
 - `backend/src/gpu_marketplace/jobs/{reference,submit,submit_ports,cancel,router}.py`, `backend/src/gpu_marketplace/repositories/{job_submit,jobs,commit_outcome}.py`, `backend/tests/{test_jobs_reference,test_jobs_submit_adapter_postgres,test_jobs_cancel_adapter_faults,test_phase1_runtime_http_postgres_e2e}.py`.
 - `simulator/src/gpu_marketplace_simulator/{app,config}.py`: ở PR39 HEAD kiểm tra, Simulator **mới có health/live + health/ready**, chưa có internal dispatch/signer/callback client Phase2.
 - `backend/src/gpu_marketplace/manager/service.py`: `_foundation_idle_runner`, chưa có Finalization Loop. `backend/src/gpu_marketplace/api/app.py`: Phase1 Auth/Listings/Jobs routes, chưa có internal callback Phase2.
@@ -106,7 +106,7 @@ TV5 phải (sau khi được cấp coding gate) hoàn thiện **thực thi mô p
 
 | ID | Mục tiêu công việc và thao tác cụ thể | Đầu ra TV5 phải nộp / điều kiện chốt |
 |---|---|---|
-| **TV5-P2E-01** | **Baseline Phase1 và mốc PR39:** đối chiếu Jobs Submit/Cancel, generator `reference.py`, V1–V4, audit/Submit↔Pause/Resize/role tests vừa bổ sung vào PR39, bao gồm sửa lỗi CI `NameError` của test PAUSED replay trên HEAD `a9d294e`; xác nhận #39 đã merge/được chấp nhận trên `main` trước khởi động Phase2, `alembic heads/version`, CI, exact SHA; phân biệt phê duyệt Phase1 và local design Phase2. | `TV5_BASELINE.md`: commit/migration/CI/review evidence; open issues/deferrals; rule same-key PAUSED 200 đã duyệt; không ghi PR39 Draft là main-approved |
+| **TV5-P2E-01** | **Baseline Phase1 và mốc PR39:** đối chiếu Jobs Submit/Cancel, generator `reference.py`, V1–V4, audit/Submit↔Pause/Resize/role tests; xác nhận merged #39, exact accepted head/CI evidence, `alembic heads`, phân biệt Phase1 approval với Phase2 conditional design. | `TV5_BASELINE.md`: commit/migration/CI/review evidence; open issues/deferrals; rule same-key PAUSED 200 đã duyệt; không ghi PR39 Draft là main-approved |
 | **TV5-P2E-02** | **Đóng băng generator và wire:** độc lập tính 4 vector, hash-domain/rejection sampling, 9-output schema, 11 V1 payload, map `gpu_count`→`requested_gpu_count`; đối chiếu `API Contract §13`/ADR004; vạch ranh giới không có oracle trong Simulator. | `TV5_WIRE_AND_REFERENCE.md`: sample byte exact hash, field allowlist, 2-runtimes JCS fixture, negative cases, `P2E-VEC/SCHEMA/WIRE` mapping; TV3 ACK |
 | **TV5-P2E-03** | **Simulator cache & conflict decision:** mô tả identity/fingerprint, simultaneous duplicate, in-flight/finished, retry vs regenerate, bound cache/TTL/evict/shutdown; đưa `P2E-CACHE-GAP-01` thành hai phương án trade-off để lead quyết định qua change-control, không tự chọn. | `TV5_CACHE_AND_DISPATCH.md`, capacity/time budgets chờ TV1+TV5 ACK; biên bản owner quyết định cho cross-restart `409` hoặc scope-change trước code |
 | **TV5-P2E-04** | **Signing key custody & service-auth:** chốt Worker↔`key_id`↔32-byte public key registry, private-key injection/recovery/restart, planned K1→K2 quiescence; phân biệt compromised key incident `NEEDS_OWNER_DECISION`; cùng TV3/TV1 chốt dispatch/callback Bearers và log redaction. | `TV5_SIGNING_KEY_RUNBOOK.md` (không có secret), ACK TV1/TV2/TV3/TV4; owner quyết định incident policy riêng trước phần code bị ảnh hưởng |
@@ -254,3 +254,37 @@ Disposition: ACK_COMPATIBLE | ACK_WITH_ACTIONS | BLOCKED
 ```
 
 **Bảo vệ quyết định:** Handoff này **chưa** sửa lại trạng thái 5 design FINAL, không tự nhận ACK của thành viên khác, không tự tuyên bố test đã chạy, không cho phép code/GitHub writes. Mỗi thay đổi tương lai ảnh hưởng producer/consumer phải thông báo và được **hai phía xác nhận** theo quy trình nhóm.
+
+## 12. Repository status and workflow addendum — 2026-11-08
+
+The PR #39 and source-sync statements above reflect the handoff's earlier snapshot. Current `main` is `bee832eaf5463df20f6c6815174322871eb6685a`; [PR #39](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39) is CLOSED/MERGED (head `3482bce3cc9726543b9345a5224d8db1b9fc6454`, merge `aff538f79997c6e2bfcf359b176a82f2cd9ecc53`), with exact-head [CI run 42385995533](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42385995533) SUCCESS. [PR #44](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/44) merged Phase 2 documentation sources into main. These facts update repository traceability only; they do not mean Phase 2 runtime exists, all Phase 2 design is approved, or coding is authorized.
+
+Current related review PRs: [#45](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/45) OPEN/Draft; [#46](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46) OPEN/Ready; [#47](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/47) OPEN/Draft. Their contents are not merged contracts and do not constitute TV1–TV4 ACKs for this handoff. PR #46's conversation requests TV5 decisions on dispatch payload, signed evidence storage, aggregate creation/update, and reference access; these remain open.
+
+The source-only command `alembic -c backend/alembic.ini heads` reports one head, `0005_listing_d7` (system Alembic 1.13.1). The `uv`-managed command was blocked by pinned dependency DNS resolution; no live PostgreSQL check was run. Record source head as verified and live DB as `NOT_RUN`.
+
+The statement in §4 that a Phase 2E design approval exists only locally is superseded as a repository-availability statement by PR #44's merged doc intake. Its design-status meaning is not changed: Phase 2 files retain conditional/pre-code status, and coding remains a separate lead authorization.
+
+**Workflow sync proposal — `PROPOSED — PENDING_LEAD_ACK`:** use one docs branch and one docs PR for Phase 2E design review; after coding gate, use one implementation task per topic branch/PR and allow a qualifying task to merge independently. TV5-P2E-19's one branch/PR wording is retained as historical text pending lead confirmation. This proposal does not amend active Team Contribution Rules or authorize implementation.
+
+Current pre-code deliverables are under [`tv5-p2e-precode/`](tv5-p2e-precode/). The package preserves approved design choices and leaves outstanding ACKs, decisions and runtime tests explicit; see `TV5_BASELINE.md` and `TV5_INTERFACE_ACK_MATRIX.md`.
+
+The historical “no GitHub writes” sentence describes the earlier handoff-only review scope. This documentation review task authorizes its docs branch/PR workflow only; it does not authorize implementation, migration, merge, or deployment.
+
+---
+
+## 13. Bàn giao đồng bộ Phase 2E — 2026-11-13 (đề xuất, chưa ACK)
+
+Nguồn hiện tại trên GitHub: [TV2 #46 @ ba63466](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46), [TV3 #49 @ 9b337f5](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/49), TV4 #48 @ b8be725; tất cả **chưa merge**. Main vẫn bee832e. Bổ sung này không thay đổi quyết định thiết kế đã được phê duyệt.
+
+| Giao diện | Nội dung TV5 cần thống nhất trước code |
+|---|---|
+| Dispatch/Outbox | Chính xác 10 khóa, demo-v1, không oracle; TV5 ưu tiên P1 full immutable payload; P2 fallback; TV1/lead chốt D-05/D-13 |
+| Rotation | D-18 Worker advisory shared/exclusive, 2 active keys làm quiesce marker, expected K1/K2, rollback K1, K1 public row giữ để verify; E-C3/D4 L2 chờ quyết định |
+| Signer proof | TV5 ưu tiên G1 nonce proof riêng, G2 chưa có cold Manager bootstrap an toàn. Simulator secret bundle + startup self-check không đủ để chứng minh active DB key |
+| Allocation | TV2 đề xuất SignerReadiness(worker_id,key_id,public_key_fingerprint,proof_expires_at) *nội bộ*; dưới Worker+Listing locks đối chiếu sole active key/fingerprint và DB expiry; sai ⇒ Blocked(SIGNER_NOT_READY), không tạo Job/GPU/Outbox; P2B-DRT-29 NOT_RUN |
+| Callback | 202 STORED/DUPLICATE, 401, 404, 409 (collision/not-acceptable), 422, 503; cùng raw envelope/result_id khi retry; stored received_at quyết định deadline; D-01/E-C1, D-02/E-C2 chờ lead |
+| Verifier → Finalizer | TV3 full immutable VerifiedV1Receipt/RejectedV1Receipt, 4 mã rejection; TV5/TV3 ưu tiên V-OUT + TV2 locked recheck/extractor, chưa chốt E-C4 |
+| Terminal/UoW | PrecedingPending; deadline fallback fresh DB scan, không tin caller proof; one UoW signed evidence/Job/release/Listing/Inbox/reputation, SYSTEM_FAULT không phạt Worker |
+
+**Quy trình:** giữ **một nhánh thiết kế docs/phase2e-tv5-design**, **một Draft PR #50**. Sau G1 docs gate và quyền code G2 riêng của nhóm trưởng, mỗi nhiệm vụ triển khai dùng branch/PR độc lập từ main mới nhất, không đưa mã vào PR docs. Chưa có quyền merge hoặc triển khai. TV3 đã comment ACK_WITH_ACTIONS tại SHA #50 cũ 7b5ee16; TV5 đã review #46 @ ed19a51 và #49 @ 9b337f5 (đều ACK_WITH_ACTIONS), không tự chuyển ACK sang SHA mới. Cần TV1/TV2/TV3/TV4/lead và người thật độc lập xác nhận **exact producer/consumer SHA**, hợp đồng, test oracle; mọi test PostgreSQL native-role/concurrency/crypto/5-service E2E Phase 2 đều **NOT_RUN**.
