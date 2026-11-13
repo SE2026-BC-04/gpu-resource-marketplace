@@ -307,7 +307,7 @@ def test_vt089_pg_listing_filter_status_roles_cursor_ties_and_before_limit(
     from test_schema_constraints import add_listing, add_user, add_worker
 
     with engine.begin() as connection:
-        _worker1_user, worker1_id = add_worker(connection)
+        worker1_user, worker1_id = add_worker(connection)
         worker2_user, worker2_id = add_worker(connection)
         listing1 = add_listing(connection, worker1_id, total=8)
         listing2 = add_listing(connection, worker2_id, total=32)

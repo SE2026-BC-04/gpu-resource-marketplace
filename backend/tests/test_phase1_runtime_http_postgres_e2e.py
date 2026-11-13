@@ -337,9 +337,21 @@ def test_worker_client_job_lifecycle_over_http_browser_and_native_runtime_role(
                     headers=worker_headers,
                 )
                 assert paused_again.status_code == 200, paused_again.text
-                jobs = client.get("/api/v1/jobs", headers=client_headers)
-                assert jobs.status_code == 200, jobs.text
-                assert [item["id"] for item in jobs.json()["items"]] == [job["id"]]
+                unfiltered_jobs = client.get("/api/v1/jobs", headers=client_headers)
+                assert unfiltered_jobs.status_code == 200, unfiltered_jobs.text
+                unfiltered_ids = {item["id"] for item in unfiltered_jobs.json()["items"]}
+                assert {
+                    job["id"],
+                    other_listing_job_response.json()["id"],
+                } <= unfiltered_ids
+
+                filtered_jobs = client.get(
+                    "/api/v1/jobs",
+                    params={"listing_id": listing["id"]},
+                    headers=client_headers,
+                )
+                assert filtered_jobs.status_code == 200, filtered_jobs.text
+                assert [item["id"] for item in filtered_jobs.json()["items"]] == [job["id"]]
                 detail = client.get(f"/api/v1/jobs/{job['id']}", headers=client_headers)
                 assert detail.status_code == 200 and detail.json()["status"] == "QUEUED"
 
