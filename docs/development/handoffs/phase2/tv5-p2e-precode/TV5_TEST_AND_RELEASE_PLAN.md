@@ -78,3 +78,19 @@ PR #39's CI run is Phase 1 baseline only. It cannot be used as a Phase 2 test ve
 | 19 | PR/handoff/release evidence | Docs preparation can continue; implementation closeout cannot | Exact reviewed HEAD, evidence, owner ACKs, independent human reviews and rollback plan |
 
 The “can proceed” column is a dependency assessment only. It does not grant coding authorization, approve any unresolved decision, or imply that a future task must wait for all of Phase 2E to merge if its own gates are satisfied.
+
+---
+
+## Cross-phase regression addendum — 2026-11-13 (all NOT_RUN)
+
+| Additional test | TV5 proposed pass oracle |
+|---|---|
+| TV2 P2B-DRT-08/18 | Current-owner expired lease ACK allowed absent takeover; stale version zero write; original 10-key raw HTTP bytes identical across retries/restarts |
+| TV2 P2B-DRT-20..23 | Earlier PENDING candidate blocks later valid candidate; late fallback cannot skip committed on-time Inbox; swapped rejection result ID/hash/Job no-op; signed bytes equal locked extracted envelope |
+| TV2 P2B-DRT-24..28 | Shared/exclusive Worker advisory races in both orders, two-active-key fence across crash, K1 restore before abort fence release, no unexpected-key retirement |
+| **TV2 P2B-DRT-29** | Cached proof K1 after K2 activation fails locked active-key ID/fingerprint check; wrong Worker/fingerprint/expired proof blocks without Job/GPU/Outbox writes |
+| TV3 P2C-SIGN-01..06 + TV5 P2E-GATE-01 | G1 nonce/domain/key matching; proof-replay and cross-domain signatures rejected; Manager restart requires fresh proof; no HTTP in UoW |
+| TV5 P2E-GATE-02 / ROTATE-01 | G2 bootstrap inconsistency addressed explicitly if chosen; signer restart *within* still-valid proof TTL measured, not assumed safe |
+| TV5 P2E-API-01 | 16,384/16,385 raw bytes and depth 4/5, 404/409/422/503 status, same-stored received_at deadline equality |
+
+Keep P2E-DRT-01..20 and original release gates. Every Phase 2 native-role PG, crypto, concurrency and five-service runtime test remains **NOT_RUN**, regardless of existing repository CI. Record source/consumer SHA, native role, migrations, barriers, stored rows, exact wire bytes and reviewer ACK before claiming PASS.
