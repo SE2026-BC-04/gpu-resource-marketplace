@@ -47,7 +47,7 @@ Cross-row rule: `allocations.gpu_count = jobs.requested_gpu_count` and counter r
 | `event_id` | `uuid` | NN, `gen_random_uuid()` | PK |
 | `attempt_id` | `uuid` | NN | FK → `execution_attempts(attempt_id)` guarded cascade; `uq_execution_outbox_attempt_id_event_type (attempt_id, event_type)` |
 | `event_type` | `varchar(16)` | NN, `'EXECUTE_JOB'` | `ck_execution_outbox_event_type` |
-| `dispatch_payload` | `jsonb` | NN | immutable; proposal P1 (D-05): exactly the ten wire keys, `ck_execution_outbox_payload_shape` (key set, `outbox_event_id = event_id`, `attempt_id` match, fixed `simulation_input`); fallback P2: eight-key core. See `P2B_UOW_INTERFACES.md` B-IF-06. Owner ACK pending (TV1 + TV5) |
+| `dispatch_payload` | `jsonb` | NN | immutable; P1 (D-05, approved by the lead, conditional, @ `531805b`): exactly the ten wire keys, `ck_execution_outbox_payload_shape` (key set, `outbox_event_id = event_id`, `attempt_id` match, fixed `simulation_input`); fallback P2: eight-key core. See `P2B_UOW_INTERFACES.md` B-IF-06. lead conditional approval @ `531805b`; TV5 exact-SHA ACK pending |
 | `state` | `varchar(12)` | NN, `'PENDING'` | `ck_execution_outbox_state` (`PENDING`,`CLAIMED`,`ACKED`,`EXHAUSTED`) |
 | `delivery_attempts` | `integer` | NN, `0` | `>= 0` |
 | `next_retry_at` | `timestamptz(6)` | NN | due time |

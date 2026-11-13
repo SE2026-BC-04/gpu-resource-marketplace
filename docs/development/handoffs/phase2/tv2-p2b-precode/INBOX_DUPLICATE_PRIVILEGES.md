@@ -33,6 +33,10 @@ It must work after the Job is terminal and while it is still `RUNNING`, and it m
 3. **Use B** if the lead insists on a byte-for-byte comparison inside PostgreSQL. B requires: fixed `SET search_path = pg_catalog`, fully qualified names, typed arguments only, `REVOKE ALL ... FROM PUBLIC`, `EXECUTE` to `gpm_api_rw` only, an owner that is **not** a superuser (new `NOLOGIN` role with `SELECT` on `result_inbox`), and a role-bootstrap change reviewed by TV1.
 Decision owner for "SHA-256 equality is enough": the lead (**D-01**). TV3 and TV5 confirm the HTTP mapping (**D-02**).
 
+### 3.1 Lead decision on D-01 (2026-11-13, @ `531805b`): Option C approved, conditional
+
+`APPROVED_DESIGN_DIRECTION_CONDITIONAL`: keep the exact wire bytes in `original_envelope_raw`, enforce `envelope_sha256 = sha256(original_envelope_raw)` in PostgreSQL, and give the API no unrestricted `SELECT` on stored raw envelopes (grant `R(result_id, bound_job_id, bound_attempt_id, envelope_sha256)` only). The duplicate probe compares the digest **and the trusted Job/Attempt binding context** and returns only `ABSENT`, `SAME` or `DIFFERENT`. **Recorded semantic change:** SHA-256 equality is a cryptographic security assumption (collision resistance), **not mathematical byte-for-byte equality**. Documents that must say so (and be reconciled, see `OPEN_DECISION_REGISTER.md` §0.2): API Contract, Database Design, Phase 2B, Phase 2C, Phase 2E. If an unchanged requirement mandates literal byte equality, that conflict is escalated to the lead; Option C is not claimed to satisfy it. Tests kept: same-ID/different-body, changed context, concurrent collision, unknown `COMMIT` (`P2B-DRT-03/04/05`, `G-02`). Option B stays documented only as the rejected alternative.
+
 ## 4. Race analysis (applies to every option)
 
 New-candidate path, READ COMMITTED, after the Auth token is checked outside the UoW:
