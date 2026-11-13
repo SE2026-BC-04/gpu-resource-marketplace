@@ -4,10 +4,11 @@
 **Nhóm / môn:** SE2026-T23 / BC-04
 **Vai trò:** TV5 — GPU-005 Jobs
 **Task:** VT-089 — tìm kiếm có lọc, phân trang và thứ tự ổn định
-**Trạng thái:** SPEC/PLAN DRAFT — contract extension PROPOSED, chưa được nhóm phê duyệt
+**Trạng thái:** L2 DESIGN APPROVED — implementation/review gates remain open
 **Branch:** `bt3/23001937-vt089-job-search`
 **Baseline:** `origin/main` at `bee832eaf5463df20f6c6815174322871eb6685a`
-**API Contract baseline:** v0.10, `APPROVED_DESIGN`; test/implementation evidence không được suy ra từ tài liệu thiết kế.
+**API Contract baseline:** v0.10 at `bee832e`; VT-089 v0.11 amendment is in this PR and remains unmerged.
+**Decision:** `DEC-VT089-L2-01`, approved by TV1 on 2026-11-13 for implementation in this same PR; TV2 `ACK_WITH_ACTIONS` is for the proposed reader/query direction, not implementation review or merge approval.
 
 > “Tôi chịu trách nhiệm về toàn bộ code, test và nội dung bài làm; tôi đã khai báo việc sử dụng AI.”
 
@@ -61,16 +62,16 @@ Không thêm field vào Job response, không thêm bảng hay dependency. Filter
 - `backend/tests/test_jobs_foundation.py`
 - `backend/tests/test_jobs_read_adapter_postgres.py`
 - `frontend/src/api/jobs.ts` và tests
-- `frontend/src/ui/jobs/JobsPage.tsx` và tests
+- `frontend/src/ui/jobs/JobsPage.tsx` và tests, only if the client/UI needs the filter for acceptance.
 - Playwright E2E chỉ nếu runtime stack có thể chạy an toàn.
 
-**Test/design evidence:** thư mục này. Không sửa `api/app.py`, Auth, Listings, migration, Database Design hoặc API Contract đã duyệt trước approval.
+**Normative/design evidence:** this assignment folder plus the approved VT-089 amendment in `docs/design/api-contract.md` within PR #52. Do not change `api/app.py`, Auth, Listings, migration, Database Design or unrelated modules.
 
 ### Test-first sequence
 
 1. Lưu spec/plan và bản ghi quyết định/blocker trước patch.
 2. Chạy baseline Jobs unit/API tests và lưu command, exit code, log, SHA.
-3. Sau khi có approval/design gate, tạo test HTTP dùng endpoint public hiện hữu; chứng minh RED cụ thể vì route chưa áp dụng listing filter (không chấp nhận import/fixture/environment failure là RED).
+3. Sau normative contract update and recorded DEC, create HTTP tests using the existing public endpoint; prove RED because the route does not apply listing filter (not due to import/fixture/environment failure).
 4. Capture response/cursor fixture baseline từ codec ở SHA trên với fixed public test key; không dựng “legacy cursor” bằng code đã sửa.
 5. Implement một vertical slice nhỏ: router → service/port → SQL reader, rồi filter frontend nếu acceptance/E2E cần.
 6. Review diff/query/authorization/cursor compatibility, chạy GREEN, regression, static checks.
@@ -97,6 +98,7 @@ Unit tests tập trung strict query validation, context binding, default behavio
 | VT089-03 | AC1/AND | API+PG | L1 có QUEUED và RUNNING; listing+QUEUED | chỉ QUEUED thuộc L1 | P1 |
 | VT089-04 | AC1/empty | HTTP | hợp lệ UUIDv4 không có visible Job | 200, empty collection, null cursor | P2 |
 | VT089-05 | AC5/validation | HTTP | listing_id empty, UUIDv1, uppercase, noncanonical | 400 INVALID_FILTER; no internal detail | P1 |
+| VT089-21 | AC5/fail closed | HTTP | repeated listing_id keys, including identical values | 400 INVALID_FILTER; reader not called | P1 |
 | VT089-06 | BVA limit lower invalid | HTTP | limit 0 | 422 per existing range behavior | P1 |
 | VT089-07 | BVA lower boundary | HTTP | limit 1 | accepted; at most one item | P1 |
 | VT089-08 | BVA near lower | HTTP | limit 2 | accepted; at most two items | P2 |
@@ -112,14 +114,33 @@ Unit tests tập trung strict query validation, context binding, default behavio
 | VT089-18 | Failure path/client compatibility | HTTP+PG | read DB unavailable on filtered query | 503 DEPENDENCY_UNAVAILABLE safe envelope; no SQL detail | P1 |
 | VT089-19 | UI stale response | Frontend | change filter while prior page request is pending | history/cursor reset; old response cannot replace new filter result | P2 |
 | VT089-20 | Filter without status / with status | API+PG | listing filter alone; listing+status | optional status behavior preserved; conjunction correct | P1 |
+| VT089-22 | AC4/filter before LIMIT | PostgreSQL | newest page rows do not match; matching rows follow them | matching Jobs are returned in first filtered page | P1 |
 
 **BVA rationale:** `limit` has explicit inclusive range `[1,100]`, so test invalid immediately below/above (`0`,`101`), both endpoints (`1`,`100`), and interior controls (`2`,`99`). Page-count data uses 19/20/21 around page size 20 to exercise below/equal/one-over. Include at least two negative cases (`VT089-05`, `VT089-16`) and failure-path (`VT089-18`) tied to old-client/API safety risk.
 
-## 5. Design/change-control gate
+## 5. Decision and change record
 
-Adding `listing_id` changes the public API query contract and `CursorContext`/`JobReader` interface. This is proposed L2. `docs/development/change-control.md` §1 classifies API query-contract changes as L2; §§2–3 require a traceable change record and team-lead decision before implementation. This document is only a proposal, not an approval record. TV2's PostgreSQL reader/query interface is a confirmed ownership boundary; cross-phase acknowledgements have not been obtained. No application patch or executable RED test for the new contract is authorized until the decision/design review gate is satisfied.
+### DEC-VT089-L2-01
 
-**Approval needed:** use this Draft PR as the linked design-change record with problem, baseline, alternatives, impact, backward compatibility, acceptance and rollback; team leader records `APPROVED`/`REJECTED`/`DEFERRED` before implementation. TV2 must review its reader/index impact. TV4 should confirm Listing ID ownership semantics; TV3 auth policy is unchanged but role-scope guard must remain covered. This proposal does not mark any ACK.
+- **Requester:** Nguyễn Đức Thăng (23001937), TV5; **decision date:** 2026-11-13 (UTC); **approver:** @thangSy221105 (TV1/team lead).
+- **Decision evidence:** [TV1 L2 decision](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/52#issuecomment-6857910079), reviewed proposal HEAD `ee2fe6fe664552240f70cfb2802277640f2831d1`.
+- **Decision:** scoped optional `listing_id` API query extension is APPROVED for implementation. Atomic normative documentation plus tests/implementation is approved in this same PR #52. This is not approval to merge, implementation acceptance, or deployment.
+- **No-change alternative:** retain current §8.2 query with `scope/status/limit/cursor`; no Listing filter. This preserves current API but does not satisfy VT-089 search request.
+- **Selected change:** add optional canonical lowercase UUIDv4 `listing_id` to GET `/api/v1/jobs` only. Empty, malformed, uppercase, noncanonical, non-v4, or duplicate query keys return `400 INVALID_FILTER`. Valid UUID with zero caller-visible Jobs returns `200`, `items=[]`, `next_cursor=null`; do not look up Listing or expose existence. Filter ANDs with visibility/status/keyset in SQL before LIMIT; response DTO and order stay unchanged.
+- **Impact:** CONFIRMED_IMPACT to GPU-005 API and TV2-owned `JobReader`/PostgreSQL list query. TV2 reviewed the design direction as `ACK_WITH_ACTIONS` ([TV2 review](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/52#pullrequestreview-5894585707)); those actions remain tracked below. No migration/index/dependency or Listing API change is approved. TV3 auth semantics remain unchanged; existing role guards must still pass.
+- **Compatibility:** when filter is absent, old callers, request/response shape, cursor canonical context bytes/HMAC, SQL statement and params remain baseline-identical; no `listing_id: null` context/param. When present, canonical ID is included in cursor context, so changing/removing filter rejects cursor with `400 INVALID_CURSOR`. Keyset order is `submitted_at DESC, id DESC`.
+- **Rollback:** revert the feature and normative amendment together in this PR; no persistent schema/data change is made. If index/performance evidence suggests a schema change, stop and request a separate TV2-owned L2 decision/PR.
+- **Acceptance IDs:** `VT089-01..22`, with API and PostgreSQL subcases listed in the matrix. RED must be committed before application code.
+
+### TV2 ACK_WITH_ACTIONS — implementation action tracking
+
+1. Preserve optional keyword-only `listing_id: UUID | None = None` after existing parameters on the protocol and adapter; existing callers and fakes remain valid.
+2. Only for non-None, append static `j.listing_id = :listing_id` and bind native UUID. With None, SQL and params must exactly match baseline; no Listing join/read.
+3. Keep SQL visibility predicate, status, cursor, order and runtime role checks intact. Do not touch `get_visible`, cancel code, grants or migrations.
+4. Cover filter-before-LIMIT, CLIENT/WORKER/ADMIN visibility, unknown/non-visible equivalence, combined status and tied timestamp cursor pages on disposable PostgreSQL. TV2’s review is design-only until the implementation HEAD is reviewed.
+5. TV5 will post/request review at the exact implementation HEAD; no implementation ACK is presumed.
+
+**TV4:** Listing ownership semantics are unchanged (filter is on existing immutable `jobs.listing_id`); cross-phase review should verify this premise. No ACK is inferred. **No owner ACK beyond the recorded TV2 design ACK is claimed.**
 
 ## 6. Evidence status
 
@@ -135,14 +156,15 @@ Adding `listing_id` changes the public API query contract and `CursorContext`/`J
   ```
 - Frontend dependencies: `npm --prefix frontend ci` — PASS, 117 packages installed from `package-lock.json`, 0 vulnerabilities; lockfile unchanged.
 - Frontend baseline: `npm --prefix frontend test -- --reporter=dot` — **PASS: 10 files, 158 tests**, exit 0; `npm --prefix frontend run typecheck` — PASS, exit 0; `npm --prefix frontend run build` — PASS, Vite production build completed, exit 0.
-- RED/GREEN: NOT_RUN (application patch held at L2 approval gate).
+- RED/GREEN: NOT_RUN at the time this proposal HEAD was recorded; current task will record test-first commits separately.
 - PostgreSQL disposable cluster: NOT_CHECKED.
 - Mutation: NOT_RUN.
 - Coverage/flaky repetition: NOT_RUN.
 - 120-task performance / p95: NOT_RUN.
 - PDF/DOCX: NOT_RUN.
-- Cross-phase ACK: NOT PROVIDED.
-- Coding/design approval for `listing_id` query contract: NOT PROVIDED in repository evidence; GitHub issue search for `VT-089` returned no matching issue.
+- DEC-VT089-L2-01: APPROVED for the scoped design and atomic same-PR workflow; implementation review/merge approval NOT PROVIDED.
+- TV2: ACK_WITH_ACTIONS for reader/query design at proposal HEAD; implementation review pending exact code HEAD.
+- TV4 ACK: NOT PROVIDED. TV3 ACK: not requested/claimed because auth semantics do not change.
 
 ## 7. AI use log (initial)
 
