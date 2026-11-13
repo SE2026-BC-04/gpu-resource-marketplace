@@ -49,3 +49,9 @@ The local review did not run application or PostgreSQL tests. The exact Phase 1 
 - #45's PR text reports the `reserved_gpu_count` reference as an erratum and asks TV2/lead to confirm `gpu_listings.allocated_gpu_count`; do not import unmerged edits or claim owner ACK from its Draft state.
 - The latest #46 comment requests TV5 decisions about `dispatch_payload`, signed-results evidence copy, aggregate creation/update fields, and whether finalization needs references. These are open requests, not ACKs.
 - Handoff v1.1's PR #39 status and CI details are a historical snapshot and must not be reused as current state.
+
+---
+
+## Cross-phase sync — 2026-11-13
+
+The Phase 1 baseline remains `main@bee832eaf5463df20f6c6815174322871eb6685a`. These are **unmerged proposals**, not accepted Phase 2 contracts: [TV2 #46 @ ba63466](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46), [TV3 #49 @ 9b337f5](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/49), [TV4 #48 @ b8be725](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/48). TV5's exact-head reviews of #46 @ ed19a51 and #49 @ 9b337f5 are `ACK_WITH_ACTIONS`; TV2's later `SignerReadiness` change @ ba63466 needs a fresh owner ACK. TV3 commented `ACK_WITH_ACTIONS` on PR #50 @ 7b5ee16; do not carry that over to new SHAs. #39/#44 merged; all Phase 2 PostgreSQL/native-role/concurrency/signing/E2E tests are `NOT_RUN`.
