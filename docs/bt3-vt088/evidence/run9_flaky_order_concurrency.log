@@ -1,0 +1,5 @@
+﻿
+== order: IT05..IT01 in reverse order (pytest de-duplicated the extra file arguments, so 5 tests ran; forward order = run2)
+5 passed, 5 warnings in 4.41s
+== concurrency: IT05 x20 separate runs
+IT05 passed 20 / 20

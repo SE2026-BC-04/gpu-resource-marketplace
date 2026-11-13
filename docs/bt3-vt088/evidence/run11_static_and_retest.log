@@ -1,0 +1,4 @@
+﻿== ruff 0.8.4 (E,F,W,B; line-length 130) on BT3 files
+All checks passed!
+== BT3 tests after lint fixes
+37 passed, 5 warnings in 6.42s

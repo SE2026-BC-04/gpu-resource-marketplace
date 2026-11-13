@@ -1,0 +1,33 @@
+diff --git a/backend/src/gpu_marketplace/identity/account_import.py b/backend/src/gpu_marketplace/identity/account_import.py
+index e20d809..1fd78d2 100644
+--- a/backend/src/gpu_marketplace/identity/account_import.py
++++ b/backend/src/gpu_marketplace/identity/account_import.py
+@@ -17,7 +17,7 @@ from collections.abc import Mapping, Sequence
+ from dataclasses import dataclass, field
+ from enum import StrEnum
+ from typing import Protocol
+-from uuid import UUID
++from uuid import UUID, uuid4
+ 
+ from gpu_marketplace.identity.normalization import LoginNameError, normalize_login_name
+ from gpu_marketplace.identity.passwords import PasswordHasher, PasswordHashingBusy
+@@ -149,17 +149,9 @@ def import_accounts(records: Sequence[object], writer: AccountWriter, hasher: Pa
+         account = NewAccount(valid.user_id, valid.login_name, password_hash, valid.role_code, valid.status)
+         try:
+             user_id = writer.create_account(account)
+-        except LoginNameTaken:
+-            failed.append(Failed(index, FailReason.LOGIN_NAME_TAKEN))
+-            continue
+-        except AccountStoreUnavailable:
+-            failed.append(Failed(index, FailReason.DB_UNAVAILABLE))
+-            store_unavailable = True
+-            continue
+         except Exception:
+-            # Not saved, whatever the cause. The exception may carry the hash: never log it.
+-            failed.append(Failed(index, FailReason.PERSISTENCE_ERROR))
+-            continue
++            # MUTATION M2 (BT3): ignore every persistence failure and report success.
++            user_id = account.user_id or uuid4()
+         created.append(Created(index, user_id))
+ 
+     logger.info(
