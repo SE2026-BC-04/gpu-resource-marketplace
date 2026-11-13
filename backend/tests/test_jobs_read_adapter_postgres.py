@@ -25,6 +25,91 @@ class Principal:
     role: str
 
 
+class _RowsResult:
+    def one(self) -> tuple[str, str]:
+        return "gpm_api_app", "test_login"
+
+    def mappings(self) -> _RowsResult:
+        return self
+
+    def all(self) -> list[dict[str, object]]:
+        return []
+
+
+class _RecordingSession:
+    def __init__(self) -> None:
+        self.statements: list[tuple[str, dict[str, object]]] = []
+
+    def __enter__(self) -> _RecordingSession:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def execute(self, statement, params=None) -> _RowsResult:
+        parameters = dict(params or {})
+        sql = str(statement)
+        if sql != "SELECT current_user, session_user":
+            self.statements.append((sql, parameters))
+        return _RowsResult()
+
+
+def _recording_reader(session: _RecordingSession) -> PostgresJobReader:
+    return PostgresJobReader(
+        lambda: session,
+        allowed_session_users=frozenset({"test_login"}),
+    )
+
+
+def test_vt089_unfiltered_reader_sql_and_parameters_match_baseline_contract() -> None:
+    session = _RecordingSession()
+    reader = _recording_reader(session)
+    principal = Principal(UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), JobRole.CLIENT)
+
+    reader.list_visible(principal=principal, status=None, after=None, limit=20)
+
+    assert session.statements == [
+        (
+            "SELECT j.id, j.client_id, j.worker_id, j.listing_id, "
+            "j.requested_gpu_count, j.duration_seconds, j.status, j.failure_reason, "
+            "j.submitted_at, j.started_at, j.terminal_at FROM jobs AS j "
+            "WHERE j.client_id = :principal_id "
+            "ORDER BY j.submitted_at DESC, j.id DESC LIMIT :limit",
+            {
+                "principal_id": principal.user_id,
+                "limit": 21,
+            },
+        )
+    ]
+
+
+def test_vt089_listing_filter_is_bound_native_uuid_before_order_and_limit() -> None:
+    session = _RecordingSession()
+    reader = _recording_reader(session)
+    principal = Principal(UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), JobRole.CLIENT)
+    listing_id = UUID("22222222-2222-4222-8222-222222222222")
+
+    reader.list_visible(
+        principal=principal,
+        status=JobStatus.QUEUED,
+        after=None,
+        limit=20,
+        listing_id=listing_id,
+    )
+
+    sql, params = session.statements[0]
+    assert "j.client_id = :principal_id AND j.status = :status AND j.listing_id = :listing_id" in sql
+    assert sql.index("j.listing_id = :listing_id") < sql.index("ORDER BY") < sql.index("LIMIT")
+    assert params == {
+        "principal_id": principal.user_id,
+        "status": "QUEUED",
+        "listing_id": listing_id,
+        "limit": 21,
+    }
+    assert isinstance(params["listing_id"], UUID)
+    assert "gpu_listings" not in sql
+
+
 @pytest.fixture
 def jobs_reader(
     migrated_database_with_teardown: Engine,

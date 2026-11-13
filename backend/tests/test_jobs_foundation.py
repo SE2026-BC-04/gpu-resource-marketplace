@@ -509,6 +509,7 @@ def test_vt089_list_http_filters_listing_before_returning_collection_red(
 
     assert response.status_code == 200
     assert [item["id"] for item in response.json()["items"]] == [str(JOB_ID)]
+    assert reader.list_calls[0].get("listing_id") == LISTING_ID
 
 
 @pytest.mark.parametrize(
@@ -535,6 +536,7 @@ def test_vt089_list_http_rejects_invalid_or_duplicate_listing_filter_red(
 
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "INVALID_FILTER"
+    assert app.state.test_reader.list_calls == []
 
 
 def test_router_detail_asgi_serializes_client_worker_id(
@@ -932,6 +934,42 @@ def test_hmac_cursor_codec_round_trip_tamper_and_context_binding() -> None:
         )
     with pytest.raises(ValueError):
         HmacCursorCodec(b"short")
+
+
+def test_vt089_legacy_cursor_fixture_is_byte_compatible_without_listing_filter() -> None:
+    key = b"VT089-PUBLIC-TEST-KEY-NOT-FOR-PRODUCTION-0001"
+    token = (
+        "eyJjb250ZXh0X3RhZyI6Ijg4ZDdiNzUwNDhjMThlY2UwZGNjNWNkYWZhY2UxOTUyNjBmOGRmNTY3MDY0ZDY3NTk2ODE1YzY5YTlhZDhmMzYiLCJqb2JfaWQiOiIzMzMzMzMzMy0zMzMzLTQzMzMtODMzMy0zMzMzMzMzMzMzMzMiLCJzdWJtaXR0ZWRfYXQiOiIyMDI2LTEwLTI0VDA4OjMwOjAwLjEyMzQ1NloiLCJ2IjoxfQ.XSVEDhc9EBrt7iWJZWsK_3v6-FEXxbZ6ut5QVfDKEBA"
+    )
+    context = CursorContext(CLIENT_ID, JobRole.CLIENT, "mine", None)
+    position = CursorPosition(submitted_at=NOW, job_id=JOB_ID)
+    codec = HmacCursorCodec(key)
+
+    assert codec.decode(token, context=context) == position
+    assert codec.encode(position, context=context) == token
+
+
+def test_vt089_filtered_cursor_is_bound_to_listing_id() -> None:
+    codec = HmacCursorCodec(b"test-only-vt089-cursor-filter-key-0001")
+    context = CursorContext(
+        CLIENT_ID, JobRole.CLIENT, "mine", None, listing_id=LISTING_ID
+    )
+    token = codec.encode(CursorPosition(NOW, JOB_ID), context=context)
+
+    assert codec.decode(token, context=context) == CursorPosition(NOW, JOB_ID)
+    with pytest.raises(ValueError):
+        codec.decode(
+            token,
+            context=CursorContext(
+                CLIENT_ID,
+                JobRole.CLIENT,
+                "mine",
+                None,
+                listing_id=UUID("44444444-4444-4444-8444-444444444444"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        codec.decode(token, context=CursorContext(CLIENT_ID, JobRole.CLIENT, "mine", None))
 
 
 @pytest.mark.parametrize(
