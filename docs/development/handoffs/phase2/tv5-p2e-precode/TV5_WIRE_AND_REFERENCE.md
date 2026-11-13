@@ -67,3 +67,9 @@ These exact values are transcribed from the merged Phase 1 reference specificati
 V4's normative rejection trace is `work_units_raw(0)=4294735637` (reject), `work_units_raw(1)=316562456` (accept), modulo result 562456. V1–V3 do not exercise rejection. Source labels V4 `VERIFIED CALCULATION`; its runtime tests are `NOT_RUN` and Phase 2 execution is not approved by the Phase 1 vector decision.
 
 Required planned tests: positive exact canonical object/output/digest; RFC 8785 cross-implementation byte equality; malformed/extra/missing fields; altered UUID casing/time/schema; wrong worker/key binding; signature tampering; V4 exact rejection counter trace; `gpu_count`→`requested_gpu_count`; no oracle/secret in dispatch, logs, or public DTO. Phase 2 runtime tests: `NOT_RUN`; TV3/TV5 ACK: `PENDING_ACK`.
+
+---
+
+## Dispatch and allocation contracts — 2026-11-13
+
+TV2 #46 @ ba63466 offers P1 (TV5 preferred): persist the **full exact ten-key** dispatch in immutable Outbox JSONB on first INSERT, caller-generated stable UUIDv4 event/attempt IDs, narrowly scoped INSERT grants, and null-safe CHECK. P2 fallback stores an eight-key core and reconstructs IDs from immutable DB columns. TV1/lead have **not chosen**; no extra field is authorized. `simulation_input={"workload_profile":"demo-v1"}` and the oracle boundary are unchanged. One deterministic `canonical_dispatch_body` must generate identical *raw HTTP bytes* across retries/takeover/restart (TV2 P2B-DRT-18, `NOT_RUN`). TV2's `SignerReadiness(worker_id,key_id,public_key_fingerprint,proof_expires_at)` is **internal allocation context**, never an eleventh dispatch key or Signed Result V1 addition. Algorithm version across deployment remains `NEEDS_OWNER_DECISION`.
