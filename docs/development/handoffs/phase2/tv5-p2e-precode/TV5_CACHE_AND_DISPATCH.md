@@ -34,3 +34,9 @@ Cache max entries/bytes, TTL, per-entry memory bound, maximum simultaneous execu
 Manager owns redelivery from immutable Outbox using ADR-005 timing and fenced claims. `202` dispatch only means accepted for execution; it does not change Job terminal state. Invalid auth yields no accepted work; malformed immutable input is rejected; same retained attempt/different fingerprint is 409. Network timeout/5xx is uncertain delivery, so resend the same event/attempt/payload, not a new allocation. Never retry a DB mutation with unknown commit blindly.
 
 Required coverage: DRT-01/02 concurrent duplicates and altered retained request; DRT-03 cold restart original; DRT-04 cold altered request (BLOCKED); shutdown/full-cache/eviction barriers; callback ACK loss exact replay; no second Allocation/Attempt/deadline extension. All Phase 2 tests `NOT_RUN`.
+
+---
+
+## TV2 CAS sync — 2026-11-13
+
+TV2 #46 @ ba63466 proposes claim only due PENDING or expired CLAIMED rows. ACK/RETRY/EXHAUSTED requires current `state='CLAIMED'` plus matching lease owner/version; clearing the lease does not reset version. Expired current claim **without takeover** can ACK; after takeover/stale version or terminal state the old ACK updates zero rows. ACKED/EXHAUSTED are never re-claimed through ordinary dispatch; missing-receipt repair is a separate authorized port. Raw ten-key body stays byte-identical after restart (P2B-DRT-08/18 `NOT_RUN`). This DB-backed Outbox CAS **does not** solve the DB-less Simulator's volatile-cache contradictory same-attempt request after *cold restart* (`P2E-CACHE-GAP-01`); signer proof G1 concerns key possession, not dispatch-content history. Lead choice and measured cache bounds remain pending.
