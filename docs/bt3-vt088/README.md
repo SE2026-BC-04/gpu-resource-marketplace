@@ -49,7 +49,7 @@ uv run --project backend --locked --group dev pytest backend/tests tests
 
 ## Evidence
 
-`docs/bt3-vt088/evidence/` holds the raw outputs of the local runs (disposable PostgreSQL 16.15 cluster, Windows): `run1` red before the patch, `run2` green, `run3` full regression, `run4`/`run5` mutations, `run6`/`run7` coverage, `run8`/`run9` flaky checks, `run10` + `load_result.json` load check, `run11` static check (ruff), and the AI plan (`ai_plan_raw.md`, `ai_plan_run.json`) with its review (`ai_plan_review.md`).
+`docs/bt3-vt088/evidence/` holds the raw outputs of the local runs (disposable PostgreSQL 16.15 cluster, Windows): `run1` red before the patch, `run2` green, `run3` full regression, `run4`/`run5` mutations (with the mutation code as `mutation_M1.diff` / `mutation_M2.diff`, produced by `git diff 0d2f626 bt3/tmp-mutation-M1|M2 -- backend/src/gpu_marketplace/identity/account_import.py`; the mutated code itself lives only on the temporary branches, never on this branch), `run6`/`run7` coverage, `run8`/`run9` flaky checks, `run10` + `load_result.json` load check, `run11` static check (ruff), and the AI plan (`ai_plan_raw.md`, `ai_plan_run.json`) with its review (`ai_plan_review.md`).
 
 ## Mutation experiment
 
