@@ -15,6 +15,7 @@ from gpu_marketplace.jobs.errors import (
     DependencyUnavailable,
     Forbidden,
     IdempotencyKeyRequired,
+    InvalidFilter,
     InvalidJson,
     JobDomainError,
     Unauthenticated,
@@ -171,6 +172,7 @@ def create_jobs_router(
         status: str | None = None,
         limit: str = "20",
         cursor: str | None = None,
+        listing_id: str | None = None,
         principal: JobPrincipal = Depends(principal_provider),
     ) -> JobCollectionResponse:
         request_id = _request_id(request)
@@ -178,12 +180,14 @@ def create_jobs_router(
         response.headers["Cache-Control"] = "no-store"
         try:
             parsed_limit = _parse_limit(limit)
+            parsed_listing_id = _parse_listing_id_filter(request, listing_id)
             return service.list_jobs(
                 principal=principal,
                 scope=scope,
                 status=status,
                 limit=parsed_limit,
                 cursor=cursor,
+                listing_id=parsed_listing_id,
             )
         except JobDomainError as exc:
             return job_error_response(exc, request_id=request_id)  # type: ignore[return-value]
@@ -266,6 +270,24 @@ def _parse_job_id(raw: str) -> UUID:
         raise ValueError("Job ID must be UUIDv4") from exc
     if value.version != 4 or str(value) != raw:
         raise ValueError("Job ID must be canonical UUIDv4")
+    return value
+
+
+def _parse_listing_id_filter(request: Request, declared_value: str | None) -> UUID | None:
+    values = request.query_params.getlist("listing_id")
+    if not values:
+        return None
+    if len(values) != 1:
+        raise InvalidFilter()
+    raw = values[0]
+    if raw != declared_value:
+        raise InvalidFilter()
+    try:
+        value = UUID(raw)
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise InvalidFilter() from exc
+    if value.version != 4 or str(value) != raw:
+        raise InvalidFilter()
     return value
 
 

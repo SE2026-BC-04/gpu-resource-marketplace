@@ -10,12 +10,14 @@ from uuid import UUID
 import pytest
 from db_safety import TestDatabase
 from gpu_marketplace.jobs.cursor import HmacCursorCodec
+from gpu_marketplace.jobs.errors import DependencyUnavailable
 from gpu_marketplace.jobs.models import JobRole, JobStatus
 from gpu_marketplace.jobs.service import JobsReadService
 from gpu_marketplace.repositories.jobs import PostgresJobReader
 from jobs_cancel_pg_support import seed_committed_job
 from sqlalchemy import event, text
 from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 
@@ -108,6 +110,29 @@ def test_vt089_listing_filter_is_bound_native_uuid_before_order_and_limit() -> N
     }
     assert isinstance(params["listing_id"], UUID)
     assert "gpu_listings" not in sql
+
+
+def test_vt089_filtered_reader_outage_is_sanitized_without_database() -> None:
+    class FailingSession(_RecordingSession):
+        def execute(self, statement, params=None) -> _RowsResult:
+            if str(statement) == "SELECT current_user, session_user":
+                return super().execute(statement, params)
+            raise SQLAlchemyError("private database password and query detail")
+
+    reader = _recording_reader(FailingSession())
+    principal = Principal(UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), JobRole.CLIENT)
+
+    with pytest.raises(DependencyUnavailable) as raised:
+        reader.list_visible(
+            principal=principal,
+            status=None,
+            after=None,
+            limit=20,
+            listing_id=UUID("22222222-2222-4222-8222-222222222222"),
+        )
+
+    assert "private database" not in str(raised.value).lower()
+    assert "password" not in str(raised.value).lower()
 
 
 @pytest.fixture
@@ -282,12 +307,13 @@ def test_vt089_pg_listing_filter_status_roles_cursor_ties_and_before_limit(
     from test_schema_constraints import add_listing, add_user, add_worker
 
     with engine.begin() as connection:
-        worker1_user, worker1_id = add_worker(connection)
+        _worker1_user, worker1_id = add_worker(connection)
         worker2_user, worker2_id = add_worker(connection)
         listing1 = add_listing(connection, worker1_id, total=8)
         listing2 = add_listing(connection, worker2_id, total=32)
         client1 = add_user(connection, "CLIENT")
         client2 = add_user(connection, "CLIENT")
+        admin_id = add_user(connection, "ADMIN")
         base_time = connection.execute(
             text("SELECT TIMESTAMPTZ '2026-11-06 12:00:00+00'")
         ).scalar_one()
@@ -351,7 +377,7 @@ def test_vt089_pg_listing_filter_status_roles_cursor_ties_and_before_limit(
             )
 
     listing_uuid = UUID(listing1)
-    admin = Principal(UUID(worker1_user), JobRole.ADMIN)
+    admin = Principal(UUID(admin_id), JobRole.ADMIN)
     expected_ids = sorted(matching_ids, reverse=True)
     first_page = reader.list_visible(
         principal=admin,
@@ -414,3 +440,67 @@ def test_vt089_pg_listing_filter_status_roles_cursor_ties_and_before_limit(
     assert [str(record.id) for record in client2_page.items] == [matching_ids[1]]
     assert {str(record.id) for record in worker1_page.items} == set(matching_ids)
     assert worker2_page.items == unknown_listing_page.items == ()
+
+
+def test_vt089_pg_listing_filter_page_boundaries_19_20_21(
+    jobs_reader: tuple[Engine, PostgresJobReader],
+) -> None:
+    engine, reader = jobs_reader
+    from test_schema_constraints import add_listing, add_user, add_worker
+
+    principal_id = None
+    listing_rows: list[tuple[UUID, list[str]]] = []
+    with engine.begin() as connection:
+        _worker_user, worker_id = add_worker(connection)
+        principal_id = UUID(add_user(connection, "ADMIN"))
+        client_id = add_user(connection, "CLIENT")
+        base_time = connection.execute(
+            text("SELECT TIMESTAMPTZ '2026-11-07 09:00:00+00'")
+        ).scalar_one()
+        for row_count in (19, 20, 21):
+            listing_id = UUID(add_listing(connection, worker_id, total=32))
+            ids: list[str] = []
+            for _ in range(row_count):
+                job_id = str(uuid4())
+                connection.execute(
+                    text(
+                        "INSERT INTO jobs (id, client_id, listing_id, worker_id, requested_gpu_count, "
+                        "duration_seconds, submitted_at, correlation_id, status) "
+                        "VALUES (:id, :client, :listing, :worker, 1, 60, :submitted, :corr, 'QUEUED')"
+                    ),
+                    {
+                        "id": job_id,
+                        "client": client_id,
+                        "listing": str(listing_id),
+                        "worker": worker_id,
+                        "submitted": base_time,
+                        "corr": str(uuid4()),
+                    },
+                )
+                ids.append(job_id)
+            listing_rows.append((listing_id, ids))
+
+    assert principal_id is not None
+    for listing_id, ids in listing_rows:
+        expected = sorted(ids, reverse=True)
+        first = reader.list_visible(
+            principal=Principal(principal_id, JobRole.ADMIN),
+            status=JobStatus.QUEUED,
+            after=None,
+            limit=20,
+            listing_id=listing_id,
+        )
+        assert [str(record.id) for record in first.items] == expected[:20]
+        if len(ids) <= 20:
+            assert first.next_position is None
+            continue
+        assert first.next_position is not None
+        second = reader.list_visible(
+            principal=Principal(principal_id, JobRole.ADMIN),
+            status=JobStatus.QUEUED,
+            after=first.next_position,
+            limit=20,
+            listing_id=listing_id,
+        )
+        assert [str(record.id) for record in second.items] == expected[20:]
+        assert second.next_position is None

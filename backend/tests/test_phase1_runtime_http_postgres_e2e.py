@@ -242,6 +242,17 @@ def test_worker_client_job_lifecycle_over_http_browser_and_native_runtime_role(
                 )
                 assert listing_updated_response.status_code == 200
                 assert listing_updated_response.json()["gpu_model"] == "E2E Test GPU Updated"
+                other_listing_response = client.post(
+                    "/api/v1/gpu-listings",
+                    headers=worker_headers,
+                    json={
+                        "gpu_model": "E2E Other Listing",
+                        "vram_gb": 80,
+                        "total_gpu_count": 2,
+                    },
+                )
+                assert other_listing_response.status_code == 201, other_listing_response.text
+                other_listing_id = other_listing_response.json()["id"]
                 assert client.post("/api/v1/auth/logout", headers=worker_headers).status_code == 204
 
                 client_token, client_user = _login(client, client_name)
@@ -249,7 +260,20 @@ def test_worker_client_job_lifecycle_over_http_browser_and_native_runtime_role(
                 client_headers = {"Authorization": f"Bearer {client_token}"}
                 browse = client.get("/api/v1/gpu-listings", headers=client_headers)
                 assert browse.status_code == 200, browse.text
-                assert [item["id"] for item in browse.json()["items"]] == [listing["id"]]
+                assert {item["id"] for item in browse.json()["items"]} == {
+                    listing["id"], other_listing_id
+                }
+                other_listing_job_response = client.post(
+                    "/api/v1/jobs",
+                    headers={**client_headers, "Idempotency-Key": f"phase1-other-{uuid4()}"},
+                    json={
+                        "listing_id": other_listing_id,
+                        "gpu_count": 1,
+                        "duration_seconds": 60,
+                    },
+                )
+                assert other_listing_job_response.status_code == 201, other_listing_job_response.text
+                other_listing_job_id = other_listing_job_response.json()["id"]
 
                 request = {
                     "listing_id": listing["id"],
@@ -383,6 +407,8 @@ def test_worker_client_job_lifecycle_over_http_browser_and_native_runtime_role(
                             "PHASE1_E2E_WORKER_LOGIN": worker_name,
                             "PHASE1_E2E_CLIENT_LOGIN": client_name,
                             "PHASE1_E2E_PASSWORD": PASSWORD,
+                            "PHASE1_E2E_OTHER_LISTING_ID": other_listing_id,
+                            "PHASE1_E2E_OTHER_JOB_ID": other_listing_job_id,
                             "PHASE1_E2E_RESULT_PATH": str(browser_result_path),
                         }
                     )
