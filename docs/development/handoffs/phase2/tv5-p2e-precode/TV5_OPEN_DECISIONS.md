@@ -21,3 +21,24 @@ All recommendations below are **PROPOSED — NOT OWNER APPROVED** unless the row
 | Design branch policy sync | PENDING_LEAD_ACK | One Phase2E design docs branch/PR; after coding gate, one task/branch/PR | Handoff v1.1 says “one branch/PR TV5 work package”; process wording must be reconciled | Lead; rules owner if needed | Future PR workflow only |
 
 Already approved design retained (not reopened here): `P2E-OPEN-01` Option A in-process bounded cache; `P2E-OPEN-02` typed-verdict boundary; `P2E-OPEN-03` contribution-ledger-first atomic UoW; `P2E-OPEN-04` GPU-005-B review order; GPU-005-B DEC-02..07 and conditional gate. Those approvals do not resolve the pending details in this register.
+
+---
+
+## Decision delta — 2026-11-13 (lead/affected owner decisions pending)
+
+| ID | TV5 proposal / dependency | Authority |
+|---|---|---|
+| D-01 / E-C1 | Original callback bytes always preserved. Literal byte compare (B) **or** SHA-256 + DB CHECK cryptographic equivalence (C), never silently equate the two | Lead + TV2/TV3/TV5 |
+| D-02 / E-C2 | Target-less ON CONFLICT DO NOTHING then fresh probe; known SAME=202 DUPLICATE, unknown-COMMIT reconciled SAME=202 STORED, unresolved ABSENT=503 | Lead change control + native-role SQL |
+| D-05/D-13 | TV5 prefers P1 full immutable ten-key dispatch and caller UUIDs; P2 eight-key core remains fallback | TV1 + lead |
+| D-06 | Version/owner-fenced Outbox CAS; terminal rows never reclaimed; repair separate | TV1 + lead |
+| D-11/D-12/D-17 | First contributing reputation UPSERT; updated_at on real delta only; stored received_at exact-deadline admission | TV2/TV3/TV5 owner freeze + SQL tests |
+| D-18/E-C3/D4 | Shared/exclusive Worker advisory lock first and two-active-key quiesce contradict partial unique active-key index proposal | Lead L2 global-lock-order/index decision, TV1/TV4 |
+| G1 vs G2 (signer option) | **G1 preferred**: nonce under separate signer-proof domain, verified against active DB key outside UoW. **G2 has cold-Manager bootstrap contradiction** if unknown readiness blocks allocation | Lead L2 internal API change for G1; TV1/TV3/TV5 |
+| SignerReadiness | TV2 #46 @ ba63466 proposes (worker_id,key_id,public_key_fingerprint,proof_expires_at) checked under Worker+Listing locks; stale K1 proof after K2 activation must fail | TV1/TV2/TV3/TV4/TV5, P2B-DRT-29 NOT_RUN |
+| E-C4 / V-OUT | TV5 prefers pure TV3 verification outside locks and TV2 strict locked evidence/hash/signed-part extractor; V-IN fallback | TV1/lead change to accepted pseudo-code |
+| P2E-VERDICT-CONTRACT-01 | Full immutable Verified/Rejected provenance, four definitive post-ingress reasons; parser drift PENDING | TV1/TV2/TV3/TV5 exact SHA ACK |
+| D-03/S-10, D-16, incident, algorithm version | Authorized key provisioning, cold-restart contradictory dispatch and compromise/queued-version decisions unresolved | Lead + owners |
+| G1 docs gate (not signer G1), G2 coding gate | Conditional design/review does not authorize code or merge | Lead and independent human L2 reviewers |
+
+TV2 [PR #46 @ ba63466](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46) and TV3 [PR #49 @ 9b337f5](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/49) remain unmerged. TV5's earlier reviews were ACK_WITH_ACTIONS, not an ACK of the subsequent SignerReadiness amendment. Every Phase 2 PostgreSQL/native-role/concurrency/crypto/E2E test remains NOT_RUN.
