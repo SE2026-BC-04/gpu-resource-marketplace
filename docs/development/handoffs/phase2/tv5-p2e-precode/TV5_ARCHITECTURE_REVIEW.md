@@ -39,3 +39,21 @@ Preserved: five-service boundary; no Simulator PostgreSQL; fixed simulation inpu
 | Secret-shaped content scan | PASS | Checked changed Markdown for private-key PEM, GitHub token shapes, and PostgreSQL URL credentials; none found |
 | Whitespace | PASS | `git diff --check` |
 | Phase 2 runtime tests / Compose E2E | NOT_RUN | Documentation-only review; no Phase 2 implementation exists on this baseline |
+
+---
+
+## Findings disposition addendum — 2026-11-13 (design changes, not executed fixes)
+
+| Finding | New design mitigation | Status |
+|---|---|---|
+| P2E-F-02 (version) | Preserve ten-key dispatch and eleven-field Signed V1; trusted version pin/operational drain decision still required | NEEDS_OWNER_DECISION |
+| P2E-F-03 (cold cache) | Outbox immutable payload/CAS does **not** create a verifiable conflicting-dispatch history inside restarted Simulator | P2E-CACHE-GAP-01 OPEN |
+| P2E-F-04 (verdict) | TV3 four-code definitive enum, full RejectedV1Receipt, V-OUT with TV2 locked hash/result_id/key and signed-part extractor | TV1/lead E-C4 + exact SHA ACK, NOT_RUN |
+| P2E-F-05 (winner/fallback) | TV2 PrecedingPending, stored received_at and locked no-PENDING fallback, one Finalization UoW | TV1/TV2/TV3/TV5, NOT_RUN |
+| P2E-F-07 (rotation) | TV2 D-18 two-active-key durable fence, exact {K1,K2} activation, K1 historical retention and safe abort | E-C3/D4 and L2 pending |
+| **P2E-F-15 / P1 (new)** | TV2 #46 @ ba63466 adds SignerReadiness checked against sole active key/fingerprint/worker/DB expiry under advisory+Listing locks, preventing stale K1 proof after K2 | TV1/TV2/TV3/TV4/TV5 typed port ACK; P2B-DRT-29 NOT_RUN |
+| **P2E-F-16 / P1 (new)** | G2 lacks safe cold-Manager bootstrap if no allocation is permitted without proof; TV5 prefers G1 | Lead G1/G2 + L2 endpoint decision |
+| **P2E-F-17 / P2 (new)** | Signer restart/loss inside cached valid proof TTL requires measured residual/explicit invalidation | TV1/TV3/TV5 test/TTL decision |
+| P2E-F-13 (DB integration) | TV2 byte-exact independent signed result, first-contribution reputation UPSERT and no Phase 2 oracle SELECT | Owner SHA ACK + native SQL tests |
+
+These are **documentation-level** mitigations, not demonstrated runtime corrections. TV3's PR #50 comment at original HEAD 7b5ee16 provided ACK_WITH_ACTIONS, and TV5's [#46 review](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46#pullrequestreview-5887153391) / [#49 review](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/49#pullrequestreview-5887054059) were ACK_WITH_ACTIONS. No prior reviewer is automatically deemed to have approved this new PR #50 HEAD. Tests NOT_RUN.
