@@ -34,15 +34,49 @@ trên Windows; trên Linux thay `backend/.venv/Scripts/python.exe` bằng
 # 10 lượt mới, đảo thứ tự test; 90 case executions
 .\backend\.venv\Scripts\python.exe -X utf8 coursework/bt3_vt091/verify.py repeat
 
-# Line coverage stdlib; branch coverage NOT_RUN
+# Line coverage lịch sử bằng stdlib trace
 .\backend\.venv\Scripts\python.exe -X utf8 coursework/bt3_vt091/verify.py coverage
 
 # Regression phần Listings hiện có (không yêu cầu PostgreSQL)
 .\backend\.venv\Scripts\python.exe -X utf8 -m pytest backend/tests/listings backend/tests/test_api_listings_mount.py -q
 ```
 
-`verify.py` ghi đè evidence tương ứng bằng kết quả **mới chạy**, không tạo PASS
-giả. Nên giữ log bài nộp trước khi chạy lại. Hai mode red/mutation tạo **repository
+### Lệnh bổ sung cho bản cải thiện (Windows PowerShell)
+
+Tool coverage chỉ dùng đo lường; không thêm vào dependency runtime/lockfile của
+sản phẩm. Cài đúng phiên bản từ requirements-evidence.txt vào môi trường test:
+
+```powershell
+uv pip install --python backend/.venv/Scripts/python.exe -r coursework/bt3_vt091/requirements-evidence.txt
+$py = '.\backend\.venv\Scripts\python.exe'
+$verify = 'coursework/bt3_vt091/verify.py'
+& $py -X utf8 $verify characterization --output-dir tmp/bt3-rerun
+& $py -X utf8 $verify mutants --output-dir tmp/bt3-rerun
+& $py -X utf8 $verify branch --output-dir tmp/bt3-rerun
+```
+
+### Linux / macOS (bash/zsh, từ gốc repository)
+
+```bash
+uv sync --project backend --locked --group dev
+uv pip install --python backend/.venv/bin/python -r coursework/bt3_vt091/requirements-evidence.txt
+PY=backend/.venv/bin/python
+V=coursework/bt3_vt091/verify.py
+"$PY" -X utf8 -m pytest coursework/bt3_vt091/tests -q
+"$PY" -X utf8 "$V" characterization --output-dir tmp/bt3-rerun
+"$PY" -X utf8 "$V" mutants --output-dir tmp/bt3-rerun
+"$PY" -X utf8 "$V" branch --output-dir tmp/bt3-rerun
+"$PY" -X utf8 "$V" load --output-dir tmp/bt3-rerun
+"$PY" -X utf8 "$V" repeat --output-dir tmp/bt3-rerun
+```
+
+Lệnh cho bash/zsh được cung cấp theo cấu trúc venv; host thực nghiệm là Windows,
+chưa xác nhận một lượt thực thi trên Linux/macOS. Các mode red/green/mutation vẫn
+chạy được với cùng PY/V. Khuyến nghị luôn dùng `--output-dir tmp/bt3-rerun` để
+không thay snapshot nộp bài. Khi không có tùy chọn này, `verify.py` ghi đè evidence
+tương ứng bằng kết quả **mới chạy**. Evidence đã commit không bị thay trên GitHub
+bởi một lượt chạy local; PDF dẫn commit cố định, không dẫn dữ liệu chưa commit.
+Hai mode red/mutation tạo **repository
 Git tạm**, nhánh và commit tạm chứa lỗi, chạy oracle, rồi dọn bản sao; không sửa
 `drafts.py` trong nhánh nộp. Git commit tạm được ghi trong JSON để giải thích thí
 nghiệm; không phải commit đã push lên repo nhóm. Patch chỉ để xem trong evidence.
@@ -66,6 +100,11 @@ nghiệm; không phải commit đã push lên repo nhóm. Patch chỉ để xem 
 - Load dùng 150 coroutine cùng chờ barrier trước khi chạy. Không phải 150 OS thread,
   không phải HTTP/TCP/browser/PostgreSQL, không suy ra đạt NFR của hệ thống thật.
 - Đây là coursework độc lập, không đóng bất kỳ test ID Phase 2 hay benchmark 736 VU.
+- VT18 đi qua router/service Listings **thật** với fixture principal/UoW giả có
+  sẵn, không sửa production. Hai case giá/model chứng minh older PATCH đến sau
+  ghi đè newer, đúng contract last-commit-wins, không gọi đó là defect/SQL race.
+- VT01–VT16 là **35 cases harness**; VT17 là experiment tải riêng; VT18 là
+  **2 cases characterization**, không nằm trong 35.
 
 ## Bằng chứng
 
@@ -78,6 +117,11 @@ nghiệm; không phải commit đã push lên repo nhóm. Patch chỉ để xem 
 | Tải | [04_load.json](evidence/04_load.json) | 900 raw samples; p95 nearest-rank, cả saved và stale_rejected; kiểm tra invariant riêng |
 | Flaky/order | [05_repeat.json](evidence/05_repeat.json) | 10 subprocess độc lập, thứ tự chọn test luân phiên |
 | Regression | [06_listing_regression.txt](evidence/06_listing_regression.txt) | 312 pass; warning deprecation TestClient và quyền ghi pytest cache được giữ nguyên |
-| Coverage | [07_line_coverage.json](evidence/07_line_coverage.json) | Chỉ lines của drafts.py/harness_api.py; không lấy tỷ lệ thay cho quality |
+| Trace lịch sử | [07_line_coverage.json](evidence/07_line_coverage.json) | Đo stdlib ban đầu, không có branch; được giữ nguyên |
+| Bốn mutant | [08_mutation_matrix.json](evidence/08_mutation_matrix.json) | M1 stale, M2 bool, M3 conflict, M4 độ dài; 4/4 bị giết chỉ trên mẫu chọn |
+| Branch coverage | [09_branch_coverage.json](evidence/09_branch_coverage.json), [lệnh/output](evidence/09_branch_run.json) | coverage.py 7.10.6 đo statement và branch cho 2 module |
+| Sản phẩm thật | [10_characterization.json](evidence/10_characterization.json) | 2 cases qua router/service thật, UoW giả; đúng contract hiện hành |
 
-Xem [bảng test/traceability](TEST_MATRIX.md) và [ghi chú nộp bài](SUBMISSION_NOTES.md).
+Xem [bảng test/traceability](TEST_MATRIX.md), [giải thích code](CODE_REVIEW_GUIDE.md)
+và [ghi chú nộp bài](SUBMISSION_NOTES.md). Các prompt có lỗi chính tả trong AI log
+được đánh dấu **trích nguyên văn**. Không tự tạo xác nhận human review.

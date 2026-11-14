@@ -1,0 +1,13 @@
+diff --git a/drafts.py b/drafts.py
+index e1afab5..0cb8452 100644
+--- a/drafts.py
++++ b/drafts.py
+@@ -44,7 +44,7 @@ class DraftStore:
+             raise InvalidDraft("revision must be a positive integer")
+         if not isinstance(fields, Mapping) or set(fields) != FIELDS:
+             raise InvalidDraft("draft must contain exactly the four Listing form fields")
+-        if any(not isinstance(value, str) or len(value) > 4096 for value in fields.values()):
++        if any(not isinstance(value, str) for value in fields.values()):
+             raise InvalidDraft("draft fields must be strings of at most 4096 characters")
+         candidate = Draft(revision, tuple(sorted(fields.items())))
+         async with self._lock:

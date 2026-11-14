@@ -49,7 +49,7 @@ def run_test(directory, selection=None):
 
 
 def write(name, result):
-    EVIDENCE.mkdir(exist_ok=True)
+    EVIDENCE.mkdir(parents=True, exist_ok=True)
     (EVIDENCE / name).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -118,11 +118,91 @@ def line_coverage():
     return int(code)
 
 
+def mutation_matrix():
+    original = (ROOT / "drafts.py").read_text(encoding="utf-8")
+    conflict = '''                    if candidate != current:
+                        raise RevisionConflict("same revision contains different fields")
+'''
+    specs = [
+        ("M1-stale", GUARD, "", "test_vt03_stale_save_cannot_replace_newer", "StaleDraft"),
+        ("M2-bool", "type(revision) is not int", "not isinstance(revision, int)", "test_vt07_invalid_revision_has_no_write", "InvalidDraft"),
+        ("M3-conflict", conflict, "", "test_vt06_identical_retry_is_idempotent_but_conflicting_retry_is_rejected", "RevisionConflict"),
+        ("M4-length", " or len(value) > 4096", "", "test_vt08_invalid_schema_does_not_replace_previous_draft", "InvalidDraft"),
+    ]
+    outcomes = []
+    for name, marker, replacement, selection, exception in specs:
+        assert original.count(marker) == 1, name
+        with tempfile.TemporaryDirectory(prefix="bt3-vt091-mutant-") as temporary:
+            target = Path(temporary)
+            for filename in ["drafts.py", "harness_api.py", "pytest.ini"]:
+                shutil.copy2(ROOT / filename, target / filename)
+            shutil.copytree(ROOT / "tests", target / "tests", ignore=shutil.ignore_patterns("__pycache__"))
+            def git(*args):
+                return subprocess.run(["git", "-c", "user.name=VT-091 experiment", "-c", "user.email=vt091@example.invalid", *args], cwd=target, check=True, capture_output=True, text=True).stdout.strip()
+            git("init", "-q")
+            git("add", ".")
+            git("commit", "-qm", "test(vt091): snapshot valid harness")
+            git("switch", "-qc", "mutation/" + name.lower())
+            (target / "drafts.py").write_text(original.replace(marker, replacement), encoding="utf-8", newline="\n")
+            git("add", "drafts.py")
+            git("commit", "-qm", "test(vt091): remove selected validation temporarily")
+            patch = git("show", "--format=", "--", "drafts.py")
+            result = run_test(target, ["tests/test_drafts.py::" + selection])
+            killed = result["exit_code"] == 1 and "DID NOT RAISE" in result["stdout"] and exception in result["stdout"]
+            (EVIDENCE / ("08_" + name + ".patch")).write_text(patch + "\n", encoding="utf-8")
+            outcomes.append({"mutant": name, "oracle": selection, "killed": killed, "temporary_branch": git("branch", "--show-current"), "temporary_commit": git("rev-parse", "HEAD"), **result})
+    assert (ROOT / "drafts.py").read_text(encoding="utf-8") == original
+    killed_count = sum(item["killed"] for item in outcomes)
+    write("08_mutation_matrix.json", {"metadata": metadata(), "outcomes": outcomes, "killed": killed_count, "selected_mutants": len(outcomes), "score_percent_on_selected_mutants": 100 * killed_count / len(outcomes), "limitation": "Four hand-selected non-equivalent mutants only; not an exhaustive mutation score.", "source_unchanged": True})
+    print(json.dumps({"killed": killed_count, "selected_mutants": len(outcomes), "source_unchanged": True}))
+    return 0 if killed_count == len(outcomes) else 1
+
+
+def branch_coverage():
+    import coverage
+    with tempfile.TemporaryDirectory(prefix="bt3-vt091-coverage-") as temporary:
+        data = str(Path(temporary) / ".coverage")
+        commands = [
+            [sys.executable, "-X", "utf8", "-m", "coverage", "run", "--branch", "--source=drafts,harness_api", "--data-file=" + data, "-m", "pytest", "-q", "tests"],
+            [sys.executable, "-X", "utf8", "-m", "coverage", "json", "--data-file=" + data, "-o", str(EVIDENCE / "09_branch_coverage.json")],
+            [sys.executable, "-X", "utf8", "-m", "coverage", "report", "--data-file=" + data, "-m"],
+        ]
+        results = []
+        for command in commands:
+            result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=60)
+            results.append({"command": command, "exit_code": result.returncode, "stdout": result.stdout, "stderr": result.stderr})
+            print(result.stdout)
+            if result.returncode != 0:
+                break
+    write("09_branch_run.json", {"metadata": metadata(), "coverage_version": coverage.__version__, "commands": results})
+    return 0 if len(results) == 3 and all(r["exit_code"] == 0 for r in results) else 1
+
+
+def characterization():
+    repo = ROOT.parents[1]
+    selection = "backend/tests/listings/test_vt091_patch_characterization.py"
+    result = run_test(repo, [selection])
+    source_paths = ["backend/src/gpu_marketplace/listings/router.py", "backend/src/gpu_marketplace/listings/service.py", "backend/tests/listings/conftest.py", "backend/tests/listings/fakes.py"]
+    write("10_characterization.json", {"metadata": metadata(), **result, "source_file": selection, "source_sha256": digest(repo / selection), "production_and_fixture_sha256": {name: digest(repo / name) for name in source_paths}, "scope": "Real production Listing router/service; existing fake principal and in-memory UoW. Sequential delayed arrival, not real PostgreSQL concurrency.", "contract": "api-contract.md Listings: last committed metadata value wins; characterization is expected behavior, not a product defect."})
+    print(result["stdout"])
+    return result["exit_code"]
+
+
 def main():
+    global EVIDENCE
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["red", "green", "mutation", "load", "repeat", "coverage"])
+    parser.add_argument("mode", choices=["red", "green", "mutation", "load", "repeat", "coverage", "mutants", "branch", "characterization"])
+    parser.add_argument("--output-dir", type=Path, help="Save a new run separately instead of replacing the submitted evidence.")
     args = parser.parse_args()
-    EVIDENCE.mkdir(exist_ok=True)
+    if args.output_dir is not None:
+        EVIDENCE = args.output_dir.resolve()
+    EVIDENCE.mkdir(parents=True, exist_ok=True)
+    if args.mode == "mutants":
+        return mutation_matrix()
+    if args.mode == "branch":
+        return branch_coverage()
+    if args.mode == "characterization":
+        return characterization()
     if args.mode in {"red", "mutation"}:
         return temporary_variant(args.mode)
     if args.mode == "repeat":

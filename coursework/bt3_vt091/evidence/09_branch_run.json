@@ -1,0 +1,77 @@
+{
+  "metadata": {
+    "timestamp": "2026-11-14T13:40:42.045758+07:00",
+    "python": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "logical_cpus": 16,
+    "packages": {
+      "pytest": "9.1.1",
+      "fastapi": "0.156.4",
+      "httpx": "0.28.1"
+    },
+    "baseline": "bee832eaf5463df20f6c6815174322871eb6685a",
+    "source_sha256": {
+      "drafts.py": "607c3252f59f8673ff3812c56434a9e64ba56dd704a8e9d1dd5f0eb5fccc1405",
+      "harness_api.py": "2655c45d61ea4f8312d7552ef2508559be08da33d4779ecea96539271f71ab62",
+      "load.py": "75cae387befdfa2f98080b66efb3db531eceb611cc56e06d42065bee0afaa82b",
+      "verify.py": "d947df926139c6b5a4a7b44edcb9754768757d46f66522f5759fee9fe63fd638",
+      "tests/test_drafts.py": "fa906a5b5de53b23851f9adbf420dbba3b3e7fb7e5a7c9c273b36a28af0ae991",
+      "tests/test_api.py": "5d42d2532c38fa6949d81c5c58184c692e0c4d8330db809a6cedbdbafdd9def1",
+      "PLAN.md": "f1424fd97e00b7762758c0328afe09940a9e5deae8c398722c2d11d51754e78b"
+    }
+  },
+  "coverage_version": "7.10.6",
+  "commands": [
+    {
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--source=drafts,harness_api",
+        "--data-file=C:\\Users\\User\\AppData\\Local\\Temp\\bt3-vt091-coverage-zvk_mgaw\\.coverage",
+        "-m",
+        "pytest",
+        "-q",
+        "tests"
+      ],
+      "exit_code": 0,
+      "stdout": "...................................                                      [100%]\n============================== warnings summary ===============================\n..\\..\\backend\\.venv\\Lib\\site-packages\\_pytest\\cacheprovider.py:469\n  C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Lib\\site-packages\\_pytest\\cacheprovider.py:469: PytestCacheWarning: could not create cache path C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\coursework\\bt3_vt091\\.pytest_cache\\v\\cache\\nodeids: [WinError 5] Access is denied: 'C:\\\\Users\\\\User\\\\OneDrive\\\\Tài liệu\\\\ChatGPT\\\\SE\\\\gpu-resource-marketplace\\\\coursework\\\\bt3_vt091\\\\.pytest_cache\\\\v\\\\cache'\n    config.cache.set(\"cache/nodeids\", sorted(self.cached_nodeids))\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n35 passed, 1 warning in 1.12s\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "coverage",
+        "json",
+        "--data-file=C:\\Users\\User\\AppData\\Local\\Temp\\bt3-vt091-coverage-zvk_mgaw\\.coverage",
+        "-o",
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\coursework\\bt3_vt091\\evidence\\09_branch_coverage.json"
+      ],
+      "exit_code": 0,
+      "stdout": "Wrote JSON report to C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\coursework\\bt3_vt091\\evidence\\09_branch_coverage.json\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "coverage",
+        "report",
+        "--data-file=C:\\Users\\User\\AppData\\Local\\Temp\\bt3-vt091-coverage-zvk_mgaw\\.coverage",
+        "-m"
+      ],
+      "exit_code": 0,
+      "stdout": "Name             Stmts   Miss Branch BrPart  Cover   Missing\n------------------------------------------------------------\ndrafts.py           52      0     16      0   100%\nharness_api.py      28      0      4      0   100%\n------------------------------------------------------------\nTOTAL               80      0     20      0   100%\n",
+      "stderr": ""
+    }
+  ]
+}

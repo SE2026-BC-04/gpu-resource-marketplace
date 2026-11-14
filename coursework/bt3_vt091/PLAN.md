@@ -67,7 +67,7 @@ Các ID VT-* là test cá nhân, không phải acceptance ID đã được nhóm
 
 - Công cụ: Codex trong chat này; AI có hỗ trợ đọc repo, chọn thiết kế, sinh code/test.
 - Prompt người dùng: “ok vậy tranh thủ test gì test nhanh cho tôi nhé vì bài này
-  hết hôm này tôi phải nọp rồi”. Các yêu cầu trước trong chat: đọc đề VT-091,
+  hết hôm này tôi phải nọp rồi” (trích nguyên văn). Các yêu cầu trước trong chat: đọc đề VT-091,
   xác định việc cần làm; đã thống nhất thử nghiệm nhỏ/harness trước.
 - Output được dùng: hai phương án trên, AC1–5, plan và tests. Không có review độc
   lập của con người; người nộp phải tự đọc và giải thích code trước khi nộp.
@@ -75,3 +75,18 @@ Các ID VT-* là test cá nhân, không phải acceptance ID đã được nhóm
   thể không kích hoạt race; (2) p95 in-memory thấp không chứng minh 150 user HTTP.
 - Bác bỏ/điều chỉnh: bảng evidence ở trên; kết quả thực thi bổ sung sau, không điền
   PASS trước khi chạy.
+
+## Bổ sung sau review ngày 14/11/2026 (không sửa lịch sử test-first)
+
+- Yêu cầu tiếp: “vậy sửa lại để bài tôi tốt hơn nhé”.
+- VT18 tại `backend/tests/listings/test_vt091_patch_characterization.py` gọi router
+  và service sản phẩm thật, dùng fixture UoW giả đã có. Hai dữ liệu giá/model:
+  newer được PATCH trước, older đến sau vẫn 200 và GET trả older. Đây là
+  characterization của contract last-commit-wins, không phải bug/DB race proof.
+- Thử thêm M2 bool, M3 cùng revision/khác nội dung, M4 giới hạn 4096, bên cạnh M1
+  stale. Mutation score chỉ tính trên bốn mutant đã chọn, không suy ra toàn suite.
+- Đo statement/branch bằng coverage.py 7.10.6 (tool đo tùy chọn, không đổi runtime
+  dependencies). Bản trace cũ giữ nguyên làm lịch sử; báo cáo mới dùng 09_branch*.
+- `--output-dir` cho phép ghi lượt chạy mới ngoài snapshot evidence của bài nộp.
+- Review source/diff do AI hỗ trợ không được ghi thành human approval; khai báo AI
+  giữ lại. Thêm CODE_REVIEW_GUIDE để giải thích code và các giới hạn khi vấn đáp.

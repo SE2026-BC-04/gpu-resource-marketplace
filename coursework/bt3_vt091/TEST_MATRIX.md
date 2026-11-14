@@ -14,6 +14,8 @@ slice test-only này. Regression Listings chỉ dùng suite đã có, không tha
 
 File `tests/test_drafts.py`: VT01–12. File `tests/test_api.py`: VT13–16.
 Tên test bắt đầu `test_vtNN_`; nhiều giá trị param tạo tổng cộng **35 test cases**.
+VT17 là experiment tải ngoài 35; VT18 là hai characterization cases riêng trong
+`backend/tests/listings/test_vt091_patch_characterization.py`.
 
 | ID | Risk / AC | Level | Precondition / input | Expected result từ requirement | Priority |
 |---|---|---|---|---|---|
@@ -34,6 +36,7 @@ Tên test bắt đầu `test_vtNN_`; nhiều giá trị param tạo tổng cộn
 | VT15 | API unavailable / AC4 | ASGI failure path | store OSError với nội dung nội bộ | 503 sanitized; GET giữ bản trước | P1 |
 | VT16 | API concurrency / AC2 | ASGI | 2 PUT cùng tồn tại, barrier giữ request1 | PUT2=200, PUT1=409, GET=2 NEW | P0 |
 | VT17 | Load/race / AC5 | Harness performance | 150 unique và 150 cùng key; 3 lượt/profile | 150 complete/run; không lỗi bất ngờ; invariant; p95<=4s | P1 |
+| VT18 | Giới hạn PATCH baseline | Real router/service + fake UoW, 2 params | Giá/model: newer PATCH trước, older snapshot sau | Cả hai200, GET trả older; 2 commit/update/audit, đúng contract hiện tại | P1 |
 
 Traceability bổ sung: AC1 → VT01/04/11; AC2 → VT03/04/05/06/11/13/16;
 AC3 → VT02/09/13; AC4 → VT02/07/08/10/12/14/15; AC5 → VT17 + `load.py`.
@@ -45,7 +48,10 @@ baseline và output trong evidence; dùng link nhánh cùng commit sau khi push.
 Mutation bắt buộc: xóa hai dòng `if revision < current.revision: raise StaleDraft`.
 VT03 phải fail `DID NOT RAISE StaleDraft`. VT03 có cả kiểm tra final data: khi
 implementation chỉ im lặng bỏ OLD thay vì reject, test vẫn bắt contract rejection.
-Đây là một mutant, **không phải mutation score cho mọi loại lỗi**.
+Thử nghiệm ban đầu có một mutant. Bản bổ sung thử thêm M2 thay type guard bằng
+isinstance (bool lọt), M3 bỏ same-revision conflict và M4 bỏ giới hạn4096.
+`08_mutation_matrix.json` lưu stdout, exit1, patch và commit tạm của mỗi mutant.
+**4/4 mutant đã chọn bị giết**, không phải mutation score cho mọi loại lỗi.
 
 Flaky risks đã xử lý: (1) time/concurrency: Event ép request cũ hoàn tất sau mới,
 không dùng sleep để đoán scheduler; timeout 5s chỉ chống treo, không phải oracle;
@@ -53,7 +59,8 @@ không dùng sleep để đoán scheduler; timeout 5s chỉ chống treo, không
 thứ tự; (3) random/network: permutation đầy đủ, load seed cố định, ASGI in-process,
 không external network. 10 lượt pass không chứng minh không bao giờ flaky.
 
-Line coverage chỉ cho execution, không đủ chứng minh invariant. Branch coverage
-NOT_RUN do stdlib trace không đo branch, môi trường chưa có coverage plugin.
+Coverage trace cũ được giữ làm lịch sử. Bản bổ sung dùng coverage.py7.10.6 với
+`--branch`, source=drafts,harness_api: 80/80 statements, 20/20 branch exits;
+đọc số thực tế trong09_branch_coverage.json. Coverage không đủ chứng minh invariant.
 Risk coverage còn hở: multi-tab/device, crash persistence, thực authz, real HTTP,
 PostgreSQL, UI debounce/reload. Các phần này không được tính PASS.

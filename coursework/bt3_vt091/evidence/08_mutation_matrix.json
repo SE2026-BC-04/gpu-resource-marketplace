@@ -1,0 +1,106 @@
+{
+  "metadata": {
+    "timestamp": "2026-11-14T13:40:45.799830+07:00",
+    "python": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "logical_cpus": 16,
+    "packages": {
+      "pytest": "9.1.1",
+      "fastapi": "0.156.4",
+      "httpx": "0.28.1"
+    },
+    "baseline": "bee832eaf5463df20f6c6815174322871eb6685a",
+    "source_sha256": {
+      "drafts.py": "607c3252f59f8673ff3812c56434a9e64ba56dd704a8e9d1dd5f0eb5fccc1405",
+      "harness_api.py": "2655c45d61ea4f8312d7552ef2508559be08da33d4779ecea96539271f71ab62",
+      "load.py": "75cae387befdfa2f98080b66efb3db531eceb611cc56e06d42065bee0afaa82b",
+      "verify.py": "d947df926139c6b5a4a7b44edcb9754768757d46f66522f5759fee9fe63fd638",
+      "tests/test_drafts.py": "fa906a5b5de53b23851f9adbf420dbba3b3e7fb7e5a7c9c273b36a28af0ae991",
+      "tests/test_api.py": "5d42d2532c38fa6949d81c5c58184c692e0c4d8330db809a6cedbdbafdd9def1",
+      "PLAN.md": "f1424fd97e00b7762758c0328afe09940a9e5deae8c398722c2d11d51754e78b"
+    }
+  },
+  "outcomes": [
+    {
+      "mutant": "M1-stale",
+      "oracle": "test_vt03_stale_save_cannot_replace_newer",
+      "killed": true,
+      "temporary_branch": "mutation/m1-stale",
+      "temporary_commit": "fbc497a7eab5c8f8597f990bb6c123e60971a108",
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_drafts.py::test_vt03_stale_save_cannot_replace_newer"
+      ],
+      "exit_code": 1,
+      "stdout": "F                                                                        [100%]\n================================== FAILURES ===================================\n__________________ test_vt03_stale_save_cannot_replace_newer __________________\n\n    def test_vt03_stale_save_cannot_replace_newer():\n        async def scenario():\n            store = DraftStore()\n            await store.save(\"worker-a\", \"new\", 2, fields(\"NEW\"))\n            with pytest.raises(StaleDraft):\n                await store.save(\"worker-a\", \"new\", 1, fields(\"OLD\"))\n            saved = await store.get(\"worker-a\", \"new\")\n            assert saved.revision == 2\n            assert saved.fields() == fields(\"NEW\")\n>       asyncio.run(scenario())\n\ntests\\test_drafts.py:47: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\runners.py:195: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\base_events.py:691: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\n    async def scenario():\n        store = DraftStore()\n        await store.save(\"worker-a\", \"new\", 2, fields(\"NEW\"))\n>       with pytest.raises(StaleDraft):\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\nE       Failed: DID NOT RAISE StaleDraft\n\ntests\\test_drafts.py:42: Failed\n=========================== short test summary info ===========================\nFAILED tests/test_drafts.py::test_vt03_stale_save_cannot_replace_newer - Fail...\n1 failed in 0.16s\n",
+      "stderr": ""
+    },
+    {
+      "mutant": "M2-bool",
+      "oracle": "test_vt07_invalid_revision_has_no_write",
+      "killed": true,
+      "temporary_branch": "mutation/m2-bool",
+      "temporary_commit": "26366c2fefae6f7027f1648e334911a89ef82aa9",
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_drafts.py::test_vt07_invalid_revision_has_no_write"
+      ],
+      "exit_code": 1,
+      "stdout": "..F...                                                                   [100%]\n================================== FAILURES ===================================\n________________ test_vt07_invalid_revision_has_no_write[True] ________________\n\nrevision = True\n\n    @pytest.mark.parametrize(\"revision\", [0, -1, True, \"2\", 1.5, None])\n    def test_vt07_invalid_revision_has_no_write(revision):\n        async def scenario():\n            store = DraftStore()\n            with pytest.raises(InvalidDraft):\n                await store.save(\"worker-a\", \"new\", revision, fields())\n            assert await store.get(\"worker-a\", \"new\") is None\n>       asyncio.run(scenario())\n\ntests\\test_drafts.py:105: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\runners.py:195: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\base_events.py:691: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\n    async def scenario():\n        store = DraftStore()\n>       with pytest.raises(InvalidDraft):\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       Failed: DID NOT RAISE InvalidDraft\n\ntests\\test_drafts.py:102: Failed\n=========================== short test summary info ===========================\nFAILED tests/test_drafts.py::test_vt07_invalid_revision_has_no_write[True] - ...\n1 failed, 5 passed in 0.18s\n",
+      "stderr": ""
+    },
+    {
+      "mutant": "M3-conflict",
+      "oracle": "test_vt06_identical_retry_is_idempotent_but_conflicting_retry_is_rejected",
+      "killed": true,
+      "temporary_branch": "mutation/m3-conflict",
+      "temporary_commit": "bbef68f9bd372bdaed021a5b7f87ceeac6ca4e75",
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_drafts.py::test_vt06_identical_retry_is_idempotent_but_conflicting_retry_is_rejected"
+      ],
+      "exit_code": 1,
+      "stdout": "F                                                                        [100%]\n================================== FAILURES ===================================\n__ test_vt06_identical_retry_is_idempotent_but_conflicting_retry_is_rejected __\n\n    def test_vt06_identical_retry_is_idempotent_but_conflicting_retry_is_rejected():\n        async def scenario():\n            store = DraftStore()\n            original = await store.save(\"worker-a\", \"new\", 1, fields(\"FIRST\"))\n            assert await store.save(\"worker-a\", \"new\", 1, fields(\"FIRST\")) == original\n            with pytest.raises(RevisionConflict):\n                await store.save(\"worker-a\", \"new\", 1, fields(\"OTHER\"))\n            assert await store.get(\"worker-a\", \"new\") == original\n>       asyncio.run(scenario())\n\ntests\\test_drafts.py:95: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\runners.py:195: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\base_events.py:691: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\n    async def scenario():\n        store = DraftStore()\n        original = await store.save(\"worker-a\", \"new\", 1, fields(\"FIRST\"))\n        assert await store.save(\"worker-a\", \"new\", 1, fields(\"FIRST\")) == original\n>       with pytest.raises(RevisionConflict):\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       Failed: DID NOT RAISE RevisionConflict\n\ntests\\test_drafts.py:92: Failed\n=========================== short test summary info ===========================\nFAILED tests/test_drafts.py::test_vt06_identical_retry_is_idempotent_but_conflicting_retry_is_rejected\n1 failed in 0.16s\n",
+      "stderr": ""
+    },
+    {
+      "mutant": "M4-length",
+      "oracle": "test_vt08_invalid_schema_does_not_replace_previous_draft",
+      "killed": true,
+      "temporary_branch": "mutation/m4-length",
+      "temporary_commit": "c1cdb8248d4a37761065195eb5412e22424dd441",
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_drafts.py::test_vt08_invalid_schema_does_not_replace_previous_draft"
+      ],
+      "exit_code": 1,
+      "stdout": "...F.                                                                    [100%]\n================================== FAILURES ===================================\n_____ test_vt08_invalid_schema_does_not_replace_previous_draft[payload3] ______\n\npayload = {'gpu_model': 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'vram_gb': '24', 'total_gpu_count': '2', 'mock_price_per_hour': ''}\n\n    @pytest.mark.parametrize(\"payload\", [{}, {**fields(), \"jwt\": \"not-allowed\"}, {**fields(), \"vram_gb\": 24}, {**fields(), \"gpu_model\": \"x\" * 4097}, None])\n    def test_vt08_invalid_schema_does_not_replace_previous_draft(payload):\n        async def scenario():\n            store = DraftStore()\n            previous = await store.save(\"worker-a\", \"new\", 1, fields())\n            with pytest.raises(InvalidDraft):\n                await store.save(\"worker-a\", \"new\", 2, payload)\n            assert await store.get(\"worker-a\", \"new\") == previous\n>       asyncio.run(scenario())\n\ntests\\test_drafts.py:116: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\runners.py:195: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\base_events.py:691: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\n    async def scenario():\n        store = DraftStore()\n        previous = await store.save(\"worker-a\", \"new\", 1, fields())\n>       with pytest.raises(InvalidDraft):\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       Failed: DID NOT RAISE InvalidDraft\n\ntests\\test_drafts.py:113: Failed\n=========================== short test summary info ===========================\nFAILED tests/test_drafts.py::test_vt08_invalid_schema_does_not_replace_previous_draft[payload3]\n1 failed, 4 passed in 0.19s\n",
+      "stderr": ""
+    }
+  ],
+  "killed": 4,
+  "selected_mutants": 4,
+  "score_percent_on_selected_mutants": 100.0,
+  "limitation": "Four hand-selected non-equivalent mutants only; not an exhaustive mutation score.",
+  "source_unchanged": true
+}

@@ -1,0 +1,45 @@
+{
+  "metadata": {
+    "timestamp": "2026-11-14T13:46:20.861762+07:00",
+    "python": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "logical_cpus": 16,
+    "packages": {
+      "pytest": "9.1.1",
+      "fastapi": "0.156.4",
+      "httpx": "0.28.1"
+    },
+    "baseline": "bee832eaf5463df20f6c6815174322871eb6685a",
+    "source_sha256": {
+      "drafts.py": "607c3252f59f8673ff3812c56434a9e64ba56dd704a8e9d1dd5f0eb5fccc1405",
+      "harness_api.py": "2655c45d61ea4f8312d7552ef2508559be08da33d4779ecea96539271f71ab62",
+      "load.py": "75cae387befdfa2f98080b66efb3db531eceb611cc56e06d42065bee0afaa82b",
+      "verify.py": "d947df926139c6b5a4a7b44edcb9754768757d46f66522f5759fee9fe63fd638",
+      "tests/test_drafts.py": "fa906a5b5de53b23851f9adbf420dbba3b3e7fb7e5a7c9c273b36a28af0ae991",
+      "tests/test_api.py": "5d42d2532c38fa6949d81c5c58184c692e0c4d8330db809a6cedbdbafdd9def1",
+      "PLAN.md": "f1424fd97e00b7762758c0328afe09940a9e5deae8c398722c2d11d51754e78b"
+    }
+  },
+  "command": [
+    "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-m",
+    "pytest",
+    "-q",
+    "backend/tests/listings/test_vt091_patch_characterization.py"
+  ],
+  "exit_code": 0,
+  "stdout": "..                                                                       [100%]\n============================== warnings summary ===============================\nbackend\\.venv\\Lib\\site-packages\\fastapi\\testclient.py:1\n  C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Lib\\site-packages\\fastapi\\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\nbackend\\.venv\\Lib\\site-packages\\_pytest\\cacheprovider.py:469\n  C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Lib\\site-packages\\_pytest\\cacheprovider.py:469: PytestCacheWarning: could not create cache path C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.pytest_cache\\v\\cache\\nodeids: [WinError 5] Access is denied: 'C:\\\\Users\\\\User\\\\OneDrive\\\\Tài liệu\\\\ChatGPT\\\\SE\\\\gpu-resource-marketplace\\\\backend\\\\.pytest_cache\\\\v\\\\cache'\n    config.cache.set(\"cache/nodeids\", sorted(self.cached_nodeids))\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n2 passed, 2 warnings in 0.13s\n",
+  "stderr": "",
+  "source_file": "backend/tests/listings/test_vt091_patch_characterization.py",
+  "source_sha256": "c60e5c42400ae2ca69257a597ec87efd32fa70cc7fa394b1e16dc3b3b2d32705",
+  "production_and_fixture_sha256": {
+    "backend/src/gpu_marketplace/listings/router.py": "59228df59b55642d960c683200119d6dada213b5b5191ec332a977470be744bd",
+    "backend/src/gpu_marketplace/listings/service.py": "cd77b92ee34438a89c2bb6fd658315478110801f2c35ff45d9df7acc6b1918b0",
+    "backend/tests/listings/conftest.py": "cfb4b3d81c5c51742b77fde104e3bd77099b37c215ebd428b52de3c9536e381b",
+    "backend/tests/listings/fakes.py": "d309af5fb509dd23739789d5ab75a91a2e72c842c6c0fe9999dbb3f7f0ece467"
+  },
+  "scope": "Real production Listing router/service; existing fake principal and in-memory UoW. Sequential delayed arrival, not real PostgreSQL concurrency.",
+  "contract": "api-contract.md Listings: last committed metadata value wins; characterization is expected behavior, not a product defect."
+}
