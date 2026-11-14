@@ -1,0 +1,10 @@
+{
+  "command": "backend/.venv/Scripts/python.exe -X utf8 -m pytest coursework/bt3_vt091/tests/test_drafts.py::test_vt03_stale_save_cannot_replace_newer -q",
+  "exit_code": 1,
+  "observed": "1 failed: DID NOT RAISE StaleDraft",
+  "scaffold_sha256_before_patch": "06092793dfb791016c394ad8ec96e6291fedbe1dae55091c1b2ffaf5d0932ad2",
+  "matches_reproduced_scaffold": true,
+  "stdout_file": "01_red.txt",
+  "scope": "Actual first run occurred before the revision guard patch. This metadata was recorded after execution; the pre-patch module hash was captured with that run.",
+  "log_normalization": "Terminal trailing spaces and UTF-8 BOM removed; result/assertions unchanged."
+}

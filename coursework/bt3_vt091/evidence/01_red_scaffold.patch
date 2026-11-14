@@ -1,0 +1,19 @@
+diff --git a/drafts.py b/drafts.py
+index e1afab5..aa92ad1 100644
+--- a/drafts.py
++++ b/drafts.py
+@@ -48,14 +48,7 @@ class DraftStore:
+             raise InvalidDraft("draft fields must be strings of at most 4096 characters")
+         candidate = Draft(revision, tuple(sorted(fields.items())))
+         async with self._lock:
+-            current = self._rows.get((owner, listing))
+-            if current is not None:
+-                if revision < current.revision:
+-                    raise StaleDraft("a newer draft is already saved")
+-                if revision == current.revision:
+-                    if candidate != current:
+-                        raise RevisionConflict("same revision contains different fields")
+-                    return current
++            # Test-first scaffold: last arrival wins; patched after the RED run.
+             self._rows[(owner, listing)] = candidate
+             return candidate

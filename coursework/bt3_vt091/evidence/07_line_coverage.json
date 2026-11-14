@@ -1,0 +1,37 @@
+{
+  "metadata": {
+    "timestamp": "2026-11-14T13:10:19.283569+07:00",
+    "python": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "logical_cpus": 16,
+    "packages": {
+      "pytest": "9.1.1",
+      "fastapi": "0.156.4",
+      "httpx": "0.28.1"
+    },
+    "baseline": "bee832eaf5463df20f6c6815174322871eb6685a",
+    "source_sha256": {
+      "drafts.py": "607c3252f59f8673ff3812c56434a9e64ba56dd704a8e9d1dd5f0eb5fccc1405",
+      "harness_api.py": "2655c45d61ea4f8312d7552ef2508559be08da33d4779ecea96539271f71ab62",
+      "load.py": "75cae387befdfa2f98080b66efb3db531eceb611cc56e06d42065bee0afaa82b"
+    }
+  },
+  "tool": "Python 3.12 stdlib trace executable-line analysis",
+  "test_exit_code": 0,
+  "files": {
+    "drafts.py": {
+      "executable_lines": 54,
+      "hit_lines": 54,
+      "missing_lines": [],
+      "line_percent": 100.0
+    },
+    "harness_api.py": {
+      "executable_lines": 28,
+      "hit_lines": 28,
+      "missing_lines": [],
+      "line_percent": 100.0
+    }
+  },
+  "branch_coverage": "NOT_RUN: stdlib trace does not measure branch coverage; no coverage plugin installed",
+  "limitation": "line execution is not assertion quality; use mutation and AC/risk traceability"
+}

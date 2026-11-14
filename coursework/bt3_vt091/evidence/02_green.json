@@ -1,0 +1,35 @@
+{
+  "metadata": {
+    "timestamp": "2026-11-14T13:12:23.239802+07:00",
+    "python": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "logical_cpus": 16,
+    "packages": {
+      "pytest": "9.1.1",
+      "fastapi": "0.156.4",
+      "httpx": "0.28.1"
+    },
+    "baseline": "bee832eaf5463df20f6c6815174322871eb6685a",
+    "source_sha256": {
+      "drafts.py": "607c3252f59f8673ff3812c56434a9e64ba56dd704a8e9d1dd5f0eb5fccc1405",
+      "harness_api.py": "2655c45d61ea4f8312d7552ef2508559be08da33d4779ecea96539271f71ab62",
+      "load.py": "75cae387befdfa2f98080b66efb3db531eceb611cc56e06d42065bee0afaa82b",
+      "verify.py": "a96c2666ec80dcfa367a61c74a0046d90c378c83d0910ae46a038bc4da18f35b",
+      "tests/test_drafts.py": "fa906a5b5de53b23851f9adbf420dbba3b3e7fb7e5a7c9c273b36a28af0ae991",
+      "tests/test_api.py": "5d42d2532c38fa6949d81c5c58184c692e0c4d8330db809a6cedbdbafdd9def1",
+      "PLAN.md": "81f42f1892b18324d94f1ed0ca69ec0e980147e649213498e8bad271fbfaec22"
+    }
+  },
+  "command": [
+    "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-m",
+    "pytest",
+    "-q",
+    "tests"
+  ],
+  "exit_code": 0,
+  "stdout": "...................................                                      [100%]\n35 passed in 0.49s\n",
+  "stderr": ""
+}

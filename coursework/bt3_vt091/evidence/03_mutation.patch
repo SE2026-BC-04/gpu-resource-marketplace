@@ -1,0 +1,13 @@
+diff --git a/drafts.py b/drafts.py
+index e1afab5..7e6d4b7 100644
+--- a/drafts.py
++++ b/drafts.py
+@@ -50,8 +50,6 @@ class DraftStore:
+         async with self._lock:
+             current = self._rows.get((owner, listing))
+             if current is not None:
+-                if revision < current.revision:
+-                    raise StaleDraft("a newer draft is already saved")
+                 if revision == current.revision:
+                     if candidate != current:
+                         raise RevisionConflict("same revision contains different fields")

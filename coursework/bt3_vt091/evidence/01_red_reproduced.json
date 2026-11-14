@@ -1,0 +1,39 @@
+{
+  "command": [
+    "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-m",
+    "pytest",
+    "-q",
+    "tests/test_drafts.py::test_vt03_stale_save_cannot_replace_newer"
+  ],
+  "exit_code": 1,
+  "stdout": "F                                                                        [100%]\n================================== FAILURES ===================================\n__________________ test_vt03_stale_save_cannot_replace_newer __________________\n\n    def test_vt03_stale_save_cannot_replace_newer():\n        async def scenario():\n            store = DraftStore()\n            await store.save(\"worker-a\", \"new\", 2, fields(\"NEW\"))\n            with pytest.raises(StaleDraft):\n                await store.save(\"worker-a\", \"new\", 1, fields(\"OLD\"))\n            saved = await store.get(\"worker-a\", \"new\")\n            assert saved.revision == 2\n            assert saved.fields() == fields(\"NEW\")\n>       asyncio.run(scenario())\n\ntests\\test_drafts.py:47: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\runners.py:195: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n..\\..\\..\\..\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\asyncio\\base_events.py:691: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\n    async def scenario():\n        store = DraftStore()\n        await store.save(\"worker-a\", \"new\", 2, fields(\"NEW\"))\n>       with pytest.raises(StaleDraft):\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\nE       Failed: DID NOT RAISE StaleDraft\n\ntests\\test_drafts.py:42: Failed\n=========================== short test summary info ===========================\nFAILED tests/test_drafts.py::test_vt03_stale_save_cannot_replace_newer - Fail...\n1 failed in 0.14s\n",
+  "stderr": "",
+  "temporary_branch": "experiment/red-scaffold",
+  "temporary_commit": "d33110fb4da80a61f254e1def8be0906ef862e24",
+  "variant_sha256": "06092793dfb791016c394ad8ec96e6291fedbe1dae55091c1b2ffaf5d0932ad2",
+  "expected_failure_observed": true,
+  "metadata": {
+    "timestamp": "2026-11-14T13:12:19.007369+07:00",
+    "python": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "logical_cpus": 16,
+    "packages": {
+      "pytest": "9.1.1",
+      "fastapi": "0.156.4",
+      "httpx": "0.28.1"
+    },
+    "baseline": "bee832eaf5463df20f6c6815174322871eb6685a",
+    "source_sha256": {
+      "drafts.py": "607c3252f59f8673ff3812c56434a9e64ba56dd704a8e9d1dd5f0eb5fccc1405",
+      "harness_api.py": "2655c45d61ea4f8312d7552ef2508559be08da33d4779ecea96539271f71ab62",
+      "load.py": "75cae387befdfa2f98080b66efb3db531eceb611cc56e06d42065bee0afaa82b",
+      "verify.py": "a96c2666ec80dcfa367a61c74a0046d90c378c83d0910ae46a038bc4da18f35b",
+      "tests/test_drafts.py": "fa906a5b5de53b23851f9adbf420dbba3b3e7fb7e5a7c9c273b36a28af0ae991",
+      "tests/test_api.py": "5d42d2532c38fa6949d81c5c58184c692e0c4d8330db809a6cedbdbafdd9def1",
+      "PLAN.md": "81f42f1892b18324d94f1ed0ca69ec0e980147e649213498e8bad271fbfaec22"
+    }
+  }
+}

@@ -1,0 +1,203 @@
+{
+  "metadata": {
+    "timestamp": "2026-11-14T13:07:58.617667+07:00",
+    "python": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "logical_cpus": 16,
+    "packages": {
+      "pytest": "9.1.1",
+      "fastapi": "0.156.4",
+      "httpx": "0.28.1"
+    },
+    "baseline": "bee832eaf5463df20f6c6815174322871eb6685a",
+    "source_sha256": {
+      "drafts.py": "607c3252f59f8673ff3812c56434a9e64ba56dd704a8e9d1dd5f0eb5fccc1405",
+      "harness_api.py": "2655c45d61ea4f8312d7552ef2508559be08da33d4779ecea96539271f71ab62",
+      "load.py": "75cae387befdfa2f98080b66efb3db531eceb611cc56e06d42065bee0afaa82b"
+    }
+  },
+  "runs": [
+    {
+      "repeat": 1,
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_drafts.py::test_vt04_delayed_old_request_finishes_after_new_request",
+        "tests/test_drafts.py::test_vt05_all_arrival_orders_preserve_maximum_revision",
+        "tests/test_drafts.py::test_vt10_storage_failure_keeps_previous_draft_and_next_edit_recovers",
+        "tests/test_api.py::test_vt16_api_two_overlapping_requests_arrive_inverted"
+      ],
+      "exit_code": 0,
+      "stdout": ".........                                                                [100%]\n9 passed in 0.43s\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 2,
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_api.py::test_vt16_api_two_overlapping_requests_arrive_inverted",
+        "tests/test_drafts.py::test_vt10_storage_failure_keeps_previous_draft_and_next_edit_recovers",
+        "tests/test_drafts.py::test_vt05_all_arrival_orders_preserve_maximum_revision",
+        "tests/test_drafts.py::test_vt04_delayed_old_request_finishes_after_new_request"
+      ],
+      "exit_code": 0,
+      "stdout": ".........                                                                [100%]\n9 passed in 0.42s\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 3,
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_drafts.py::test_vt04_delayed_old_request_finishes_after_new_request",
+        "tests/test_drafts.py::test_vt05_all_arrival_orders_preserve_maximum_revision",
+        "tests/test_drafts.py::test_vt10_storage_failure_keeps_previous_draft_and_next_edit_recovers",
+        "tests/test_api.py::test_vt16_api_two_overlapping_requests_arrive_inverted"
+      ],
+      "exit_code": 0,
+      "stdout": ".........                                                                [100%]\n9 passed in 0.44s\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 4,
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_api.py::test_vt16_api_two_overlapping_requests_arrive_inverted",
+        "tests/test_drafts.py::test_vt10_storage_failure_keeps_previous_draft_and_next_edit_recovers",
+        "tests/test_drafts.py::test_vt05_all_arrival_orders_preserve_maximum_revision",
+        "tests/test_drafts.py::test_vt04_delayed_old_request_finishes_after_new_request"
+      ],
+      "exit_code": 0,
+      "stdout": ".........                                                                [100%]\n9 passed in 0.42s\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 5,
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_drafts.py::test_vt04_delayed_old_request_finishes_after_new_request",
+        "tests/test_drafts.py::test_vt05_all_arrival_orders_preserve_maximum_revision",
+        "tests/test_drafts.py::test_vt10_storage_failure_keeps_previous_draft_and_next_edit_recovers",
+        "tests/test_api.py::test_vt16_api_two_overlapping_requests_arrive_inverted"
+      ],
+      "exit_code": 0,
+      "stdout": ".........                                                                [100%]\n9 passed in 0.40s\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 6,
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_api.py::test_vt16_api_two_overlapping_requests_arrive_inverted",
+        "tests/test_drafts.py::test_vt10_storage_failure_keeps_previous_draft_and_next_edit_recovers",
+        "tests/test_drafts.py::test_vt05_all_arrival_orders_preserve_maximum_revision",
+        "tests/test_drafts.py::test_vt04_delayed_old_request_finishes_after_new_request"
+      ],
+      "exit_code": 0,
+      "stdout": ".........                                                                [100%]\n9 passed in 0.46s\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 7,
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_drafts.py::test_vt04_delayed_old_request_finishes_after_new_request",
+        "tests/test_drafts.py::test_vt05_all_arrival_orders_preserve_maximum_revision",
+        "tests/test_drafts.py::test_vt10_storage_failure_keeps_previous_draft_and_next_edit_recovers",
+        "tests/test_api.py::test_vt16_api_two_overlapping_requests_arrive_inverted"
+      ],
+      "exit_code": 0,
+      "stdout": ".........                                                                [100%]\n9 passed in 0.42s\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 8,
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_api.py::test_vt16_api_two_overlapping_requests_arrive_inverted",
+        "tests/test_drafts.py::test_vt10_storage_failure_keeps_previous_draft_and_next_edit_recovers",
+        "tests/test_drafts.py::test_vt05_all_arrival_orders_preserve_maximum_revision",
+        "tests/test_drafts.py::test_vt04_delayed_old_request_finishes_after_new_request"
+      ],
+      "exit_code": 0,
+      "stdout": ".........                                                                [100%]\n9 passed in 0.40s\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 9,
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_drafts.py::test_vt04_delayed_old_request_finishes_after_new_request",
+        "tests/test_drafts.py::test_vt05_all_arrival_orders_preserve_maximum_revision",
+        "tests/test_drafts.py::test_vt10_storage_failure_keeps_previous_draft_and_next_edit_recovers",
+        "tests/test_api.py::test_vt16_api_two_overlapping_requests_arrive_inverted"
+      ],
+      "exit_code": 0,
+      "stdout": ".........                                                                [100%]\n9 passed in 0.40s\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 10,
+      "command": [
+        "C:\\Users\\User\\OneDrive\\Tài liệu\\ChatGPT\\SE\\gpu-resource-marketplace\\backend\\.venv\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_api.py::test_vt16_api_two_overlapping_requests_arrive_inverted",
+        "tests/test_drafts.py::test_vt10_storage_failure_keeps_previous_draft_and_next_edit_recovers",
+        "tests/test_drafts.py::test_vt05_all_arrival_orders_preserve_maximum_revision",
+        "tests/test_drafts.py::test_vt04_delayed_old_request_finishes_after_new_request"
+      ],
+      "exit_code": 0,
+      "stdout": ".........                                                                [100%]\n9 passed in 0.42s\n",
+      "stderr": ""
+    }
+  ],
+  "pass": true,
+  "scope": "90 case executions; deterministic Event ordering, fresh process/store; alternating selection order"
+}

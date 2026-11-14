@@ -1,0 +1,39 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+__________________ test_vt03_stale_save_cannot_replace_newer __________________
+
+    def test_vt03_stale_save_cannot_replace_newer():
+        async def scenario():
+            store = DraftStore()
+            await store.save("worker-a", "new", 2, fields("NEW"))
+            with pytest.raises(StaleDraft):
+                await store.save("worker-a", "new", 1, fields("OLD"))
+            saved = await store.get("worker-a", "new")
+            assert saved.revision == 2
+            assert saved.fields() == fields("NEW")
+>       asyncio.run(scenario())
+
+coursework\bt3_vt091\tests\test_drafts.py:47:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\User\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\asyncio\runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+C:\Users\User\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\asyncio\runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\User\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    async def scenario():
+        store = DraftStore()
+        await store.save("worker-a", "new", 2, fields("NEW"))
+>       with pytest.raises(StaleDraft):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE StaleDraft
+
+coursework\bt3_vt091\tests\test_drafts.py:42: Failed
+=========================== short test summary info ===========================
+FAILED coursework\bt3_vt091\tests\test_drafts.py::test_vt03_stale_save_cannot_replace_newer
+1 failed in 0.19s
