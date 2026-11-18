@@ -101,7 +101,7 @@ Open: unbound rejected rows (`bound_job_id IS NULL`, `state='REJECTED'`). Baseli
 
 Extra unique `uq_signed_results_job_id_result_id (job_id, result_id)` for the Phase 3 dispute FK. `uq_signed_results_job_id` already guarantees one result per Job.
 [Δ] `ck_signed_results_outcome_reason`: `(outcome = 'SUCCESS') = (failure_reason IS NULL)`.
-[Δ] The Inbox row that produced an accepted result keeps its own copy of the bytes; `signed_results.original_envelope_raw` equals it. A CHECK cannot compare across tables; `TX-FINALIZE` copies the Inbox bytes in the same statement set and the test asserts equality (**D-10**: do we store the bytes twice or reference the Inbox row; the design chooses twice because Inbox rows can purge on their own schedule; **TV5 ACK_COMPATIBLE**: keep the independent byte-exact copy, copy it in the same UoW from the selected Inbox row, assert byte and hash equality and `UNIQUE(job_id)`, never overwrite on replay or after an unknown `COMMIT`).
+[Δ] The Inbox row that produced an accepted result keeps its own copy of the bytes; `signed_results.original_envelope_raw` equals it. A CHECK cannot compare across tables; `TX-FINALIZE` copies the Inbox bytes in the same statement set and the test asserts equality (**D-10**: do we store the bytes twice or reference the Inbox row; the design chooses twice so accepted evidence does not depend on the Inbox row's own state transitions (both are Job-linked and leave only with the guarded Job cleanup); **TV5 ACK_COMPATIBLE**: keep the independent byte-exact copy, copy it in the same UoW from the selected Inbox row, assert byte and hash equality and `UNIQUE(job_id)`, never overwrite on replay or after an unknown `COMMIT`).
 
 ## 7. `job_reputation_contributions`
 
