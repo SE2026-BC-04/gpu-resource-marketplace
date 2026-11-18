@@ -433,7 +433,7 @@ PR #39 includes the implemented `jobs/reference.py` generator and Phase 1 refere
 
 ### E3. Multiple distinct signed candidates for the same Attempt
 
-Suppose after Simulator restart two authenticated callbacks for one Job arrive with **different** `result_id` values. The API can durably store eligible on-time candidates independently (subject to approved ingress constraints); they are not identical replay. Manager processes bounded candidates deterministically by trusted `(received_at, inbox_row_id)`: reject invalid candidates and continue, accept the first verified/context-eligible one, and mark later candidates superseded/rejected without changing the accepted immutable result. The `signed_results` Job uniqueness, terminal state and contribution uniqueness enforce one business outcome. **The exact Inbox state labels and locked candidate-selection SQL require TV2/TV3/TV5 ACK**; no new table is added.
+Suppose after Simulator restart two authenticated callbacks for one Job arrive with **different** `result_id` values. The API can durably store eligible on-time candidates independently (subject to approved ingress constraints); they are not identical replay. Manager processes bounded candidates deterministically by trusted `(received_at, inbox_id)`: reject invalid candidates and continue, accept the first verified/context-eligible one, and settle later stored candidates with TV2 housekeeping `REJECTED(NOT_SELECTED)` or `REJECTED(ALREADY_TERMINAL)`, without changing the accepted immutable result. There is no `SUPERSEDED` Inbox state or TV3 rejection code. The `signed_results` Job uniqueness, terminal state and contribution uniqueness enforce one business outcome. **The exact Inbox state labels and locked candidate-selection SQL require TV2/TV3/TV5 ACK**; no new table is added.
 
 At deadline, a previously admitted on-time Inbox candidate must be exhausted/considered before `SYSTEM_FAULT`; a receipt that first acquires the Job lock at or after `hard_deadline_at` cannot be admitted as new. Local or worker `finished_at` must not move this boundary.
 
@@ -533,7 +533,7 @@ Contribution is keyed by `job_id` and written in the **same UoW/COMMIT** as resu
 | `E-IF-06` | Ingress bearer scope, bounded raw JSON parse, redacted errors and `202` semantics | TV1, TV3, TV5 | `PENDING_PARAMS/ACK` |
 | `E-IF-07` | Native-role Inbox grants, raw byte UNIQUE conflict, commit-unknown reconciliation | TV2, TV3, TV5 | `PENDING_ACK` |
 | `E-IF-08` | Typed `VerifiedV1Receipt`, evidence/key binding and finalizer TOCTOU recheck | TV1, TV2, TV3, TV5 | `PENDING_ACK` |
-| `E-IF-09` | Candidate ordering, multiple result IDs and rejected/superseded cleanup | TV1, TV2, TV3, TV5 | `PENDING_ACK` |
+| `E-IF-09` | Candidate ordering, multiple result IDs and REJECTED housekeeping cleanup | TV1, TV2, TV3, TV5 | `PENDING_ACK` |
 | `E-IF-10` | Single Finalization UoW, contribution and aggregate deltas/recovery | TV1, TV2, TV5 | `PENDING_ACK` |
 | `E-IF-11` | PAUSED same-key Submit replay (already approved), RUNNING dispatch repair (separate) | TV2, TV4, TV5 | `PENDING_ACK/TEST` |
 | `E-IF-12` | Phase 1 accepted-main SHA, actual role/CI evidence, revisions + 2E compatibility | TV1–TV5 | `PENDING_PHASE1_GATE` |
