@@ -89,8 +89,25 @@ The “can proceed” column is a dependency assessment only. It does not grant 
 | TV2 P2B-DRT-20..23 | Earlier PENDING candidate blocks later valid candidate; late fallback cannot skip committed on-time Inbox; swapped rejection result ID/hash/Job no-op; signed bytes equal locked extracted envelope |
 | TV2 P2B-DRT-24..28 | Shared/exclusive Worker advisory races in both orders, two-active-key fence across crash, K1 restore before abort fence release, no unexpected-key retirement |
 | **TV2 P2B-DRT-29** | Cached proof K1 after K2 activation fails locked active-key ID/fingerprint check; wrong Worker/fingerprint/expired proof blocks without Job/GPU/Outbox writes |
-| TV3 P2C-SIGN-01..06 + TV5 P2E-GATE-01 | G1 nonce/domain/key matching; proof-replay and cross-domain signatures rejected; Manager restart requires fresh proof; no HTTP in UoW |
+| TV3 P2C-SIGN-01..08 + TV5 P2E-GATE-01 | G1 nonce/domain/key matching; proof-replay and cross-domain signatures rejected; Manager restart requires fresh proof; no HTTP in UoW |
 | TV5 P2E-GATE-02 / ROTATE-01 | G2 bootstrap inconsistency addressed explicitly if chosen; signer restart *within* still-valid proof TTL measured, not assumed safe |
 | TV5 P2E-API-01 | 16,384/16,385 raw bytes and depth 4/5, 404/409/422/503 status, same-stored received_at deadline equality |
 
 Keep P2E-DRT-01..20 and original release gates. Every Phase 2 native-role PG, crypto, concurrency and five-service runtime test remains **NOT_RUN**, regardless of existing repository CI. Record source/consumer SHA, native role, migrations, barriers, stored rows, exact wire bytes and reviewer ACK before claiming PASS.
+
+---
+
+## Additional exact-head regression oracles — 2026-11-18
+
+| Test matrix | Lead-selected design / required checks |
+|---|---|
+| TV2 `P2B-DRT-19` | First-contributing UPSERT (D-12) with **two concurrent distinct Jobs for one Worker**: unique contribution, +1 each and trusted `updated_at`; NONE/SYSTEM_FAULT/duplicates do not touch aggregate |
+| TV2 `P2B-DRT-23` | Reject `INVALID_STRUCTURE`/`UNSUPPORTED_SCHEMA_VERSION` as post-ingress definitive verifier codes, and reject housekeeping `NOT_SELECTED`/`ALREADY_TERMINAL` as TV3 verdicts; transient drift keeps PENDING |
+| TV2 `P2B-DRT-29` | `SignerReadiness`: wrong `worker_id`, wrong public key fingerprint, expired proof at **DB timestamp equality**, stale K1 after K2; two allocation/rotation commit orders and zero Job/GPU/Outbox writes |
+| TV3 `P2C-SIGN-01/02` | Unknown/mismatched signer blocks allocation **after proof expiration/invalidation**; not a claim that an existing cached TTL proof disappears instantly |
+| TV3 `P2C-SIGN-07` / TV5 `P2E-ROTATE-01` | Simulator restart **inside proof TTL** with valid cached proof: document possible allocation and later `SYSTEM_FAULT` with no Worker penalty; do not overclaim no-allocation |
+| TV3 `P2C-SIGN-08` / TV2 `P2B-DRT-29` | Proof K1, activate K2, try stale K1 proof ⇒ `Blocked(SIGNER_NOT_READY)`; then fresh K2 proof succeeds; both lock orders |
+| TV5 `P2E-GATE-01` | G1 proof: 32 raw nonce bytes and 43-char unpadded wire base64url, canonical UUID IDs, domain-separated 64-byte signature; wrong nonce/key/domain/replay rejected. Endpoint auth scope `MANAGER_DISPATCH_TOKEN`. |
+| TV5 `P2E-API-01` | D-01 Option C: retained raw bytes + DB CHECK/hash and bound context; deliberate same-ID different body/context collision and unknown-COMMIT probe. No arbitrary raw SELECT for API role. |
+
+All are **NOT_RUN**. Lead source: [#46 conditional decision @531805b](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46#issuecomment-6849327771); current TV2 #46 @a27526e, TV3 #49 @62bded7. Existing repository CI cannot serve as the acceptance evidence for any of these checks.
