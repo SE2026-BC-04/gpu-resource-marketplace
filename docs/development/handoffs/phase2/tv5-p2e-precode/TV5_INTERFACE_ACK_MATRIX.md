@@ -25,7 +25,7 @@ S-2E is the baseline version before its status addendum in this PR.
 | 04 | TV3 key policy + TV2 registry → TV5 signer / TV1 runtime | Worker/key_id binding, injection/recovery, K1/K2, incident response | S-ADR4; S-2E DR-E3; DRT-05/06/08 | TV1/TV2/TV3/TV5: registry lifecycle and key-compromise response? | PENDING_ACK / NEEDS_OWNER_DECISION |
 | 05 | TV5 signer → TV3 verifier | Nine-field mock vs exact eleven-field Signed V1; prefix/JCS/Ed25519/V1–V4 | S-ADR4; S-API §13.2; DRT-07/08 | TV3/TV5: exact dual-runtime fixtures and signer/verifier API ACK? | PENDING_ACK |
 | 06 | TV5 callback client → TV3 API / TV1 wiring | callback Bearer, raw bytes, body limits, 202/401/409/422/5xx and retries | S-API §§13.2–13.3; S-ADR5; DRT-09..11 | TV1/TV3/TV5: concrete size/depth/time budgets and route wiring? | PENDING_PARAMS / ACK |
-| 07 | TV3 API ingress → TV2 Inbox | scoped INSERT/read duplicate path, raw-byte equality, unique conflict, commit-unknown | S-API §13.2; S-2B §4; DRT-10/11/19 | TV2/TV3/TV5: exact duplicate context and DB privilege/function? | PENDING_ACK |
+| 07 | TV3 API ingress → TV2 Inbox | scoped INSERT/read duplicate path, D-01 Option C hash+context equality, unique conflict, commit-unknown | S-API §13.2; S-2B §4; DRT-10/11/19 | TV2/TV3/TV5: exact duplicate context and DB privilege/function? | PENDING_ACK |
 | 08 | TV3 verifier → TV1/TV5 Manager finalizer | Trusted typed verdict bound to Inbox ID/raw hash/IDs/key; locked recheck | S-2E §2.4 / DR-E5; DRT-08/17 | TV1/TV2/TV3/TV5: exact fields/types, provenance and stale handling? | PENDING_ACK (`P2E-VERDICT-CONTRACT-01`) |
 | 09 | TV2 Inbox → TV1 Manager/TV5 policy | Multiple result IDs, `(received_at,inbox_id)`, invalid-first, non-winner cleanup | S-API §13.2; S-2E DR-E5; DRT-12/13/16 | TV1/TV2/TV3/TV5: terminal cleanup using existing states only? | PENDING_ACK |
 | 10 | TV5 policy + TV1 Manager → TV2 TX-FINALIZE | one UoW: signed result, terminal Job, release, Listing decrement, Inbox, contribution/aggregate | S-DB §11; S-2E §2.5 / DR-E7; DRT-17/18 | TV1/TV2/TV5: exact SQL/UoW ports, aggregate row ownership, commit reconciliation? | PENDING_ACK |
@@ -42,7 +42,7 @@ S-2E is the baseline version before its status addendum in this PR.
 | 04 | `(worker_id,key_id)` binding; missing/wrong key fails closed; historical K1 verifies after planned K2 rotation; incident response open | Private Ed25519 material only in Simulator/Worker secret boundary; public key registry in TV2 DB | DRT-05/06/08; key custody negative tests |
 | 05 | Nine-field mock is distinct from exact eleven-field Signed Result V1; strict JCS, prefix and Ed25519 | Signing is local to trusted simulator; TV3 verification binds trusted registry/context; no private material leaves signer | DRT-07/08; byte-exact cross-runtime fixtures |
 | 06 | Callback resends original raw envelope/result_id; 202 STORED/DUPLICATE; 409 changed-byte collision; bounded retry per ADR-005 | API token check before Inbox lookup/write; DB commits original bytes before 202 | DRT-09..11; API-INT-05..11 |
-| 07 | Inbox retains original bytes/hash, result_id, trusted context/time and processing status; same ID exact bytes+context duplicate, changed bytes/context conflict | API scoped INSERT; Manager state-only update; Listing→Job admission locks and DB clock after Job lock | DRT-10/11/19; P2B DBTX/privilege tests |
+| 07 | Inbox retains original bytes/hash, result_id, trusted context/time and processing status; same ID cryptographic digest+trusted context duplicate under D-01 Option C, different digest/context conflict; raw evidence preserved | API scoped INSERT; Manager state-only update; Listing→Job admission locks and DB clock after Job lock | DRT-10/11/19; P2B DBTX/privilege tests |
 | 08 | Typed verdict binds Inbox row/hash, result/job/attempt/worker/listing/key and classification or rejection; exact Python types unresolved | Verifier cannot mutate Job; finalizer must re-read evidence/state under DB locks | DRT-08/17; stale verdict and mismatched context tests |
 | 09 | Candidates ordered `(received_at,inbox_id)`; reject invalid then continue; existing Inbox state enum only; no new receipt on retry | TV2 owns bounded candidate reads/updates; finalizer serializes with Listing→Job locks | DRT-12/13/16; invalid-first/valid-second and later-batch tests |
 | 10 | One durable finalization outcome; replay/unknown commit reconciles, not blind retry | One TV2 UoW for signed result, terminal Job, allocation release, `allocated_gpu_count`, Inbox, contribution and aggregate; no HTTP under locks | DRT-17/18; independent connection checks all affected rows |
@@ -61,16 +61,34 @@ Initial table above is a baseline snapshot; use these **newer unmerged producer 
 
 | E-IF | Updated design direction | Status / remaining decision |
 |---|---|---|
-| 01 | TV2 P1 full ten-key immutable Outbox, canonical raw wire; P2 eight-key fallback | PENDING TV1/lead D-05/D-13, PG tests |
+| 01 | **TV1 conditionally selected P1**, full immutable ten-key Outbox, canonical wire; P2 not selected | TV1/TV2/TV5 exact-SHA ACK; native grants and PG tests NOT_RUN |
 | 02–03 | Volatile cache and cross-restart altered Attempt are separate from signing proof; cap/TTL/shutdown measured | P2E-CACHE-GAP-01 NEEDS_OWNER_DECISION; numeric limits PENDING |
-| 04 | D-18 shared/exclusive Worker lock, two-active-key rotation fence; G1 preferable to G2; internal SignerReadiness proof bound under locks | TV1/TV2/TV3/TV4/TV5 ACK, lead E-C3/D4/L2, G1/G2 and D-03/S-10 |
+| 04 | **TV1 conditionally selected D-18/E-C3 and G1**, Worker-first advisory/two-key fence with internal SignerReadiness checked under locks | TV1/TV2/TV3/TV4/TV5 exact-SHA ACK; normative API/DB source correction, provisioning, TTL tests |
 | 05 | ADR-004 nine-field mock vs eleven-field Signed V1 and independent canonical/Ed25519 | TV3/TV5 fixture and owner ACK; NOT_RUN |
 | 06 | Callback 202 STORED/DUPLICATE, 401, 404 context, 409 collision/unacceptable, 422 invalid, 503 unresolved; 16,384 B/depth 4 proposed | TV1 budget & TV3/TV5 ACK, NOT_RUN |
-| 07 | TV2 target-less ON CONFLICT + fresh ABSENT/SAME/DIFFERENT probe and trusted stored received_at | Lead D-01/E-C1, D-02/E-C2; real API-role grants/SQL |
-| 08 | TV3 VerifiedV1Receipt + full RejectedV1Receipt with non-NULL result_id/hash; four definitive rejection codes; V-OUT and TV2 locked extractor | TV1/lead E-C4, exact producer-consumer SHA ACK, NOT_RUN |
+| 07 | **TV1 D-01 Option C approved conditionally**, retain original bytes, SHA-256 CHECK and digest + trusted Job/Attempt probe; target-less conflict D-02 still proposed | D-02/E-C2 exact source/owner approval, real API-role SQL NOT_RUN |
+| 08 | **TV1 conditionally selected E-C4 V-OUT**, full immutable verified/rejected DTO, four definitive codes, locked extractor | Normative DB pseudocode and TV1/TV2/TV3/TV5 exact-SHA freeze; tests NOT_RUN |
 | 09 | PrecedingPending, valid-A/valid-B deterministic earliest winner, no premature fallback | TV1/TV2/TV3/TV5 B-IF-05/07 ACK and tests |
-| 10 | One TV2 Finalization UoW; D-11/D-12 first-contribution UPSERT proposed | TV1/TV2/TV5 grants, contribution and unknown-COMMIT PG tests |
+| 10 | One TV2 Finalization UoW; **TV1 conditionally approved D-12 first-contributing UPSERT** | Owner ACK, physical grants, two-Job concurrency and unknown-COMMIT tests NOT_RUN |
 | 11 | TV4 scheduler must supply fresh SignerReadiness for eligible Worker and handle Blocked(SIGNER_NOT_READY), without bypassing FIFO | TV4/TV1 integration ACK and P2B-DRT-29 |
 | 12 | Main bee832e Phase 1 accepted source baseline; #39/#44 merged; TV3 earlier scoped PR #50 feedback exists | New exact #50 SHA reviewer/independent human L2 ACK + lead docs/coding gates |
 
 TV3 [scoped comment on PR #50](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/50) addressed thin rejection DTO, conditional D-01 language, 404/503 mapping and retire-vs-delete at this **proposal** level; re-review is needed on the new SHA. Do not mark approvals or test PASS based on a previous SHA or green foundation CI.
+
+## Current cross-owner decision/ACK ledger — 2026-11-18
+
+**This is the current status; the earlier baseline table and 2026-11-13 notes are historical snapshots.** Source authority: [TV1 conditional L2 architecture decision on PR #46 @ `531805b`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46#issuecomment-6849327771); producer heads [TV2 PR #46 @ `a27526e479dbb2d915495e4bbe40327cc56427af`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46) and [TV3 PR #49 @ `62bded701a7b1cd371307915c7ce746736fc9325`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/49).
+
+| E-IF | Lead architecture direction | Still pending on the new TV5 SHA |
+|---|---|---|
+| E-IF-01 | D-05/D-13 P1 ten-key immutable Outbox **selected** | TV1/TV2/TV5 exact producer/consumer ACK, canonical raw bytes and restricted PG role tests |
+| E-IF-02/03 | **NOT DECIDED:** contradictory same-attempt dispatch after Simulator cold restart; cache limits | D-16/P2E-CACHE-GAP-01 and runtime bounds/TTL/eviction |
+| E-IF-04 | D-18 two active rows + Worker-first advisory **selected**; signer **G1 selected**, G2 not | API internal proof endpoint L2 text; D-03/S-10, signer TTL/nonce/restart/recovery and TV1/TV2/TV3/TV4/TV5 exact ACK |
+| E-IF-05 | ADR-004 strict Signed V1 unchanged | TV3↔TV5 cross-runtime vectors |
+| E-IF-06/07 | D-01 **Option C** and D-17 stored INSERT RETURNING **selected** | D-02/E-C2 source/probe contract, TV1 16,384-byte/depth-4 resource ACK, native-role SQL |
+| E-IF-08/09 | E-C4 **V-OUT selected**, four-code verifier, locked evidence and earliest valid candidate | Normative DB TX-FINALIZE pseudocode, exact-SHA owner ACK and race tests |
+| E-IF-10 | D-12 **first contributing UPSERT selected** | TV1/TV2/TV5 UoW/grant ACK, real 2-Job/Worker PG concurrency tests |
+| E-IF-11 | D-18 readiness check under Worker+Listing locks | TV4 FIFO/Blocked integration ACK, D-06 missing-receipt repair port still open |
+| E-IF-12 | Phase1 main baseline accepted; PRs #46/#49/#50 still open docs | **Two independent human L2 reviews** at final SHA, G1 docs gate, separate merge/coding authorization |
+
+**TV2 and TV3 reviews on PR #50 @ `c8c241c` were `ACK_WITH_ACTIONS`**, not independent human approval of the final head. ACKs must cite new SHA, field/byte contracts, failure/retry/transaction semantics and test oracle. All Phase 2 native-role PG, signing, concurrent locks and E2E tests remain `NOT_RUN` despite foundation CI.
