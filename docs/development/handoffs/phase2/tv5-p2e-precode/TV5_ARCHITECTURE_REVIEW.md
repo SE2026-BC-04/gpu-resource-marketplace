@@ -57,3 +57,23 @@ Preserved: five-service boundary; no Simulator PostgreSQL; fixed simulation inpu
 | P2E-F-13 (DB integration) | TV2 byte-exact independent signed result, first-contribution reputation UPSERT and no Phase 2 oracle SELECT | Owner SHA ACK + native SQL tests |
 
 These are **documentation-level** mitigations, not demonstrated runtime corrections. TV3's PR #50 comment at original HEAD 7b5ee16 provided ACK_WITH_ACTIONS, and TV5's [#46 review](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46#pullrequestreview-5887153391) / [#49 review](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/49#pullrequestreview-5887054059) were ACK_WITH_ACTIONS. No prior reviewer is automatically deemed to have approved this new PR #50 HEAD. Tests NOT_RUN.
+
+---
+
+## Reclassification after lead's L2 decisions — 2026-11-18
+
+**Authority:** [TV1 decision on PR #46 @ `531805b`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46#issuecomment-6849327771). The earlier 2026-11-13 finding table reports **historical** conditional choices, not current open decision status.
+
+| Finding | Decision/mitigation state | Still required |
+|---|---|---|
+| `P2E-F-02` algorithm version | **NOT RESOLVED** by chosen P1 or G1 | Lead version pin/rollout fence and no V1 wire mutation |
+| `P2E-F-03` cold cache | **D-16/P2E-CACHE-GAP-01 STILL OPEN**, Outbox persistence does not prove original dispatch to DB-less restarted Simulator | Lead contract qualification or approved authenticated persisted proof |
+| `P2E-F-04` verifier DTO/V-OUT | **E-C4 V-OUT CONDITIONALLY SELECTED**; four-code definitive rejection and locked original-bytes/JCS extractor | Exact producer/consumer ACK, normative TX-FINALIZE pseudocode, P2B-DRT-23 |
+| `P2E-F-05` first winner/late fallback | TV2 first `PrecedingPending`, stored timestamp and one UoW design | B-IF-05/07 exact owner ACK and real PostgreSQL race tests |
+| `P2E-F-07` key rotation | **D-18/E-C3 CONDITIONALLY SELECTED** two-key fence/Worker-first lock (no partial unique active-key index) | Approved DB/Phase1B/Phase2C L2 source reconciliation, D-03/S-10, abort/restart tests |
+| `P2E-F-15` proof-to-active-key TOCTOU | **G1 selected conditionally**; TV2 internal `SignerReadiness` checked against sole key ID and 64-lowercase-hex SHA-256 of 32 raw public-key bytes | G1 API endpoint/wire, TTL/restart and P2B-DRT-29 / P2C-SIGN-08 |
+| `P2E-F-16` G2 bootstrap | **G2 NOT SELECTED**; historical issue, not a blocker to the *chosen* G1 design | Avoid adopting G2 silently; G1 endpoint/replay contract still pending |
+| `P2E-F-17` signer loss within proof TTL | **Residual under G1**, not eliminated by a short TTL | `P2C-SIGN-07` and `P2E-ROTATE-01`: SYSTEM_FAULT without Worker penalty; owner TTL policy |
+| `P2E-F-13` physical DB integration | **D-01 Option C, D-12 UPSERT, D-17 stored RETURNING conditionally selected** | Native role CHECK/grant/clock and two-Job aggregate tests |
+
+**Remaining decisions:** D-02/E-C2, D-03/S-10, D-06 repair, D-16, private key compromise, cache bounds/TTL, algorithm version and L2 API/proof contract. All Phase 2 runtime/SQL/crypto/concurrency/E2E tests **NOT_RUN**. Distinguish `APPROVED_DESIGN_DIRECTION_CONDITIONAL` from an owner ACK, human L2 approval, merge or implementation authorization.
