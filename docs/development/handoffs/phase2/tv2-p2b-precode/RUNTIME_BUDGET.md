@@ -21,6 +21,7 @@ Outbox lease 30 s; retry backoff `2, 4, 8, 16, 30, 30, …` s; poll default 2 s;
 | Scheduler scan size (Listings per pass) | TV1 + TV4 | no Listing starved; blocked head does not stop other Listings | `P2D-TX-03` |
 | graceful-shutdown budget | TV1 | ≥ longest UoW (`statement_timeout` + commit) so in-flight UoWs resolve | `P2B-DRT-11`, `P2B-UOW-05` |
 | retry budget for `40001`/`40P01` | TV2 | finite; stable identifiers; never for `23xxx`/`40003` | `P2B-UOW-04` |
+| repair lease, repair backoff (`repair_next_at`) and repair budget (`B-IF-06R`, proposed, D-19) | TV1 (+ TV2, TV5) | lease ≥ the HTTP timeouts (ADR-005 2 s / 5 s); backoff and budget bounded so a repair never reaches `hard_deadline_at`; counted per Outbox row | `P2B-DRT-30..36` (no numbers proposed) |
 
 ## 2.1 Admission deadline vs processing budget (P1-02)
 

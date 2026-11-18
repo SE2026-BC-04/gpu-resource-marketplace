@@ -29,8 +29,8 @@ It must work after the Job is terminal and while it is still `RUNNING`, and it m
 ## 3. Recommendation (TV2, for ACK)
 
 1. **Reject A.** It hands the API every stored envelope for a feature that needs a yes/no.
-2. **Default to C** if the lead accepts that, with the stored-hash CHECK in place, hash equality is the byte-equality test. It adds no function, no role and no `SECURITY DEFINER` surface, and it keeps all Phase 2 DB code `SECURITY INVOKER` like D2/D3/D7.
-3. **Use B** if the lead insists on a byte-for-byte comparison inside PostgreSQL. B requires: fixed `SET search_path = pg_catalog`, fully qualified names, typed arguments only, `REVOKE ALL ... FROM PUBLIC`, `EXECUTE` to `gpm_api_rw` only, an owner that is **not** a superuser (new `NOLOGIN` role with `SELECT` on `result_inbox`), and a role-bootstrap change reviewed by TV1.
+2. **Recommended C (approved by the lead, §3.1):** with the stored-hash CHECK in place, SHA-256 equality plus the trusted Job/Attempt context is the duplicate test, as a cryptographic assumption and not mathematical byte equality. It adds no function, no role and no `SECURITY DEFINER` surface, and it keeps all Phase 2 DB code `SECURITY INVOKER` like D2/D3/D7.
+3. **B is not selected and is not a fallback** (lead @ `531805b`); using it would be an L2 change request. Recorded only for the comparison, B would require: fixed `SET search_path = pg_catalog`, fully qualified names, typed arguments only, `REVOKE ALL ... FROM PUBLIC`, `EXECUTE` to `gpm_api_rw` only, an owner that is **not** a superuser (new `NOLOGIN` role with `SELECT` on `result_inbox`), and a role-bootstrap change reviewed by TV1.
 Decision owner for "SHA-256 equality is enough": the lead (**D-01**). TV3 and TV5 confirm the HTTP mapping (**D-02**).
 
 ### 3.1 Lead decision on D-01 (2026-11-13, @ `531805b`): Option C approved, conditional

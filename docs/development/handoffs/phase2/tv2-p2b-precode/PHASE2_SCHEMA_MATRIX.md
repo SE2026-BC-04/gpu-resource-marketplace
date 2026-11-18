@@ -47,7 +47,7 @@ Cross-row rule: `allocations.gpu_count = jobs.requested_gpu_count` and counter r
 | `event_id` | `uuid` | NN, `gen_random_uuid()` | PK |
 | `attempt_id` | `uuid` | NN | FK → `execution_attempts(attempt_id)` guarded cascade; `uq_execution_outbox_attempt_id_event_type (attempt_id, event_type)` |
 | `event_type` | `varchar(16)` | NN, `'EXECUTE_JOB'` | `ck_execution_outbox_event_type` |
-| `dispatch_payload` | `jsonb` | NN | immutable; P1 (D-05, approved by the lead, conditional, @ `531805b`): exactly the ten wire keys, `ck_execution_outbox_payload_shape` (key set, `outbox_event_id = event_id`, `attempt_id` match, fixed `simulation_input`); fallback P2: eight-key core. See `P2B_UOW_INTERFACES.md` B-IF-06. lead conditional approval @ `531805b`; TV5 exact-SHA ACK pending |
+| `dispatch_payload` | `jsonb` | NN | immutable; P1 (D-05, approved by the lead, conditional, @ `531805b`): exactly the ten wire keys, `ck_execution_outbox_payload_shape` (key set, `outbox_event_id = event_id`, `attempt_id` match, fixed `simulation_input`); P2 (eight-key core) is not selected and not a fallback. See `P2B_UOW_INTERFACES.md` B-IF-06. lead conditional approval @ `531805b`; TV5 exact-SHA ACK pending |
 | `state` | `varchar(12)` | NN, `'PENDING'` | `ck_execution_outbox_state` (`PENDING`,`CLAIMED`,`ACKED`,`EXHAUSTED`) |
 | `delivery_attempts` | `integer` | NN, `0` | `>= 0` |
 | `next_retry_at` | `timestamptz(6)` | NN | due time |
@@ -59,6 +59,7 @@ Cross-row rule: `allocations.gpu_count = jobs.requested_gpu_count` and counter r
 Index: `ix_execution_outbox_due (next_retry_at, event_id) WHERE state IN ('PENDING','CLAIMED','ACKED')` (§9.4).
 [Δ] Coherence CHECKs (**D-06**, need TV1 + lead ACK because they constrain how the dispatcher clears a lease): `ck_execution_outbox_lease_pair`: `(lease_owner IS NULL) = (lease_until IS NULL)`; `ck_execution_outbox_state_lease`: `(state = 'CLAIMED') = (lease_owner IS NOT NULL)` (so `PENDING`, `ACKED` and `EXHAUSTED` always carry **no** lease); `ck_execution_outbox_acked_at`: `(state = 'ACKED') = (acked_at IS NOT NULL)`. Together with the CAS predicates in `P2B_UOW_INTERFACES.md` B-IF-06 (claim only `PENDING`-due or `CLAIMED`-expired; ACK/RETRY/EXHAUSTED only `WHERE state='CLAIMED' AND lease_version=:v AND lease_owner=:o`; lease columns cleared on all three; `lease_version` never reset) an expired lease can never resurrect an `ACKED` or `EXHAUSTED` row.
 [Δ] `ck_execution_outbox_payload_object` is subsumed by `ck_execution_outbox_payload_shape` (object, exact key set, fixed `simulation_input`, id keys are JSON strings equal to the columns; the whole predicate is `COALESCE(..., false)` because a CHECK accepts NULL). The shape CHECK uses only immutable jsonb operators; it never casts payload text to `timestamptz` (that cast is not immutable), so timestamp equality with the `execution_attempts` columns is a transaction rule plus test (`P2B-DRT-18`).
+[Δ] **PROPOSED, not approved (D-19, `B-IF-06R`; not part of R1 unless TV1 + TV2 + TV5 ACK and the lead authorizes):** repair columns `repair_owner varchar(128) NULL`, `repair_lease_until timestamptz(6) NULL`, `repair_version bigint NOT NULL DEFAULT 0`, `repair_count integer NOT NULL DEFAULT 0`, `repair_next_at timestamptz(6) NULL`; `ck_execution_outbox_repair_pair` `(repair_owner IS NULL) = (repair_lease_until IS NULL)`; `ck_execution_outbox_repair_acked` `(repair_owner IS NULL OR state = 'ACKED')`; `repair_version >= 0`, `repair_count >= 0`. They exist because `ck_execution_outbox_state_lease` forbids a normal lease on an `ACKED` row. No change to `state`, `dispatch_payload`, ids or the normal lease columns. If not approved, the table stays exactly as above.
 
 ## 5. `result_inbox`
 
@@ -127,7 +128,11 @@ Phase 3 replaces this CHECK and adds the composite FK `(job_id, corrected_by_dis
 
 | Consumer | Columns to confirm | Status |
 |---|---|---|
-| TV1 | outbox state/lease/retry columns and CHECKs (D-06); attempts deadlines | `PENDING_ACK` |
+| TV1 | outbox state/lease/retry columns and CHECKs (D-06); attempts deadlines; proposed repair columns (D-19, not approved) | `PENDING_ACK` |
 | TV3 | `result_inbox` insert columns, `received_at` default, hash CHECK, body bound (D-07, D-08) | `PENDING_ACK` |
 | TV4 | `allocations` columns and counter reconciliation; optional active index (D-09) | `PENDING_ACK` |
 | TV5 | `signed_results` columns, category CHECK values, contribution shape, payload contents (D-05, D-10) | `PENDING_ACK` |
+
+## 10. Evidence chain
+
+The join keys, hashes, trusted time sources and retention of the six tables as one chain are in `EVIDENCE_TRACEABILITY_MATRIX.md` (no schema change).
