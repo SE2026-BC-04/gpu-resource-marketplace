@@ -288,3 +288,23 @@ Nguồn hiện tại trên GitHub: [TV2 #46 @ ba63466](https://github.com/SE2026
 | Terminal/UoW | PrecedingPending; deadline fallback fresh DB scan, không tin caller proof; one UoW signed evidence/Job/release/Listing/Inbox/reputation, SYSTEM_FAULT không phạt Worker |
 
 **Quy trình:** giữ **một nhánh thiết kế docs/phase2e-tv5-design**, **một Draft PR #50**. Sau G1 docs gate và quyền code G2 riêng của nhóm trưởng, mỗi nhiệm vụ triển khai dùng branch/PR độc lập từ main mới nhất, không đưa mã vào PR docs. Chưa có quyền merge hoặc triển khai. TV3 đã comment ACK_WITH_ACTIONS tại SHA #50 cũ 7b5ee16; TV5 đã review #46 @ ed19a51 và #49 @ 9b337f5 (đều ACK_WITH_ACTIONS), không tự chuyển ACK sang SHA mới. Cần TV1/TV2/TV3/TV4/lead và người thật độc lập xác nhận **exact producer/consumer SHA**, hợp đồng, test oracle; mọi test PostgreSQL native-role/concurrency/crypto/5-service E2E Phase 2 đều **NOT_RUN**.
+
+---
+
+## 14. Quyết định kiến trúc đã chọn có điều kiện và bàn giao mới — 18/11/2026
+
+**Nguồn quyết định có thẩm quyền:** [TV1 tại PR #46, HEAD được duyệt `531805b`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46#issuecomment-6849327771). Đầu tài liệu §13 (13/11) là snapshot lịch sử; **trạng thái hiện hành** dựa trên [TV2 #46 @ `a27526e`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46), [TV3 #49 @ `62bded7`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/49).
+
+| Nội dung | Quyết định TV1 (chỉ `APPROVED_DESIGN_DIRECTION_CONDITIONAL`) | Việc TV5/phối hợp còn phải hoàn thành |
+|---|---|---|
+| Callback duplicate D-01/E-C1 | **Option C**: vẫn lưu nguyên byte gốc; DB `envelope_sha256 = sha256(original_envelope_raw)` CHECK, duplicate probe so digest **và Job/Attempt binding**. Đây là tương đương mật mã, **không** phải so byte toán học | Đồng bộ normative API/DB/2B/2C/2E; TV2/TV3/TV5 ACK + restricted-role PG test |
+| D-05/D-13 dispatch | **P1**: bất biến đúng 10 trường Outbox; pre-INSERT UUIDv4; P2 không chọn | TV1/TV2/TV5 ACK, narrow INSERT grants, raw-body retry/restart test |
+| D-06 | **CAS được duyệt có điều kiện** | Repair missing receipt là port riêng, phải chốt authorization/fencing với TV1/TV2/TV5 |
+| D-18/E-C3/D4 | **Worker advisory first** (shared allocation/exclusive key registration), 2 public keys active tạm thời để quiesce; **không** tạo partial unique active-key index | L2 sửa nguồn DB/Phase1B/2C, TV4 FIFO, native-role race và rollback K1 |
+| Signer | **G1 Ed25519 proof of possession**; G2 không chọn | L2 thêm Manager→Simulator endpoint; 32-byte CSPRNG nonce, Base64url 43 ký tự trên wire và raw bytes trong signed message; UUID lowercase canonical, `MANAGER_DISPATCH_TOKEN`; nonce/replay/TTL/timeout còn chờ |
+| `SignerReadiness` | Context nội bộ `(worker_id,key_id,public_key_fingerprint,proof_expires_at)` dưới Worker+Listing lock | Fingerprint = SHA-256 **32 raw public-key bytes → 64 lowercase hex**; Manager memory only và invalidation; `P2B-DRT-29`, `P2C-SIGN-07/08` NOT_RUN |
+| E-C4 Verifier | **V-OUT**: TV3 verify ngoài UoW; TV2 khóa DB và recheck Inbox/hashes/key/signed parts | 4 rejection codes, DTO full `inbox_id/result_id`, nguyên bằng chứng và `extract_signed_parts_v1`; sửa normative TX-FINALIZE |
+| D-17 ingress deadline | **INSERT ... RETURNING id, received_at** sau Listing→Job lock; equal/late rollback toàn UoW | Real PostgreSQL/clock/race tests |
+| D-12 reputation | **UPSERT tại đóng góp thật đầu tiên**, chỉ SUCCESS/WORKER_FAULT +1, SYSTEM_FAULT/NONE không đổi | P2B-DRT-19 hai Jobs đồng thời cùng Worker; native-role test |
+
+**Chưa chốt:** D-02/E-C2, D-03/S-10, D-16/P2E-CACHE-GAP-01, D-06 repair port, phiên bản thuật toán khi deploy, incident lộ khóa, proof TTL/timeout và giới hạn cache. **Không đồng nhất G1 proof lựa chọn bảo mật với G1 docs gate của nhóm.** PR #50 vẫn là Draft, một nhánh `docs/phase2e-tv5-design` và không có production code. TV2/TV3 đã review SHA `c8c241c` với `ACK_WITH_ACTIONS`; cần họ cùng TV1/TV4 và **hai human L2 reviewers độc lập** xác nhận SHA mới cuối cùng. CI repository 4/4 không phải Phase 2 tests; PostgreSQL/native role/Ed25519/interoperability/concurrency/E2E đều `NOT_RUN`. Chưa có quyền merge, code hoặc kích hoạt runtime.
