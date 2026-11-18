@@ -1,15 +1,15 @@
 # Phase 2D — FIFO Scheduling and Listing Capacity (TV4) — v0.9 Deep Review
 
-> **Current review snapshot (2026-11-08):** Phase 1 PR #39 is merged; accepted `main` is `bee832eaf5463df20f6c6815174322871eb6685a` (see §7.1). The 2026-11-07 ledger records historical conditional decisions. This revision is **SELF_REVIEWED / AWAITING_CROSS_REVIEW**, not a completed owner/consumer ACK or coding authorization. Follow the docs-first workflow in §7.8.
+> **Current review snapshot (2026-11-19):** Phase 1 PR #39 is merged; accepted `main` is `bee832eaf5463df20f6c6815174322871eb6685a` (see §7.1). TV1 reviewed PR #48 @ `b3991189f0d9f543013e035b3a0637bd9a62be77` and returned `ACK_WITH_ACTIONS / HOLD DOCS GATE`. This revision addresses that request; it still requires exact-HEAD cross-owner ACKs and a separate leader merge decision. It is not coding authorization.
 
 > **Repository:** `SE2026-BC-04/gpu-resource-marketplace`  
-> **Version:** `0.9-docs-review-20261108` (stable filename retained; approved baseline remains conditional), updated 2026-11-08
+> **Version:** `0.9-docs-review-20261119` (stable filename retained; approved baseline remains conditional), updated 2026-11-19
 > **Existing baseline status:** `P2D-GATE-01 = APPROVED_DESIGN_CONDITIONAL`; **new v0.9 changes:** `PROPOSED_FOR_OWNER_REVIEW / PENDING_ACK / NOT_APPROVED_FOR_IMPLEMENTATION`.  
 > **Important:** These five Phase 2A-2E files are *design work packages for five team members*. Assignment below proposes documentation ownership; it does not approve new implementation rights, modify the architectural ownership of API/Manager/Simulator, or authorize coding.  
 > **Phase 2 start gate:** self-review and revise design → docs PR/cross-review → leader decision and merge docs → implementation by task. No independent policy, application/test code or runtime activation before the applicable docs/dependency gates are approved.
 
 > **Proposed documentation owner:** TV4 - Listings owner (`VietNguyen865`)  
-**Current review conclusion:** `SELF_REVIEWED / DOC_CORRECTIONS_PROPOSED / CROSS_REVIEW_PENDING / PHASE2_RUNTIME_NOT_RUN`. The earlier count of 14 P2 + 3 P3 findings is historical; it is not approval of this revision.
+**Current review conclusion:** `LEAD_ACK_WITH_ACTIONS_ADDRESSED / EXACT_HEAD_CROSS_REVIEW_PENDING / HOLD_DOCS_GATE / PHASE2_RUNTIME_NOT_RUN`. The earlier finding count and reviews on older SHAs are historical; neither is approval of this revision.
 
 ## 1. Goal and boundary
 
@@ -29,7 +29,7 @@ No advanced fair-share, backfilling, multi-Worker Job allocation, overcommit, Wo
 
 ## 2.1. Phase 2D architecture and delivery responsibility (review, not yet approved)
 
-**TV4 designs Listing-aware scheduling policy; Manager owns runtime execution.** Phase 2A has conditional design approval for three concurrent logical loops in one Manager process, with Scheduling as one loop. TV4 does not create a new service or a second independent Job lifecycle implementation. TV1 integrates the Scheduler; TV2 supplies DB transaction and grants; TV5 confirms Job/Attempt/Outbox handoff; TV3 confirms role/identity boundaries where affected. Phase 2A v0.9, Phase 2B v1.3 and Phase 2C v0.9 are conditionally owner-approved local review documents; their tests and cross-owner interfaces are not thereby verified. Their locally approved design revisions have not been pushed to GitHub.
+**TV4 designs Listing-aware pure policy; Manager owns runtime execution.** TV1 owns the Scheduler loop, bounded Listing scan, executor/configuration and integration. TV2 owns `TX-ALLOCATE`, its native DB Session, Worker/Listing/Job locks, SQL and atomic effects. Under those locks TV2 selects the authoritative FIFO-head Job by `enqueue_seq` and gives TV4's pure policy only an immutable scalar snapshot; TV4 opens no Session and performs no database mutation. TV5 confirms Job/Attempt/Outbox and release semantics; TV3 owns signer/key security. The current pushed design references are Phase 2A [#47 @ `001619d`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/47), Phase 2B [#46 @ `0ca059c`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46), Phase 2C [#49 @ `62bded7`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/49) and Phase 2E [#50 @ `edb247f8`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/50). Their conditional directions and technical ACKs do not by themselves close independent L2 review or authorize code.
 
 ### One Listing versus multiple Listings
 
@@ -253,7 +253,7 @@ All are planned against **real disposable PostgreSQL**, not PASS evidence. The P
 | PostgreSQL Listing adapter | `backend/src/gpu_marketplace/repositories/listings.py`, via merged #31; SQLAlchemy `READ COMMITTED` UoW and D7 guard | Must not infer Manager grants or native `session_user` proof from this API adapter; separate role verification is pending |
 | Phase 1 TX-SUBMIT | `backend/src/gpu_marketplace/repositories/job_submit.py` on #39: Listing `FOR UPDATE`; replay existing retained key/body even after PAUSED; creates Job+reference transactionally | New API Job submission does **not** allocate GPU, create Attempt/Outbox or guarantee execution |
 | Phase 2D code/runtime | **NOT_IMPLEMENTED / NOT_RUN in #39** | PR #39's CI (4 jobs successful) cannot be claimed as Phase 2 allocation or concurrency PASS |
-| Owner approvals | `P2D-OPEN-01/02/03`, `P2D-GATE-01`, Phase 2A/2B/2C conditional review | Precise Python ports, SQL, pool sizing, key-rotation locking, reviewer ACKs remain PENDING |
+| Owner approvals | `P2D-OPEN-01/02/03`, `P2D-GATE-01`; D-18/E-C3, G1 and Worker-first lock are `APPROVED_DESIGN_DIRECTION_CONDITIONAL`; lead revision request on #48 @ `b399118` | Precise Python ports, D-19, TTL/replay/restart, provisioning/compromise, pool sizing and exact-HEAD reviewer ACKs remain PENDING |
 
 **Ownership freeze (no duplicate implementation):** TV4 owns the *pure policy and FIFO correctness oracle* and presents a design/port to TV1; TV2 owns the PostgreSQL `TX-ALLOCATE` repository/UoW, locks, grants, constraints and rollback semantics; TV1 owns the Manager Scheduling loop, executor, bounded scan and integration; TV5 owns Job/Attempt/Outbox consumer invariants and final release; TV3 owns Worker key readiness/rotation security policy. A shared repo import does not move transaction ownership from Manager to the public API. Final code-file ownership/PR sequencing is `PENDING_ACK` among TV1/TV2/TV4/TV5; do not write competing scheduler or allocation services in parallel without agreement.
 
@@ -263,51 +263,62 @@ All are planned against **real disposable PostgreSQL**, not PASS evidence. The P
 
 Proposed bounded scanning, subject to TV1/TV2/TV4 ACK:
 
-1. Discover candidate **Listing IDs** in a stable order (e.g. `(gpu_listings.id)` ascending). A cursor records the last **inspected Listing**, not the last allocated Job. Continue after it and wrap at the end. It is a volatile optimization; never the authoritative business state.
-2. Bound both `max_listings_per_cycle` and total time/DB executor use per cycle. These are **not assigned numerical values here**; obtain a measured capacity/pool budget from TV1+TV2 before runtime implementation. A 2-second default is polling configuration only, not a start-time SLA or a promise to finish scanning the entire Listing table every tick.
-3. Every candidate gets its **own short `READ COMMITTED` `TX-ALLOCATE`**. The transaction re-reads `ACTIVE`, Job head and available capacity under Listing lock; an unlocked query or stale cursor is **never** an allocation authorization.
-4. A contended Worker/Listing/Job lock uses a bounded wait and returns `Noop(LOCK_BUSY)` after rollback; move to other Listings and reconsider the blocked one in later passes. The current TV1/TV2 contract does not use `SKIP LOCKED` on Listing or Job; never bypass the true Job head, use `OFFSET`, or substitute timestamp/UUID order.
-5. An unfit FIFO head produces **`BLOCKED_CAPACITY`** for that Listing and no mutation; the scan continues to other Listings. After a successful one-head allocation, commit and move on; another Job from the same Listing can be considered in a later separate transaction/cycle.
-6. On restart, rebuild eligibility from database rows and recover the cursor conservatively (a fresh scan is permitted). No in-memory cursor, race winner, lease or local clock authorizes duplicate reservation. Record `listing_id`, `head_job_id`, `enqueue_seq`, reason, cycle ID and counts in redacted observability logs (no oracle/secret data).
+1. Discover candidate **Listing IDs** from an unlocked DB hint in a stable order (initial proposal: `gpu_listings.id ASC`). The hint may prefer Listings likely to contain queued work before a G1 call, but it is never authorization and cannot replace the locked head/status/capacity/key checks in `TX-ALLOCATE`.
+2. A rotating cursor records the last **inspected Listing**, not the last allocated Job. Advance it after every inspected result, including `EMPTY`, `Blocked(HEAD_DOES_NOT_FIT)`, `Blocked(LISTING_NOT_ACTIVE)`, `Blocked(SIGNER_NOT_READY)` and `Noop(LOCK_BUSY)`. At the end, wrap to the beginning. A Listing inserted behind the current cursor is discovered after wrap; one inserted ahead may be discovered in the current pass. No Listing is permanently omitted.
+3. The cursor is volatile in-memory scan progress only. After restart, rebuild eligibility from PostgreSQL and begin a conservative fresh pass; no cursor, race winner, lease or local clock authorizes reservation. Continuous inserts do not create a snapshot guarantee.
+4. Bound `max_listings_per_cycle`, elapsed work, proof-call concurrency, executor use and DB-pool consumption. None receives a numeric value here; TV1+TV2+TV3+TV4+TV5 must measure and ACK the relevant budgets. The configurable 2-second cadence is not a Job-start SLA or a promise to finish the table each tick.
+5. Do not issue unbounded G1 HTTP calls for every Listing every two seconds. Use per-Worker readiness cached only within its approved TTL; invalidate on expiry, Manager restart, active-key/key-lifecycle change and other approved signer lifecycle events. A cache entry that is expired or does not match the active Worker key is unusable. Proof HTTP has bounded timeout/concurrency, runs before a UoW, and signer failure advances the cursor and permits other Listings to proceed; the blocked Listing is reconsidered later.
+6. Every candidate that reaches allocation gets its **own short `READ COMMITTED` `TX-ALLOCATE`**. TV2 re-reads Listing identity/status, selects the real FIFO head and checks capacity/key readiness under Worker → Listing → Job locks. A stale hint or proof cache is never allocation authorization.
+7. A contended Worker/Listing/Job lock uses a bounded wait and returns `Noop(LOCK_BUSY)` after rollback; advance to other Listings and reconsider the blocked Listing after wrap/later passes. Never use Listing/Job `SKIP LOCKED`, `OFFSET`, timestamps or UUIDs to bypass the true Job head.
+8. An unfit FIFO head returns `Blocked(HEAD_DOES_NOT_FIT)` without mutation and consumes only that Listing attempt, not the remaining cycle. After `Allocated`, commit and move on; a later transaction/cycle may consider the next head. Record only redacted IDs/result category/cycle counters—never proof, key, token or oracle bytes.
 
-**Design caution:** stable iteration with continuous writes and contended Listings does not by itself prove a bounded-wait guarantee. Acceptance must show observed progress with seeded `listings > cycle_budget`, blocked/PAUSED Listings and repeated cycles. Do not invent absolute fairness latency or new persistent scheduler cursor table.
+**Design caution:** stable iteration with continuous writes and contended Listings does not by itself prove a bounded-wait guarantee. Acceptance must include `listings > cycle_budget`, a continuously locked Listing, an oversized head, PAUSED/signer-blocked Listings, a Listing inserted on each side of the current cursor, wrap-around and Manager restart. Do not invent absolute fairness latency or a persistent scheduler cursor table, and do not let Scheduler/proof work exhaust Dispatcher or Finalizer executor/DB capacity.
 
 ### 7.3. Single UoW TX-ALLOCATE and proposed result port
 
-The following is **pseudocode**, not executable SQL or a new frozen Python signature:
+The following is **pseudocode**, not executable SQL or a frozen Python signature. It freezes ownership and the two-level result vocabulary: TV4 policy returns an assessment; only TV2's committed UoW returns allocation outcomes.
 
 ```text
-allocate_one_listing(listing_id, signer: SignerReadiness) -> AllocationDecision
-  one TV2 native gpm_manager_app Session / one READ COMMITTED UoW
-  obtain fresh authenticated G1 signer proof before the UoW; no HTTP inside it
-  begin; acquire shared Worker advisory lock, then lock and recheck Listing
-  re-read Listing status and allocated/total capacity
-  if not ACTIVE: no mutation -> INACTIVE_LISTING (cleanup/result mapping pending ACK)
-  select first still-QUEUED Job by enqueue_seq ASC LIMIT 1 FOR UPDATE
-      (NEVER SKIP LOCKED on Job rows)
-  if none: commit no-op -> EMPTY_QUEUE
-  recheck exactly one active key and proof worker/key/fingerprint/expiry against DB time
-  if proof/key invalid: commit no-op -> Blocked(SIGNER_NOT_READY)
-  if head GPUs > total - allocated: commit no-op -> BLOCKED_CAPACITY(head_id)
+TV1 Scheduler (bounded loop):
+  scan stable Listing-ID hints from rotating in-memory cursor
+  advance cursor after every inspected Listing; wrap at end
+  obtain/cache bounded G1 proof per Worker outside any DB UoW
+  if unavailable/expired/key-mismatched: record SIGNER_NOT_READY; continue; revisit later
+  call TV2.allocate_one_listing(listing_id, SignerReadiness)
+
+TV2 allocate_one_listing(listing_id, signer):
+  create one native gpm_manager_app Session / one READ COMMITTED UoW
+  acquire shared Worker advisory lock; lock/recheck Listing; lock true FIFO-head Job
+  select head by enqueue_seq ASC LIMIT 1 FOR UPDATE (NEVER SKIP LOCKED)
+  build immutable scalar PolicySnapshot(listing_status,total,allocated,head_id,
+      head_enqueue_seq,head_requested_gpu_count) -- no ORM row or Session escapes
+  assessment = TV4.assess(snapshot)  // pure: ELIGIBLE | EMPTY |
+                                     // HEAD_DOES_NOT_FIT | LISTING_NOT_ACTIVE
+  EMPTY -> COMMIT no-op -> Noop(NO_QUEUED_HEAD)
+  LISTING_NOT_ACTIVE -> COMMIT no-op -> Blocked(LISTING_NOT_ACTIVE)
+  HEAD_DOES_NOT_FIT -> COMMIT no-op -> Blocked(HEAD_DOES_NOT_FIT)
+  missing Listing or lock_timeout -> ROLLBACK -> Noop(LISTING_NOT_FOUND | LOCK_BUSY)
+  recheck sole active key + signer worker/key/fingerprint + DB-time expiry under locks
+  mismatch -> COMMIT no-op -> Blocked(SIGNER_NOT_READY)
+  ELIGIBLE is not allocation success and does not authorize HTTP
   trusted t = clock_timestamp() AFTER required locks
-  conditional update Listing allocated_gpu_count += head.requested_gpu_count
-  conditional update exact Job QUEUED -> RUNNING, started_at=t
-  insert exactly one active Allocation for Job; one stable Execution Attempt
-  insert one EXECUTE_JOB Outbox event, immutable dispatch payload and due time
-  persist finish_due_at=t+duration_seconds and hard_deadline_at=finish_due_at+120s
-  commit all changes ATOMICALLY; return ALLOCATED(job_id,attempt_id,event_id)
-  any failed insert/guard -> rollback entire UoW; NO remote HTTP inside DB TX
+  guarded increment gpu_listings.allocated_gpu_count
+  guarded exact Job QUEUED -> RUNNING; insert one Allocation, Attempt and Outbox event
+  persist fixed finish_due_at and hard_deadline_at; COMMIT atomically
+  return Allocated(job_id, attempt_id, event_id) only after known COMMIT
+  unknown COMMIT -> CommitOutcomeUnknown(listing_id,job_id,attempt_id,event_id)
+  NO proof/HTTP call and no second Session while locks/UoW are open
 ```
 
-**Erratum X-01:** `reserved_gpu_count` in the previous §7.3 pseudocode was a typo; the actual field is `gpu_listings.allocated_gpu_count`. TV1 confirms it in #47 @ `001619d`, and TV2 records it in #46 @ `20d67c8`. This changes no schema; exact-SHA cross-owner ACK and merging the corrected source remain pending.
+**Erratum X-01:** `reserved_gpu_count` in the previous §7.3 pseudocode was a typo; the actual field is `gpu_listings.allocated_gpu_count`. TV1 confirms it in #47 @ `001619d`, and TV2 records it in #46 @ `0ca059c`. This changes no schema; exact-SHA cross-owner ACK and merging the corrected source remain pending.
 
-**Proposed typed port (TV2 #46 @ `20d67c8`, TV1 #47 @ `001619d`):** `Allocated(job_id,attempt_id,event_id)`; `Blocked(LISTING_NOT_ACTIVE|HEAD_DOES_NOT_FIT|SIGNER_NOT_READY)`; `Noop(NO_QUEUED_HEAD|LISTING_NOT_FOUND|LOCK_BUSY)`; `CommitOutcomeUnknown(listing_id,job_id,attempt_id,event_id)`. Exact source/consumer ACKs and failure mapping remain pending; no runtime port is implemented.
+**Frozen vocabulary proposed for exact-SHA ACK (TV2 #46 @ `0ca059c`, TV1 #47 @ `001619d`):** TV4's pure `PolicyAssessment` is only `ELIGIBLE | EMPTY | HEAD_DOES_NOT_FIT | LISTING_NOT_ACTIVE`. TV2 maps it and transaction conditions to `Allocated(job_id,attempt_id,event_id)`; `Blocked(LISTING_NOT_ACTIVE|HEAD_DOES_NOT_FIT|SIGNER_NOT_READY)`; `Noop(NO_QUEUED_HEAD|LISTING_NOT_FOUND|LOCK_BUSY)`; or `CommitOutcomeUnknown(listing_id,job_id,attempt_id,event_id)`. Do not expose `ALLOCATED`, `EMPTY_QUEUE`, `BLOCKED_CAPACITY` or `INACTIVE_LISTING` as a second UoW outcome set. No runtime port is implemented.
 
-**No-op baseline:** approved Database Design §11.3 A already specifies **COMMIT no-op** for an empty queue or insufficient head capacity. Preserve that behavior; it is not an open choice to substitute a rollback. TV2 must align the port/cleanup semantics with that source. Cleanup for inactive/missing/lock-busy outcomes and resource release on every exit still need explicit ACK. A policy-only `ELIGIBLE` assessment, if used later, is not `ALLOCATED` and cannot authorize dispatch.
+**Cleanup baseline:** `EMPTY`, `HEAD_DOES_NOT_FIT`, `LISTING_NOT_ACTIVE` and `SIGNER_NOT_READY` COMMIT no-op with zero business writes; missing Listing and `LOCK_BUSY` roll back/close the Session. A pure `ELIGIBLE` assessment is not `Allocated`, cannot authorize dispatch and carries no live ORM/Session. `DependencyUnavailable` remains a sanitized exception, not a policy/UoW business outcome.
 
 **Mandatory correctness guards:** `jobs.id`, `jobs.listing_id`, `jobs.worker_id` remain immutable; one Job has **at most one** Allocation, Attempt and EXECUTE_JOB event (`UNIQUE`/FK as specified by Database Design); `allocated_gpu_count` reflects `SUM(active allocations.gpu_count)` after commit; no caller may open a second Session to finish an in-flight partial transaction. Do not hand a live ORM entity/locked Session across `asyncio.to_thread`/executor or across TV1/TV2 service boundaries. The short DB UoW is owned entirely within one synchronous worker call.
 
-**Commit uncertainty:** a confirmed rollback can be retried only by a fresh DB read and contract-approved bounded policy. An **unknown COMMIT outcome** (lost acknowledgement/connection, PostgreSQL `40003`, unknown SQLSTATE) is **not** permission for a blind re-allocation. Reconcile committed rows from a new trusted Session using Job/Allocation/Attempt/Outbox uniqueness. If the outcome remains uncertain, fail closed and surface safe operational evidence; do not return `ALLOCATED` without a reliable committed state and do not advance capacity twice. Mapping and safe retry budget are `PENDING_ACK` with TV1/TV2/TV5, while the no-blind-retry invariant is inherited from #39.
+**Commit uncertainty:** after `CommitOutcomeUnknown(listing_id,job_id,attempt_id,event_id)`, TV1 calls TV2's fresh-session read `reconcile_allocation(expected=(listing_id,job_id,attempt_id,event_id))`. `AllocationCommitted` requires the complete durable Attempt/Allocation/Outbox graph and all four IDs equal, even if the Job is now terminal and the Allocation `RELEASED`. `AllocationNotCommitted` requires the whole graph absent and the Job still `QUEUED`. A partial/contradictory graph, advanced Job without the graph, or any Listing/Attempt/Event ID mismatch is `AllocationUnknown`: alert/fail closed, no blind retry, no new Attempt/Event and no second capacity delta. A definite rollback may enter only the separately bounded retry path approved by TV1/TV2.
 
 ### 7.4. Interaction with Listing edit, Cancel, Dispatch and Finalization
 
@@ -324,9 +335,9 @@ allocate_one_listing(listing_id, signer: SignerReadiness) -> AllocationDecision
 
 **Outbox fencing nuance:** Outbox claim/ACK/retry is its own short **Outbox-only** DB transaction. Never keep an Outbox lock and then acquire a Listing/Job lock (or vice versa) across a network call. A stale dispatch call may still arrive; the Simulator checks Attempt/request identity and the API/Manager enforce no second business effect. `lease_version` fences DB state writes by a stale dispatcher; it does **not** cancel an already sent HTTP request.
 
-**Signer readiness, conditional direction:** TV1 obtains authenticated G1 nonce proof outside any UoW and passes in-memory `SignerReadiness(worker_id,key_id,public_key_fingerprint,proof_expires_at)`; fingerprint is lowercase SHA-256 hex of the 32 raw public-key bytes. No fresh proof means no port call; report `Blocked(SIGNER_NOT_READY)`. Under Worker+Listing locks TV2 rechecks Worker, sole active key, fingerprint and `clock_timestamp() < proof_expires_at`, failing closed without writes. The proof endpoint requires L2 API reconciliation; TTL/replay, restart-inside-TTL, compromise and provisioning remain open. Invalidation on key/lifecycle change, expiry or Manager restart does not prove an unknown Simulator restart cannot occur inside TTL. All runtime tests remain `NOT_RUN`.
+**Signer readiness, conditional direction:** TV1 obtains authenticated G1 nonce proof outside any UoW and passes in-memory `SignerReadiness(worker_id,key_id,public_key_fingerprint,proof_expires_at)`; fingerprint is lowercase SHA-256 hex of the 32 raw public-key bytes. Unlocked queued-work hints may suppress obviously unnecessary proof calls but never authorize allocation. Proof calls have bounded timeout and concurrency, are cached per Worker only within the approved TTL, and are invalidated on expiry, Manager restart, active-key/key-lifecycle change and other approved signer lifecycle signals. An expired or key-mismatched cache entry is unusable. No fresh proof means no port call; report `Blocked(SIGNER_NOT_READY)`, continue other Listings and revisit this one later. Under Worker+Listing locks TV2 rechecks Worker, sole active key, fingerprint and `clock_timestamp() < proof_expires_at`, failing closed without writes. The endpoint, numeric budgets, TTL/replay/nonce freshness, Simulator restart inside TTL, unavailable-signer recovery, compromise and provisioning remain OPEN for TV1/TV2/TV3/TV4/TV5/lead ACK. No HTTP runs under locks. All runtime tests remain `NOT_RUN`.
 
-**Repair scope:** normal Outbox claim/ACK use Outbox-only short UoWs. TV2's separate `B-IF-06R` ACKED-receipt repair is `PROPOSED_FOR_ACK`, not approved; its proposed lock order is Listing -> Job -> Outbox with HTTP only after commit, same Attempt/event/immutable payload, no reservation or deadline extension, including when Listing is PAUSED. TV1/TV2/TV5 and the lead must approve the port, privileges and races; do not assume an old dispatch lease is reused.
+**TV4 boundary disposition for D-19: `ACK_COMPATIBLE`, not approval.** PAUSED blocks only new allocation. Normal Outbox claim/ACK/retry remains Outbox-only and reuses the committed Attempt/event/payload. TV2's separate `B-IF-06R` ACKED missing-receipt repair remains `PROPOSED_FOR_ACK`; its proposed lock order is Listing → Job → Outbox with HTTP only after COMMIT, a separate repair fence/lease, the same immutable identity/payload, no reservation and no deadline extension. TV4 owns neither repair SQL, columns/grants/guards, HTTP client nor Finalizer. TV1/TV2/TV5 and the lead must freeze D-19 before code; do not infer approval from this compatibility statement.
 
 ### 7.5. Required two-session and bounded-scheduler evidence (additional test designs; `NOT_RUN`)
 
@@ -339,14 +350,14 @@ Existing `P2D-TX-01..12`, `P2D-RACE-01..08`, `P2D-SCHED-01..05`, `DBTX-*` and `A
 | `P2D-DRT-03` | Queue head needs 4 GPUs with 2 free and later needs 1; another Listing has fitting head | Both Jobs on blocked Listing remain QUEUED, other Listing progresses, no phantom capacity delta |
 | `P2D-DRT-04` | Cancel current FIFO head before Scheduler lock; inspect next cycle | Cancelled head is excluded; next earliest still-QUEUED Job may allocate if capacity permits, with one set of child records |
 | `P2D-DRT-05` | Inject constraint failure after Listing counter/Job status write | Zero partial Allocation/Attempt/Outbox/Job RUNNING/counter effects after rollback |
-| `P2D-DRT-06` | Drop COMMIT ACK after durable TX-ALLOCATE success, then retry orchestration | Reconciliation finds same Job/Attempt/Outbox/Allocation; no second reservation or new event |
+| `P2D-DRT-06` | Drop COMMIT ACK after durable TX-ALLOCATE success; reconcile with expected `(listing_id,job_id,attempt_id,event_id)` and repeat with a different expected Event ID | Exact complete graph returns `AllocationCommitted` even after terminal/release; Event-ID mismatch returns `AllocationUnknown`; no second reservation/Attempt/Event |
 | `P2D-DRT-07` | PAUSE commits just after allocation, then dispatch 202 lost | Re-dispatch same event/Attempt without another counter delta or deadline extension; eventual final effect once |
 | `P2D-DRT-08` | Competing UPDATE/PATCH capacity reduction vs allocation in both commit orders | Existing Listing capacity/queued max guards respected; no allocated count > total |
-| `P2D-DRT-09` | Hundreds of Listings with a bounded scan and blocked head at beginning; restart scanner | Per-cycle budget respected, eligible later Listing observed within tested fair passes, no duplicate allocation after restart |
-| `P2D-DRT-10` | Saturate slow SQL worker calls while dispatcher/finalizer due | Scheduling does not monopolize shared connection pool/executor; no deadlock/starvation under agreed budget |
+| `P2D-DRT-09` | Listings exceed cycle budget; one is continuously locked, one has oversized head; add Listings before/after current cursor; wrap and restart | Cursor advances after every outcome, wraps, discovers new rows without starvation, eligible Listings progress and restart causes no duplicate allocation |
+| `P2D-DRT-10` | Saturate slow SQL and signer-proof calls while Dispatcher/Finalizer are due | Proof/scan timeout and concurrency budgets hold; Scheduler does not monopolize HTTP/executor/DB pool; other Listings and due loops progress |
 | `P2D-DRT-11` | Two independent Manager scheduler sessions claim same Listing simultaneously | At most one successful allocation per unique queued head; no overcommit or duplicate Attempt/Outbox |
 | `P2D-DRT-12` | Planned K1→K2 rotation while queued jobs and running attempts exist | Key quiescence policy and new-allocation handling match **separately approved** TV3/TV5 signer-readiness contract; `BLOCKED` until ACK |
-| `P2D-DRT-13` | Manager crash before and after allocation COMMIT; restart | Before: no side effects; after: exactly one persisted allocation/Attempt/Outbox and one eventual dispatch |
+| `P2D-DRT-13` | Manager crash before/after allocation COMMIT; reconcile complete, absent, partial and wrong-ID graphs | Before/absent+QUEUED is `AllocationNotCommitted`; exact graph is `AllocationCommitted`; partial or any wrong ID is `AllocationUnknown`; never blind retry |
 | `P2D-DRT-14` | Native API role attempts Manager-only TX-ALLOCATE; native Manager role runs legal allocation | API allocation writes denied; authorized Manager transaction behaves per contract; no owner/SET ROLE bypass |
 | `P2D-DRT-15` | Stale Outbox dispatcher lease after new fencing claim | Old worker cannot ACK/modify new lease, and no duplicate business allocation/finalization occurs |
 
@@ -354,17 +365,17 @@ Existing `P2D-TX-01..12`, `P2D-RACE-01..08`, `P2D-SCHED-01..05`, `DBTX-*` and `A
 
 ### 7.6. Cross-owner ACK matrix and implementation-entry gates
 
-| Interface/gate ID | Source/consumer decision to record | Required reviewers | State |
+| Interface/gate ID | Producer → consumers; exact reference | Required reviewers | State |
 |---|---|---|---|
-| `D-IF-01` | Pure FIFO policy and allocation result categories/fields, no duplicated scheduler | TV1 + TV2 + TV4 + TV5 | `PENDING_ACK` |
-| `D-IF-02` | One synchronous, bounded UoW + native Manager role/ACL + lock/commit uncertainty | TV1 + TV2 + TV4 | `PENDING_ACK` |
-| `D-IF-03` | Stable Listing locator/cursor, bounded lock wait and cross-Listing progress; no Listing/Job SKIP LOCKED | TV1 + TV2 + TV4 | `PENDING_ACK` |
-| `D-IF-04` | Scheduler 2s config, work/time budget, executor/DB pool and health metrics | TV1 + TV2 + TV4 | `PENDING_PARAMS` |
-| `D-IF-05` | PAUSED RUNNING resend uses same Attempt/event/payload; proposed separate ACKED repair fence, not necessarily same lease | TV1 + TV2 + TV4 + TV5 | `PENDING_ACK / D-19 OPEN` |
-| `D-IF-06` | Cancel/Pause/Capacity edit vs TX-ALLOCATE barriers and error mapping | TV2 + TV4 + TV5 | `PENDING_ACK` |
-| `D-IF-07` | Conditional D-18 Worker-first lock/G1 readiness and planned two-key quiescence; separate emergency incident policy | TV1 + TV2 + TV3 + TV4 + TV5 | `DIRECTION_APPROVED_CONDITIONAL / EXACT_SHA_ACK_PENDING` |
-| `D-IF-08` | Allocation release/finalization/timeout counter reconciliation and retry | TV1 + TV2 + TV4 + TV5 | `PENDING_ACK` |
-| `D-IF-09` | Acknowledge merged main/Phase 1 barrier evidence and record disposition of remaining audit follow-up | TV1 + TV2 + TV4 + TV5 | `PENDING_ACK / AUDIT_DISPOSITION_PENDING` |
+| `D-IF-01` | TV4 pure snapshot/assessment → TV2 mapping and TV1 orchestration; #46 `0ca059c`, #47 `001619d` | TV1 + TV2 + TV4 + TV5 | `PENDING_EXACT_HEAD_ACK` |
+| `D-IF-02` | TV2 UoW/native role/lock/cleanup/reconciliation → TV1/TV4; #46 `0ca059c` | TV1 + TV2 + TV4 | `PENDING_EXACT_HEAD_ACK` |
+| `D-IF-03` | TV4+TV1 stable rotating cursor and revisit semantics → TV2 integration | TV1 + TV2 + TV4 | `PENDING_EXACT_HEAD_ACK` |
+| `D-IF-04` | TV1 resource configuration → TV2/TV4; 2s default fixed, numeric proof/scan/time/executor/DB budgets not fixed | TV1 + TV2 + TV4 | `PENDING_PARAMS / MEASUREMENT` |
+| `D-IF-05` | TV1/TV2/TV5 same-Attempt retry and proposed `B-IF-06R` → TV4 PAUSED boundary; #46 `0ca059c` | TV1 + TV2 + TV4 + TV5 | `TV4_ACK_COMPATIBLE / D-19 OPEN / EXACT_HEAD_ACK_PENDING` |
+| `D-IF-06` | TV2+TV4 Listing/Cancel/Allocate race and error mapping → TV5 lifecycle | TV2 + TV4 + TV5 | `PENDING_EXACT_HEAD_ACK` |
+| `D-IF-07` | TV3 G1/key policy + TV2 Worker/key recheck + TV1 bounded proof calls → TV4/TV5; #49 `62bded7`, #46 `0ca059c` | TV1 + TV2 + TV3 + TV4 + TV5 | `APPROVED_DESIGN_DIRECTION_CONDITIONAL / EXACT_HEAD_ACK_PENDING` |
+| `D-IF-08` | TV2/TV5 release/finalization/timeout reconciliation → TV1/TV4; #46 `0ca059c`, #50 `edb247f8` | TV1 + TV2 + TV4 + TV5 | `PENDING_EXACT_HEAD_ACK` |
+| `D-IF-09` | TV1/TV2 Phase 1 baseline/native-role/audit disposition → TV4/TV5 | TV1 + TV2 + TV4 + TV5 | `BASELINE_RECORDED / AUDIT_DISPOSITION_PENDING` |
 
 **Docs gate before code:** finish self-review/corrections, obtain affected source/consumer ACKs and independent cross-review, resolve blocking choices, then obtain the leader's decision and merge the docs PR. This applies to the pure policy too; a prototype or green CI cannot open the gate. Before the relevant code task starts: (i) freeze merged main/migration/role baseline and audit disposition; (ii) ACK the concrete TV2 port and lock/commit boundary for dependent tasks; (iii) resolve signer readiness before allocation integration; (iv) agree scan/work/pool parameters before runtime scanning. Follow §7.8 rather than using one implementation branch for the whole Phase.
 
@@ -388,10 +399,10 @@ Owner/consumer ACKs and remaining gaps:
 
 - **Preserved (owner-approved):** strict per-Listing FIFO, Listing-before-Job row locking, one Listing per `TX-ALLOCATE`, PAUSED RUNNING dispatch repair, configurable 2s scan, 18 total database tables, 5 runtime services, immutable Job and Attempt identities. Conditional D-18 adds a Worker advisory lock before allocation's Listing lock.
 - **Clarified in v0.9:** split TV1/TV2/TV4/TV5 ownership, proposed scan/cursor semantics, bounded executor limits, typed allocation outcomes, commit-unknown reconciliation, stale Outbox fencing, signer readiness interface and deterministic evidence.
-- **Still undecided:** concrete adapter signature/port, numerical budget/pool limit, complete key-rotation SQL and separate compromised-key response, exact `LOCK_BUSY`/`DEPENDENCY_UNAVAILABLE` retry policy. Preserve as `PENDING` until source/consumer ACK and any required owner change control.
+- **Still OPEN:** numerical G1/scan/time/executor/DB pool/lock/statement budgets; G1 TTL/nonce/replay and restart-inside-TTL; provisioning identity and unavailable-signer recovery; compromised-key response; D-19 repair columns/grants/guards; exact `LOCK_BUSY`/`DependencyUnavailable` orchestration; D-09 index; audit disposition. Preserve them as `PENDING` until source/consumer ACK and required L2 change control.
 - **Runtime status:** official Phase 2D PG/Scheduler acceptance IDs remain `NOT_RUN`; PR #39's Phase 1 CI and prototype #45's policy unit results do not close those IDs. The prototype remains on hold pending docs approval.
 
-### 7.8. Self-review and docs-first delivery — 2026-11-08
+### 7.8. Self-review and docs-first delivery — updated 2026-11-19
 
 **Workflow:** self-review → `docs/phase2d-design-review` → cross-review/corrections → leader approves and merges docs → one code task/branch/PR at a time. Each subsequent task starts from latest `main`, with its own scoped tests and review; independent tasks may run in parallel only after their design/dependency approval. No self-merge. [Prototype #45 is Draft/HOLD](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/45#issuecomment-6721101443); it is not the docs PR or an approved implementation baseline.
 
@@ -412,3 +423,17 @@ Owner/consumer ACKs and remaining gaps:
 4. **TV1+TV2+TV5 with TV4 (`D-IF-05/06/08/09`):** ACK same-Attempt PAUSED repair, both-order Cancel/Pause/Resize races and exactly-once release. Record the existing audit follow-up disposition separately from the now-merged baseline and completed Phase 1 barriers.
 
 **Review evidence:** link/file consistency and schema/design comparison only. All Phase 2 runtime, PG races and performance tests remain `NOT_RUN` (signer-dependent scenarios `BLOCKED` until contract approval). Self-review, CI and Codex advice do not count as independent human approval. The docs PR must record exact reviewed SHA, cross-owner ACKs and the leader's closure/merge decision before code resumes.
+
+### 7.9. TV1 revision-request mapping and handover — 2026-11-19
+
+| Request | Change in this revision | Status after edit |
+|---|---|---|
+| `P1-01` pure policy ↔ UoW | §2.1 and §7.3 freeze TV1/TV2/TV4 ownership, immutable `PolicySnapshot`, four policy assessments and one `B-IF-06` UoW outcome vocabulary | `PROPOSED_FOR_EXACT_HEAD_ACK` |
+| `P1-02` bounded signer proof | §7.2/§7.4 add unlocked hints, per-Worker TTL cache/invalidation, bounded timeout/concurrency, cross-Listing progress and no HTTP under UoW | interface frozen; numeric budgets `PENDING_PARAMS` |
+| `P2-03` scan/fairness | §7.2 advances cursor after every outcome, wraps, defines restart/new-Listing behavior and protects Dispatcher/Finalizer resources | `PROPOSED_FOR_EXACT_HEAD_ACK` |
+| `P2-04` unknown COMMIT | §7.3 defines the expected four IDs and all three reconciliation outcomes; `P2D-DRT-06/13` include wrong Event ID/partial graph | `PROPOSED_FOR_EXACT_HEAD_ACK` |
+| `P2-05` D-19 boundary | §7.4 records TV4 `ACK_COMPATIBLE` only; normal Outbox and separate proposed repair port/lease remain distinct | D-19 remains `OPEN / NOT_APPROVED` |
+| `P2-06` document reconciliation | top snapshot, §2.1, §7.1, §7.6–7.8 use pushed SHAs and conditional-decision labels; X-01 remains `allocated_gpu_count` | done in TV4 docs; producer ACKs pending |
+| `P2-07` tests/handoff | Existing test families retained; §7.5 adds proof bounds, wrong Event ID, continuously locked/new Listing and wrap-around cases; handoff mirrors this matrix | all runtime/PG/performance tests `NOT_RUN` |
+
+**Next gate:** publish the new exact HEAD and request scoped ACKs from TV1 (`D-IF-01..09`, budgets/integration), TV2 (`D-IF-01..06/08/09`, #46 compatibility), TV3 (`D-IF-07`), TV5 (`D-IF-01/05..08`) and the lead for independent L2/docs-gate closure. A technical ACK on a boundary is not a substitute for the required independent human reviews. No source code, migration, config or PR #45 change belongs to this revision.
