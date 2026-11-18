@@ -35,7 +35,7 @@ No advanced fair-share, backfilling, multi-Worker Job allocation, overcommit, Wo
 
 **Existing invariant, not open for redesign:** FIFO is strictly ordered by `jobs.enqueue_seq` *within each Listing*. There is no cross-Listing global Job FIFO requirement and no permission to skip an unfittable head Job merely to fill unused GPUs.
 
-**Approved P2D-OPEN-01 (2026-11-07):** exactly **one Listing per short `TX-ALLOCATE` transaction**, while one scheduler tick may handle several Listings in separate transactions, subject to a bounded work/time budget. This isolates contention and rollbacks across unrelated Listings. If multiple Scheduler executors ever contend, `SKIP LOCKED` may be used **only to distribute Listing claims**, never to bypass locked queued Jobs.
+**Approved P2D-OPEN-01 (2026-11-07):** exactly **one Listing per short `TX-ALLOCATE` transaction**, while one scheduler tick may handle several Listings in separate transactions, subject to a bounded work/time budget. The current TV1/TV2 contract uses an unlocked Listing locator and bounded lock wait; `SKIP LOCKED` is not used for Listing or FIFO-head Job locks. Outbox claim is a separate independent-row use.
 
 ### Proposed algorithm and transaction boundaries
 
@@ -64,7 +64,7 @@ No advanced fair-share, backfilling, multi-Worker Job allocation, overcommit, Wo
 
 ## 2.3. Concurrency truth table — PAUSE / CANCEL / ALLOCATE (approved baseline, no new decision)
 
-All operations that contend for the same Listing serialize by **Listing-first** locking and recheck their preconditions under the lock. PostgreSQL `READ COMMITTED` and the existing `TX-PAUSE-EDIT`, `TX-CANCEL`, `TX-ALLOCATE` contracts are authoritative; this table only makes their accepted consequences explicit.
+All operations that contend for the same Listing serialize on that row and recheck their preconditions. Under conditional D-18, allocation first takes a Worker advisory lock; applicable row locks still use Listing before Job. The source lock-order supersession and exact ACKs remain pending.
 
 | Race / case | Winner commits first | Required committed outcome |
 |---|---|---|
@@ -118,7 +118,7 @@ All operations that contend for the same Listing serialize by **Listing-first** 
 
 ## 2.5. `P2D-OPEN-03` — APPROVED: configurable 2-second Scheduler scan (2026-11-07)
 
-**Context:** Phase 2A approved a separate Scheduling loop alongside Dispatch/Retry and Finalization. ADR-005 fixes a **2-second dispatch/outbox/receipt/fallback poll**, which is distinct from the Scheduler cadence now approved in `P2D-OPEN-03`. FIFO order and Listing-first transaction locking remain binding regardless of timer choice. The numeric work budget and DB resource sizing still require review by TV1 (runtime), TV2 (DB concurrency/pool), and TV4 (scheduling).
+**Context:** Phase 2A approved a separate Scheduling loop alongside Dispatch/Retry and Finalization. ADR-005 fixes a **2-second dispatch/outbox/receipt/fallback poll**, distinct from Scheduler cadence `P2D-OPEN-03`. FIFO and Listing-before-Job row locking remain binding; conditional D-18 adds the Worker advisory lock before allocation's Listing lock. Numeric budgets remain pending TV1/TV2/TV4 review.
 
 | Option | Proposed cadence | Pros / trade-offs |
 |---|---|---|
@@ -143,7 +143,7 @@ All are design-only (`NOT_RUN`). TV1/TV2/TV4 must agree the work/time budget and
 
 ## 3. Proposed scheduling algorithm (restatement of approved design)
 
-1. Manager finds an eligible Listing and locks its row first; multiple scheduling instances may distribute **Listing** claims using `SKIP LOCKED` if needed.
+1. Manager locates an eligible Listing without locking; allocation acquires the Worker shared advisory lock, then its Listing row with a bounded wait. Current TV1/TV2 design uses no Listing `SKIP LOCKED`.
 2. Under that Listing lock, select the *earliest still-QUEUED Job* by ascending `enqueue_seq`. Never apply `SKIP LOCKED` to skip a locked Job head. If the head is too large for free capacity, do **not** schedule a smaller later Job.
 3. Reject allocation when Listing is `PAUSED`, or when `requested_gpu_count > free capacity`. Re-evaluate all predicates after acquiring locks; trust persisted DB state.
 4. Atomically increment `allocated_gpu_count`, transition head Job to `RUNNING`, insert one `allocations`, `execution_attempts` and stable `execution_outbox` row, then commit. A partial commit is invalid.
@@ -216,12 +216,12 @@ Owner decision on PR #39 explicitly resolves the earlier Submit/PAUSED ambiguity
 - Default scan cadence is **2 seconds configurable** (`P2D-OPEN-03` owner-approved), not a 2-second job-start SLA. Keep one Listing in each allocation transaction (`P2D-OPEN-01`).
 - Within a locked ACTIVE Listing, choose the smallest queued `enqueue_seq`; do not use `FOR UPDATE SKIP LOCKED` on the Job head and then run a later smaller Job. If head needs more GPUs than free capacity, do not allocate later Jobs from the same Listing.
 - Avoid whole-system starvation: use a **bounded listing batch** and a rotating stable cursor/fair round-robin over Listings across scheduler ticks. Continue to other Listings when one head is capacity-blocked; do not loop hot on a single blocked head.
-- Lock order remains Listing -> Job; PAUSED and Cancel/Allocate transactions recheck current state after their locks. Outbox dispatch retry does not allocate again, and must not acquire a new Listing reservation.
+- `TX-ALLOCATE` takes Worker advisory shared -> Listing -> Job under the conditional D-18 direction; PAUSED/Cancel recheck state under their applicable Listing -> Job locks. Dispatch retry never creates a reservation.
 - The concrete `listing_scan_budget`, DB pool/executor budget and cross-Listing cursor details are proposed, to be chosen and ACKed by TV1/TV2/TV4 after load testing; do not invent a performance guarantee.
 
 ### D3. Planned key rotation vs allocation race
 
-The approved planned K1->K2 policy waits for related RUNNING work to quiesce. A **race-safe operational recipe to review** is: pause all of that Worker's relevant Listings using existing Listing state transitions; drain RUNNING attempts to terminal/timeout; acquire Listing locks in a stable order and verify there is no RUNNING attempt before controlled key retirement/activation; confirm K2 signing material is provisioned before resuming Listings. If checks fail, do not rotate and do not resume automatically. TV2/TV3/TV4/TV5 must review lock order and role permissions; this is not yet a validated SQL protocol.
+**Current conditional D-18/E-C3 direction:** a per-Worker shared advisory transaction lock precedes Listing -> Job in allocation; registration/activation use the exclusive Worker lock. Two active key rows persistently block new allocations while RUNNING Attempts drain. Activation requires exactly {K1,K2}, trusted K2 readiness and no RUNNING Attempt; failed deployment restores a usable K1 signer before removing the fence. Preserve historical verification keys. This supersedes the earlier pause-all recipe as the proposed rotation protocol; normative source reconciliation, exact-SHA ACKs and native-role tests remain pending.
 
 ### D4. Required two-session tests
 
@@ -266,7 +266,7 @@ Proposed bounded scanning, subject to TV1/TV2/TV4 ACK:
 1. Discover candidate **Listing IDs** in a stable order (e.g. `(gpu_listings.id)` ascending). A cursor records the last **inspected Listing**, not the last allocated Job. Continue after it and wrap at the end. It is a volatile optimization; never the authoritative business state.
 2. Bound both `max_listings_per_cycle` and total time/DB executor use per cycle. These are **not assigned numerical values here**; obtain a measured capacity/pool budget from TV1+TV2 before runtime implementation. A 2-second default is polling configuration only, not a start-time SLA or a promise to finish scanning the entire Listing table every tick.
 3. Every candidate gets its **own short `READ COMMITTED` `TX-ALLOCATE`**. The transaction re-reads `ACTIVE`, Job head and available capacity under Listing lock; an unlocked query or stale cursor is **never** an allocation authorization.
-4. If a Listing lock is already owned, a `SKIP LOCKED` Listing-only claim may move the current scan onward **without trying to skip that Listing's FIFO Job**. A skipped Listing must remain eligible on later passes. Never use Job-level `SKIP LOCKED`, `OFFSET` on locked queue candidates, `ORDER BY submitted_at/UUID` or choose a later fit Job.
+4. A contended Worker/Listing/Job lock uses a bounded wait and returns `Noop(LOCK_BUSY)` after rollback; move to other Listings and reconsider the blocked one in later passes. The current TV1/TV2 contract does not use `SKIP LOCKED` on Listing or Job; never bypass the true Job head, use `OFFSET`, or substitute timestamp/UUID order.
 5. An unfit FIFO head produces **`BLOCKED_CAPACITY`** for that Listing and no mutation; the scan continues to other Listings. After a successful one-head allocation, commit and move on; another Job from the same Listing can be considered in a later separate transaction/cycle.
 6. On restart, rebuild eligibility from database rows and recover the cursor conservatively (a fresh scan is permitted). No in-memory cursor, race winner, lease or local clock authorizes duplicate reservation. Record `listing_id`, `head_job_id`, `enqueue_seq`, reason, cycle ID and counts in redacted observability logs (no oracle/secret data).
 
@@ -277,14 +277,17 @@ Proposed bounded scanning, subject to TV1/TV2/TV4 ACK:
 The following is **pseudocode**, not executable SQL or a new frozen Python signature:
 
 ```text
-allocate_one_listing(listing_id) -> AllocationDecision
+allocate_one_listing(listing_id, signer: SignerReadiness) -> AllocationDecision
   one TV2 native gpm_manager_app Session / one READ COMMITTED UoW
-  begin; lock Listing[listing_id] before querying or locking any Job
+  obtain fresh authenticated G1 signer proof before the UoW; no HTTP inside it
+  begin; acquire shared Worker advisory lock, then lock and recheck Listing
   re-read Listing status and allocated/total capacity
   if not ACTIVE: no mutation -> INACTIVE_LISTING (cleanup/result mapping pending ACK)
   select first still-QUEUED Job by enqueue_seq ASC LIMIT 1 FOR UPDATE
       (NEVER SKIP LOCKED on Job rows)
   if none: commit no-op -> EMPTY_QUEUE
+  recheck exactly one active key and proof worker/key/fingerprint/expiry against DB time
+  if proof/key invalid: commit no-op -> Blocked(SIGNER_NOT_READY)
   if head GPUs > total - allocated: commit no-op -> BLOCKED_CAPACITY(head_id)
   trusted t = clock_timestamp() AFTER required locks
   conditional update Listing allocated_gpu_count += head.requested_gpu_count
@@ -296,9 +299,9 @@ allocate_one_listing(listing_id) -> AllocationDecision
   any failed insert/guard -> rollback entire UoW; NO remote HTTP inside DB TX
 ```
 
-**Erratum X-01 (proposed correction):** `reserved_gpu_count` in the previous §7.3 pseudocode was a typo. The field is `gpu_listings.allocated_gpu_count` in Database Design §11.3 A, the actual schema and TV2/TV4 handoffs. This revision aligns the pseudocode; no column is added/renamed. TV2+TV4 cross-review and lead confirmation of the correction remain pending.
+**Erratum X-01:** `reserved_gpu_count` in the previous §7.3 pseudocode was a typo; the actual field is `gpu_listings.allocated_gpu_count`. TV1 confirms it in #47 @ `001619d`, and TV2 records it in #46 @ `20d67c8`. This changes no schema; exact-SHA cross-owner ACK and merging the corrected source remain pending.
 
-**Proposed result categories** to prevent competing implementations: `ALLOCATED`, `EMPTY_QUEUE`, `BLOCKED_CAPACITY`, `INACTIVE_LISTING`, `LOCK_BUSY`, `DEPENDENCY_UNAVAILABLE` and `COMMIT_OUTCOME_UNKNOWN`. Typed data may include `listing_id`, `job_id`/`attempt_id`/`outbox_event_id` only when safely known. TV1+TV2+TV4+TV5 must approve exact names/types, missing-Listing behavior and exception-to-outcome mapping; the Python port is `PENDING_ACK`.
+**Proposed typed port (TV2 #46 @ `20d67c8`, TV1 #47 @ `001619d`):** `Allocated(job_id,attempt_id,event_id)`; `Blocked(LISTING_NOT_ACTIVE|HEAD_DOES_NOT_FIT|SIGNER_NOT_READY)`; `Noop(NO_QUEUED_HEAD|LISTING_NOT_FOUND|LOCK_BUSY)`; `CommitOutcomeUnknown(listing_id,job_id,attempt_id,event_id)`. Exact source/consumer ACKs and failure mapping remain pending; no runtime port is implemented.
 
 **No-op baseline:** approved Database Design §11.3 A already specifies **COMMIT no-op** for an empty queue or insufficient head capacity. Preserve that behavior; it is not an open choice to substitute a rollback. TV2 must align the port/cleanup semantics with that source. Cleanup for inactive/missing/lock-busy outcomes and resource release on every exit still need explicit ACK. A policy-only `ELIGIBLE` assessment, if used later, is not `ALLOCATED` and cannot authorize dispatch.
 
@@ -313,15 +316,17 @@ allocate_one_listing(listing_id) -> AllocationDecision
 | `PATCH` hardware versus new allocation | Hardware changes require **no** `QUEUED` or `RUNNING` Job; effective no-op hardware PATCH may proceed | Scheduler takes the same Listing lock; hardware change cannot silently invalidate an already accepted Job |
 | Reduce Listing total capacity | New total cannot fall below `allocated_gpu_count` **or** maximum demand of still-QUEUED Jobs | Check after Listing lock. If both fail, existing API error priority gives `LISTING_CAPACITY_BELOW_ALLOCATED` precedence |
 | `TX-CANCEL` vs `TX-ALLOCATE` | Both Listing → Job; recheck QUEUED after lock | Cancel-first yields CANCELLED/no allocation; allocate-first yields RUNNING and cancellation conflicts |
-| `TX-PAUSE-EDIT` vs `TX-ALLOCATE` | Both Listing-first, current status rechecked | PAUSE-first gives zero new reservation; allocate-first preserves old RUNNING attempt; PAUSED cannot cancel it |
+| `TX-PAUSE-EDIT` vs `TX-ALLOCATE` | Both serialize on Listing; allocate first takes Worker advisory shared, then rechecks status | PAUSE-first gives zero new reservation; allocate-first preserves old RUNNING attempt; PAUSED cannot cancel it |
 | PAUSED + existing retained Submit key/body | Phase 1 approved replay HTTP 200, even if currently PAUSED | No new Job, reference, allocation or Outbox from replay |
 | PAUSED + old RUNNING Outbox | TV1/TV2 dispatcher may resend only the **same** Attempt/event/payload under ADR-005 | No second reservation, hard deadline extension or job reopening |
 | Manager Finalization / timeout | TV5/TV2 take Listing → Job → Allocation … in the approved order | GPU release and counter decrement **exactly once**; no stale in-memory scheduler count |
-| Planned key rotation | TV3 owns key policy. Existing PAUSE + drain RUNNING can be used as proposed quiescence mechanism | Must avoid new allocation with unavailable signing key; precise multi-Listing lock/key-readiness protocol `PENDING_ACK` |
+| Planned key rotation | D-18 Worker-first shared/exclusive advisory locks and two-active-key allocation fence; TV3 owns key policy | No head bypass; key/proof rechecked under lock; rollback and source reconciliation `PENDING_ACK` |
 
 **Outbox fencing nuance:** Outbox claim/ACK/retry is its own short **Outbox-only** DB transaction. Never keep an Outbox lock and then acquire a Listing/Job lock (or vice versa) across a network call. A stale dispatch call may still arrive; the Simulator checks Attempt/request identity and the API/Manager enforce no second business effect. `lease_version` fences DB state writes by a stale dispatcher; it does **not** cancel an already sent HTTP request.
 
-**Signer readiness is an unresolved cross-owner input:** No new status/table/endpoint is approved solely to solve Worker key rotation. TV3+TV5 must define how the Simulator can sign for the selected Worker and how TV2/TV4 safely determine readiness or fail closed **without exposing private keys or reading the protected reference**. Absent a reviewed policy, mark the provisioning/rotation-dependent allocation acceptance tests `BLOCKED`, rather than silently adding a runtime RPC inside the `TX-ALLOCATE` lock.
+**Signer readiness, conditional direction:** TV1 obtains authenticated G1 nonce proof outside any UoW and passes in-memory `SignerReadiness(worker_id,key_id,public_key_fingerprint,proof_expires_at)`; fingerprint is lowercase SHA-256 hex of the 32 raw public-key bytes. No fresh proof means no port call; report `Blocked(SIGNER_NOT_READY)`. Under Worker+Listing locks TV2 rechecks Worker, sole active key, fingerprint and `clock_timestamp() < proof_expires_at`, failing closed without writes. The proof endpoint requires L2 API reconciliation; TTL/replay, restart-inside-TTL, compromise and provisioning remain open. Invalidation on key/lifecycle change, expiry or Manager restart does not prove an unknown Simulator restart cannot occur inside TTL. All runtime tests remain `NOT_RUN`.
+
+**Repair scope:** normal Outbox claim/ACK use Outbox-only short UoWs. TV2's separate `B-IF-06R` ACKED-receipt repair is `PROPOSED_FOR_ACK`, not approved; its proposed lock order is Listing -> Job -> Outbox with HTTP only after commit, same Attempt/event/immutable payload, no reservation or deadline extension, including when Listing is PAUSED. TV1/TV2/TV5 and the lead must approve the port, privileges and races; do not assume an old dispatch lease is reused.
 
 ### 7.5. Required two-session and bounded-scheduler evidence (additional test designs; `NOT_RUN`)
 
@@ -330,7 +335,7 @@ Existing `P2D-TX-01..12`, `P2D-RACE-01..08`, `P2D-SCHED-01..05`, `DBTX-*` and `A
 | New test ID | Injection | PASS oracle; every row remains `NOT_RUN` |
 |---|---|---|
 | `P2D-DRT-01` | Freeze `submitted_at`, submit two Jobs via proper TX-SUBMIT lock at different accepted orders | `enqueue_seq` alone chooses first admitted queued Job; UUID order/timestamp ties cannot reverse FIFO |
-| `P2D-DRT-02` | Hold the Listing lock via an authorized Pause/Cancel/EDIT transaction; race a scheduler scan, then release its barrier | Scheduler waits/skips **only the Listing claim** and never selects a later QUEUED Job via Job `SKIP LOCKED`; after lock release it rechecks the true head |
+| `P2D-DRT-02` | Hold the Listing lock via an authorized Pause/Cancel/EDIT transaction; race a scheduler scan, then release its barrier | Bounded lock wait yields `LOCK_BUSY` and rollback; scan advances to other Listings and later rechecks the true head, without Listing/Job `SKIP LOCKED` |
 | `P2D-DRT-03` | Queue head needs 4 GPUs with 2 free and later needs 1; another Listing has fitting head | Both Jobs on blocked Listing remain QUEUED, other Listing progresses, no phantom capacity delta |
 | `P2D-DRT-04` | Cancel current FIFO head before Scheduler lock; inspect next cycle | Cancelled head is excluded; next earliest still-QUEUED Job may allocate if capacity permits, with one set of child records |
 | `P2D-DRT-05` | Inject constraint failure after Listing counter/Job status write | Zero partial Allocation/Attempt/Outbox/Job RUNNING/counter effects after rollback |
@@ -353,11 +358,11 @@ Existing `P2D-TX-01..12`, `P2D-RACE-01..08`, `P2D-SCHED-01..05`, `DBTX-*` and `A
 |---|---|---|---|
 | `D-IF-01` | Pure FIFO policy and allocation result categories/fields, no duplicated scheduler | TV1 + TV2 + TV4 + TV5 | `PENDING_ACK` |
 | `D-IF-02` | One synchronous, bounded UoW + native Manager role/ACL + lock/commit uncertainty | TV1 + TV2 + TV4 | `PENDING_ACK` |
-| `D-IF-03` | Listing ID scan/cursor + Listing-only SKIP LOCKED and cross-Listing progress | TV1 + TV2 + TV4 | `PENDING_ACK` |
+| `D-IF-03` | Stable Listing locator/cursor, bounded lock wait and cross-Listing progress; no Listing/Job SKIP LOCKED | TV1 + TV2 + TV4 | `PENDING_ACK` |
 | `D-IF-04` | Scheduler 2s config, work/time budget, executor/DB pool and health metrics | TV1 + TV2 + TV4 | `PENDING_PARAMS` |
-| `D-IF-05` | PAUSED existing RUNNING dispatch repair (same Attempt/event/lease) | TV1 + TV2 + TV4 + TV5 | `PENDING_ACK` |
+| `D-IF-05` | PAUSED RUNNING resend uses same Attempt/event/payload; proposed separate ACKED repair fence, not necessarily same lease | TV1 + TV2 + TV4 + TV5 | `PENDING_ACK / D-19 OPEN` |
 | `D-IF-06` | Cancel/Pause/Capacity edit vs TX-ALLOCATE barriers and error mapping | TV2 + TV4 + TV5 | `PENDING_ACK` |
-| `D-IF-07` | Worker key readiness, planned rotation quiescence and emergency incident policy | TV2 + TV3 + TV4 + TV5 | `PENDING_ACK / OWNER_DECISION_REQUIRED` |
+| `D-IF-07` | Conditional D-18 Worker-first lock/G1 readiness and planned two-key quiescence; separate emergency incident policy | TV1 + TV2 + TV3 + TV4 + TV5 | `DIRECTION_APPROVED_CONDITIONAL / EXACT_SHA_ACK_PENDING` |
 | `D-IF-08` | Allocation release/finalization/timeout counter reconciliation and retry | TV1 + TV2 + TV4 + TV5 | `PENDING_ACK` |
 | `D-IF-09` | Acknowledge merged main/Phase 1 barrier evidence and record disposition of remaining audit follow-up | TV1 + TV2 + TV4 + TV5 | `PENDING_ACK / AUDIT_DISPOSITION_PENDING` |
 
@@ -381,7 +386,7 @@ Owner/consumer ACKs and remaining gaps:
 
 ### 7.7. Change-control and version ledger
 
-- **Preserved (owner-approved):** strict per-Listing FIFO, Listing-first Job locking, one Listing per `TX-ALLOCATE`, PAUSED RUNNING dispatch repair, configurable 2s scan, 18 total database tables, 5 runtime services, immutable Job and Attempt identities.
+- **Preserved (owner-approved):** strict per-Listing FIFO, Listing-before-Job row locking, one Listing per `TX-ALLOCATE`, PAUSED RUNNING dispatch repair, configurable 2s scan, 18 total database tables, 5 runtime services, immutable Job and Attempt identities. Conditional D-18 adds a Worker advisory lock before allocation's Listing lock.
 - **Clarified in v0.9:** split TV1/TV2/TV4/TV5 ownership, proposed scan/cursor semantics, bounded executor limits, typed allocation outcomes, commit-unknown reconciliation, stale Outbox fencing, signer readiness interface and deterministic evidence.
 - **Still undecided:** concrete adapter signature/port, numerical budget/pool limit, complete key-rotation SQL and separate compromised-key response, exact `LOCK_BUSY`/`DEPENDENCY_UNAVAILABLE` retry policy. Preserve as `PENDING` until source/consumer ACK and any required owner change control.
 - **Runtime status:** official Phase 2D PG/Scheduler acceptance IDs remain `NOT_RUN`; PR #39's Phase 1 CI and prototype #45's policy unit results do not close those IDs. The prototype remains on hold pending docs approval.
@@ -401,9 +406,9 @@ Owner/consumer ACKs and remaining gaps:
 
 **Questions to close during cross-review (still PENDING):**
 
-1. **TV2 ↔ TV4, with TV1/TV5 (`D-IF-01/02`):** publish/confirm the proposed `allocate_one_listing(listing_id)` input and safe outcome fields. Listing ID is a locator, not permission to use a UI/stale head; SQL selects the authoritative head under locks. Which IDs/sequence/free capacity are returned for each outcome, how is a missing Listing handled, and how are lock/statement failures distinguished from unknown COMMIT? Reconciliation must identify the original Job/Attempt/Outbox when safely known, not blindly retry the next head.
-2. **TV1+TV2+TV4 (`D-IF-03/04`):** agree cursor/Listing-only lock-skip semantics and concrete max Listings/work time/executor/pool/SQL timeout budgets, with a disposable-DB measurement plan. The already-approved configurable 2s cadence does not select those values. No new benchmark/SLA is proposed.
-3. **TV2+TV3+TV4+TV5 (`D-IF-07`):** specify atomic signer readiness and quiescent rotation. Merely pausing a discovered set is insufficient if another Listing can be created/resumed meanwhile. Confirm admission/rotation serialization without private-key reads or HTTP under locks; lead decides compromised-key incident handling. No new lock order/table/grant is approved here.
+1. **TV2 ↔ TV4, with TV1/TV5 (`D-IF-01/02`):** freeze `allocate_one_listing(listing_id, SignerReadiness)` and outcome fields by exact SHA. Listing ID is a locator; SQL selects the authoritative head under locks. Missing Listing, lock/statement failures and unknown COMMIT remain distinct. Reconcile the durable graph with stable IDs even if the Job became terminal and Allocation RELEASED; missing/contradictory evidence stays UNKNOWN, never blind retry.
+2. **TV1+TV2+TV4 (`D-IF-03/04`):** agree cursor/lock-timeout/revisit semantics and concrete max Listings/work time/executor/pool/SQL timeout budgets, with a disposable-DB measurement plan. The already-approved configurable 2s cadence does not select those values. No new benchmark/SLA is proposed.
+3. **TV1+TV2+TV3+TV4+TV5 (`D-IF-07`):** reconcile the conditional D-18 Worker-first lock and G1 proof with normative API/DB sources and exact producer/consumer SHAs. Merely pausing a discovered set is insufficient if another Listing is created/resumed. TTL/replay/restart, provisioning and compromised-key incident handling remain open; no private-key reads or HTTP under locks.
 4. **TV1+TV2+TV5 with TV4 (`D-IF-05/06/08/09`):** ACK same-Attempt PAUSED repair, both-order Cancel/Pause/Resize races and exactly-once release. Record the existing audit follow-up disposition separately from the now-merged baseline and completed Phase 1 barriers.
 
 **Review evidence:** link/file consistency and schema/design comparison only. All Phase 2 runtime, PG races and performance tests remain `NOT_RUN` (signer-dependent scenarios `BLOCKED` until contract approval). Self-review, CI and Codex advice do not count as independent human approval. The docs PR must record exact reviewed SHA, cross-owner ACKs and the leader's closure/merge decision before code resumes.
