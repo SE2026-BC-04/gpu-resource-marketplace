@@ -2,10 +2,14 @@
 
 **Owner:** TV3 — `@giakhanh-hub` (Auth/Security owner; producer strict V1 parser/verifier).  
 **Bản review:** `v1.1 — FINAL-DESIGN-ALIGNED — REVIEWED_FOR_OWNER_APPROVAL`, 2026-11-07.  
-**Trạng thái:** `ACK_WITH_ACTIONS / READY_FOR_OWNER_REVIEW`; sau khi lead chốt sẽ là `APPROVED_HANDOFF_CONDITIONAL`, **không phải cho phép code**.  
-**Thiết kế nguồn:** `Phase_2C_v0.9.md`, đã chốt `APPROVED_DESIGN_CONDITIONAL`; đối chiếu bốn thiết kế FINAL 2A v0.9, 2B v1.3, 2D v0.9, 2E v1.8. Các bổ sung thiết kế được đánh dấu `PROPOSED_FOR_ACK`, `PENDING_PARAMS` hay `NEEDS_OWNER_DECISION` chưa tự động có hiệu lực.  
-**GitHub snapshot:** PR [#39](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39) vẫn **open/Draft, chưa merge `main`**, HEAD `6788505cbb68e09ad08ea2b96728bc6c69e8a32e`, base `main@1d8b1b2c52b759d99a072c3d0d889b375083a8c4`. PR [#42](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/42) đã merge **vào nhánh #39**, không đồng nghĩa #39 đã vào `main`.  
-**Phạm vi thay đổi lần này:** chỉ tài liệu handoff và báo cáo review; **không sửa source code, PR, config, database hay secret**. Toàn bộ test Phase 2 `NOT_RUN`.
+**Trạng thái:** `SELF_REVIEWED / AWAITING_CROSS_REVIEW` (2026-11-08, TV3 tự review trên nhánh `docs/phase2c-tv3-design`); 2026-11-19: TV1 `ACK_WITH_MINOR_ACTIONS` ở `f3edb94`, `C-FINAL-01..04` đã xử lý, chờ TV1 kiểm tra lần cuối (không phải approval, không phải cho phép code); sau khi review chéo và lead chốt sẽ là `APPROVED_HANDOFF_CONDITIONAL`, **không phải cho phép code**.  
+**Thiết kế nguồn:** `Phase_2C_v0.9.md`, đã chốt `APPROVED_DESIGN_CONDITIONAL`; đối chiếu bốn thiết kế FINAL 2A v0.9, 2B v1.3, 2D v0.9, 2E v1.8. Các bổ sung thiết kế được đánh dấu `PROPOSED_FOR_ACK`, `PENDING_PARAMS` hay `NEEDS_OWNER_DECISION` chưa tự động có hiệu lực. Kết quả tự review và các câu hỏi cần chốt: `Phase_2C_v0.9.md` §6. Cập nhật 2026-11-09 sau review chéo (TV5 trên PR #49, TV2 #46 @ `342497c`): đề xuất chốt hợp đồng verdict, enum lý do từ chối, vị trí verify, trình tự xoay khóa K1→K2 (§6.6) và errata có điều kiện chờ lead quyết `D-01`/`D-02` (§6.7); tất cả vẫn `PROPOSED_FOR_ACK`.  
+**GitHub snapshot (cập nhật 2026-11-08):** PR [#39](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39) **đã merge vào `main`** (`aff538f`, source head `3482bce`), gồm cả #42. `main` hiện tại: `bee832eaf5463df20f6c6815174322871eb6685a` (sau #44 nhập 5 thiết kế + 5 handoff Phase 2). Alembic head: `0005_listing_d7`. Gate G0 (mục 8) đã đạt.  
+**Phạm vi thay đổi lần này:** chỉ tài liệu (file này và `Phase_2C_v0.9.md`); **không sửa source code, config, database hay secret**. Toàn bộ test Phase 2 `NOT_RUN`.
+
+**Cập nhật 2026-11-19 (theo TV1 Phase 2C Design Revision Request trên #49, `P1-01..P2-07`):** chỉ tài liệu. Thông tin trong header ở trên về snapshot GitHub là của 2026-11-08; **snapshot mới (đọc 2026-11-19, chỉ đọc):** `main` vẫn là `bee832e` (không có commit mới từ 2026-11-10); PR #46 (2B) `f58acd4`, #47 (2A) `001619d`, #48 (2D) `813aa3e`, #50 (2E) `edb247f`, #49 (2C, file này) = HEAD ghi trong comment công bố bản sửa này. Các quyết định L2 nhóm trưởng đã duyệt có điều kiện (**`APPROVED_DESIGN_DIRECTION_CONDITIONAL`**, *không* phải `ACKED / MERGE_APPROVED / IMPLEMENTED / TESTED`): D-01 Option C, D-18/E-C3 (hai khóa active = quiesce, không thêm partial unique index), G1, E-C4 V-OUT, D-17 `INSERT ... RETURNING received_at`; Verifier Option A (TV3 sở hữu module verify thuần, TV1 tích hợp trong Manager, không thêm service); Blockchain Option A (Phase 2 chỉ giữ evidence off-chain, EVM ở Phase 4). Phương án B, G2, V-IN **không còn là fallback tự động**; muốn đổi phải mở L2 change request. D-02/E-C2 đã được TV2/TV3/TV5 thống nhất kỹ thuật nhưng chưa nằm trong bản ghi quyết định của lead (`PROPOSED_FOR_ACK`). D-19 (repair) vẫn `PROPOSED_FOR_ACK`, chưa được duyệt. Chi tiết: `Phase_2C_v0.9.md` §7. **Toàn bộ test Phase 2 vẫn `NOT_RUN`**; chưa có hợp đồng nào được đánh dấu `FROZEN`.
+
+**Cập nhật 2026-11-19 lần 2 (TV1 "Final Phase 2C Design Actions" trên #49, review HEAD `f3edb94`, kết luận `ACK_WITH_MINOR_ACTIONS`, mục `C-FINAL-01..04`):** lead chấp nhận kiến trúc Phase 2C; TV3 **không thiết kế lại** Internal Auth, Signed Result V1, G1, V-OUT hay Key Rotation. Bản này chỉ làm rõ: (1) ranh giới adapter đọc khóa tin cậy (persistence, đóng Session trước) và verifier Ed25519 thuần (không PostgreSQL, Session, HTTP) — `Phase_2C_v0.9.md` §7.2.1; (2) partial unique index active-key là `SUPERSEDED_BY_D18` — DR-C4, §6.6.5 mục 7; (3) runbook lỗi verifier R1–R4 — §7.9; (4) trạng thái và HEAD lịch sử/hiện tại — §7.7, §7.10, file này, mô tả PR #49. Không đổi wire G1, `C-IF-01..11`, schema, migration hay trạng thái test. Lead tự điều phối ACK liên Phase và quyết định L2; TV3 không tự đóng quyết định L2.
 
 ## 1. Mục tiêu: TV3 phải đạt được điều gì?
 
@@ -26,7 +30,7 @@ TV3 xây dựng và kiểm chứng **ranh giới tin cậy của kết quả mô
 | Công đoạn | TV3 chịu trách nhiệm | Owner khác và ranh giới bắt buộc |
 |---|---|---|
 | Manager → Simulator | Ma trận token purpose, quy định từ chối token sai, negative-test/security review | TV1 dispatch client; TV5 Simulator endpoint/runtime và callback sender |
-| Simulator → API | Auth callback dependency, strict HTTP JSON V1 validation, status/error/security tests, tích hợp route theo wiring TV1 | TV2 UoW/Inbox INSERT, raw-byte dedup, DB clock, grants; TV1 API lifecycle/Compose integration |
+| Simulator → API | Auth callback dependency, strict HTTP JSON V1 validation, status/error/security tests, tích hợp route theo wiring TV1 | TV2 UoW/Inbox INSERT, dedup theo SHA-256 + binding (D-01 Option C), DB clock, grants; TV1 API lifecycle/Compose integration |
 | Verification | Pure canonicalization/JCS/Ed25519 verifier; chuẩn kiểu typed success/reject; kiểm signer/claim với context tin cậy do caller cung cấp | TV2 public-key read+Job/Attempt context; TV1 orchestrates; TV5 Finalizer rechecks |
 | Key registration/rotation | Chốt security policy, lựa chọn K1/K2 đúng ngữ cảnh, regression historical verifier | TV2 SQL/ACL/lock/provisioning; TV5 private signer key và restart; TV4 readiness trước allocation; TV1 runtime coordination |
 | Finalization & Reputation | Chỉ đưa ra bằng chứng xác minh/loại từ chối không chứa secret | **TV5** chính sách signed outcome → terminal/reputation; **TV2** transaction atomic; TV1 gọi |
@@ -56,7 +60,7 @@ TV3 xây dựng và kiểm chứng **ranh giới tin cậy của kết quả mô
 | `Phase_2D_v0.9.md` | `fdb7f79a1b89b9ed911fddce67da1763ea88a5417ab946a3121f8701f8758c60` |
 | `Phase_2E_v1.8.md` | `90af557a46a0f7bcb663eb9d17de3a2db866c4c0b2f1e5006a9160eed2d6609f` |
 
-Tài liệu các Phase có một số mốc GitHub HEAD *lịch sử*. Khi có xung đột giữa status trong bản cũ và quyết định đã được owner chốt sau đó, dùng sổ phê duyệt cuối; nhưng `PENDING_ACK/NOT_RUN` vẫn giữ nguyên.
+Các SHA256 trên là của bản trên `main@bee832e` **trước** lần tự review 2026-11-08; `Phase_2C_v0.9.md` sửa trong nhánh docs sẽ có SHA mới, ghi trong PR docs. Tài liệu các Phase có một số mốc GitHub HEAD *lịch sử*. Khi có xung đột giữa status trong bản cũ và quyết định đã được owner chốt sau đó, dùng sổ phê duyệt cuối; nhưng `PENDING_ACK/NOT_RUN` vẫn giữ nguyên.
 
 ### 3.2. Các nguồn chuẩn trong GitHub
 
@@ -72,7 +76,7 @@ Tài liệu các Phase có một số mốc GitHub HEAD *lịch sử*. Khi có x
 - `backend/migrations/versions/0001_phase1b_baseline.py`: `worker_public_keys` đã có trong 10 bảng Phase1; TV3 không tạo lại.
 - `backend/tests/{test_api_auth_mount,test_auth_http_postgres,test_api_cors,test_auth_session_browser_e2e}.py`: regression Phase1 Auth, **không thay thế callback/Ed25519 tests**.
 
-**Trạng thái nền:** HEAD PR #39 `6788505cbb68e09ad08ea2b96728bc6c69e8a32e` vẫn Draft/open/unmerged. PR #42 merge vào **nhánh #39**; không nhầm với merge #39 vào `main`. CI Phase1 xanh không biến `P2C-DRT-*` thành PASS.
+**Trạng thái nền (cập nhật 2026-11-08):** PR #39 đã merge vào `main` (`aff538f`), gồm #42; `main` hiện tại `bee832e`. Các mô tả code Phase 1 ở trên (app.py, simulator, manager idle loop) vẫn đúng trên `main` này. CI Phase1 xanh không biến `P2C-DRT-*` thành PASS.
 
 ## 4. Các bất biến bảo mật không được thay
 
@@ -92,7 +96,7 @@ Tài liệu các Phase có một số mốc GitHub HEAD *lịch sử*. Khi có x
 1. Kiểm tra phương thức, Content-Type JSON/UTF-8, **service Bearer đúng purpose** trước DB read/write hoặc bất kỳ ACK chấp nhận nào; end-user HS256 JWT và `MANAGER_DISPATCH_TOKEN` bị từ chối `401`. Không dùng CORS làm quyền truy cập.
 2. Strict parse **bounded raw bytes** (size/depth numerical budget = `PENDING_PARAMS` TV1/TV3/TV5), reject key trùng trong JSON, extra/missing keys/invalid wire; giữ raw body chính xác, không chỉ giữ `jsonb` rồi serialize lại.
 3. Phân biệt **wire/schema gate** với **cryptographic gate**. Malformed envelope → `422 INVALID_SIGNED_ENVELOPE`, không có eligible Inbox. Envelope schema hợp lệ nhưng signature Ed25519 sai → **có thể** `202 STORED` sau commit, rồi Manager/TV3 verifier đánh dấu candidate `REJECTED`; tuyệt đối không `422` tại ingress chỉ vì signature sai khi API không phải verifier.
-4. TV2 adapter là owner `TX-INBOX-INGRESS`: duplicate retained same `result_id`/same full original bytes → `202 DUPLICATE`, **kể cả Job đã terminal**, không thay `received_at`; cùng ID khác 1 byte (kể cả JSON whitespace/order) → `409 RESULT_ID_COLLISION`. Trường hợp race hai request, UNIQUE loser rollback và đọc lại committed winner, không nhờ RAM cache; callback-context binding không được rò dữ liệu người khác.
+4. TV2 adapter là owner `TX-INBOX-INGRESS`: duplicate retained cùng `result_id`, cùng SHA-256 của byte nhận được (bằng `envelope_sha256` đã lưu, DB `CHECK` ràng buộc với `sha256(original_envelope_raw)`) và cùng trusted binding → `202 DUPLICATE`, **kể cả Job đã terminal**, không thay `received_at` đã lưu; cùng ID nhưng digest hoặc binding khác (kể cả chỉ khác JSON whitespace/order) → `409 RESULT_ID_COLLISION`. *(Cập nhật 2026-11-19, D-01 Option C `APPROVED_DESIGN_DIRECTION_CONDITIONAL`: đây dựa trên giả định an toàn của SHA-256, không phải chứng minh hai chuỗi byte giống hệt; sender vẫn phải gửi lại đúng byte gốc và cùng `result_id`; callback không reserialize để so sánh.)* Trường hợp race hai request: `INSERT ... ON CONFLICT DO NOTHING RETURNING id, received_at` không có target, loser nhận 0 row và probe mới đọc committed winner (`ABSENT` → `503`); không nhờ RAM cache (D-02/E-C2: thống nhất kỹ thuật, `PROPOSED_FOR_ACK`); callback-context binding không được rò dữ liệu người khác.
 5. Candidate mới: DB bắt Listing → Job lock, kiểm RUNNING và Attempt thực, lấy `received_at=clock_timestamp()` **sau Job lock**, yêu cầu `< hard_deadline_at`. Đúng giờ `== deadline` bị từ chối `409 RESULT_NOT_ACCEPTABLE`. Không backdate theo `finished_at` của Worker.
 6. `202 STORED` chỉ sau **COMMIT đã xác nhận**. Nếu connection/COMMIT outcome unknown, không nói đã lưu; sender TV5 retry cùng bytes/ID để reconciliation theo unique result; 5xx/503 không phải bằng chứng chưa commit. Không lưu PENDING với unbound/unknown context.
 7. Local Compose API callback dùng **existing listener**, có thể truy cập từ tiến trình trên host loopback; không gọi nó network-private chỉ vì path `/internal`. Cần Bearer, safe ingress, no public frontend route. Nếu expose non-loopback/untrusted, cần review ingress/TLS/mTLS trước deployment, **không tự tạo listener/service mới**.
@@ -112,16 +116,27 @@ TV5 Simulator signs exact V1 envelope (private key only in Simulator)
   -> one terminal Job + one GPU release + eligible Reputation effect
 ```
 
-**Typed contract `C-IF-06` is PROPOSED_FOR_ACK**, not a frozen Python public API:
+**Typed contract `C-IF-06` is PROPOSED_FOR_ACK**, not a frozen Python public API. *(Cập nhật 2026-11-19: tên field đã đồng bộ với #46 `B-IF-07` @ `f58acd4` và `Phase_2C_v0.9.md` §6.6.1/§7.4; khối cũ dùng `inbox_row_id` và `signed_payload_fingerprint` đã bị thay thế.)*
 
 ```text
 VerifiedV1Receipt(
-  inbox_row_id, envelope_sha256, result_id, job_id, attempt_id,
-  worker_id, listing_id, key_id, outcome, failure_reason,
-  result_digest, signed_schema_version='1', signed_payload_fingerprint
+  schema_version='1', inbox_id, result_id, envelope_sha256,
+  job_id, attempt_id, worker_id, listing_id, key_id,
+  outcome, failure_reason, result_digest,
+  finished_at_wire,       # chuỗi đã ký, không dùng cho admission
+  payload_jcs_raw,        # UTF-8(JCS(payload)), KHÔNG có domain prefix
+  signature_raw           # 64 byte
 )
-RejectedV1Receipt(inbox_row_id, rejection_code)
+RejectedV1Receipt(
+  inbox_id, result_id, envelope_sha256, job_id, attempt_id,
+  rejection_code          # enum đóng: UNKNOWN_KEY, KEY_WORKER_MISMATCH,
+)                         #   CONTEXT_MISMATCH, INVALID_SIGNATURE
 ```
+
+- **V-OUT (E-C4, `APPROVED_DESIGN_DIRECTION_CONDITIONAL`):** verify ngoài lock window; TV2 recheck dưới khóa Listing→Job→Allocation→Inbox: `inbox_id`, `result_id`, byte gốc đã lưu và `envelope_sha256`, binding, `received_at` đã lưu, `key_id`, và `payload_jcs_raw`/`signature_raw` khớp `extract_signed_parts_v1` trên byte đã khóa. Verdict cũ/lệch không có hiệu lực. Mã housekeeping (`NOT_SELECTED`, `ALREADY_TERMINAL`) không bao giờ nằm trong `RejectedV1Receipt`. Lỗi parser/invariant/dependency của row đã admit ⇒ Inbox `PENDING`, không tự reject. `PrecedingPending` và deadline fallback không phụ thuộc scan proof do caller đưa vào.
+- Verify **lịch sử** tách khỏi readiness cấp phát: hai khóa active chỉ chặn allocation mới, không là lý do reject receipt K1 đã lưu đúng hạn (`Phase_2C_v0.9.md` §7.3).
+- **Ranh giới verify thuần (`C-FINAL-01`, `Phase_2C_v0.9.md` §7.2.1):** adapter đọc khóa tin cậy (port TV2, thuộc persistence, TV1 gọi) đọc trong transaction read-only ngắn, trả snapshot bất biến rồi **đóng Session**; Manager (TV1) áp luật "đúng một khóa active" cho G1, gọi HTTP sau khi transaction đã đóng, tính `proof_expires_at` và quản lý `SignerReadiness`; verifier thuần của TV3 chỉ nhận public key tin cậy, nonce/proof hoặc byte Inbox và context, **không** truy vấn PostgreSQL, không giữ Session, không HTTP; `TX-ALLOCATE`/`finalize_one` của TV2 kiểm lại dưới khóa.
+- **Lỗi verifier (`C-FINAL-03`, §7.9):** chỉ 4 mã definitive mới reject; DB/key registry sập, parser/invariant drift, timeout/exception lặp lại ⇒ Inbox giữ `PENDING`, retry có giới hạn, alert đã redact, escalation; không tự tạo rejection hay `SYSTEM_FAULT`. Receipt K1 trong lúc rotation là đường bình thường, không phải lỗi. Con số: `PENDING_PARAMS`.
 
 - Chỉ immutable typed data/provenance, **không chứa** SQLAlchemy Session, private keys, JWT, nguyên protected reference hay Boolean `verified=true` do JSON/HTTP tự cung cấp.
 - Re-verify/compare trusted bytes, signer and Job/Attempt state **trong finalizer UoW** theo Listing→Job→Allocation→Inbox; không truyền locked ORM object giữa transaction/thread; tránh TOCTOU. Mọi V1 context mismatch đều `REJECTED` không làm Job terminal lập tức.
@@ -129,14 +144,17 @@ RejectedV1Receipt(inbox_row_id, rejection_code)
 
 ### 4.4. Keys và các quyết định chưa đóng
 
-- TV3 xác nhận security binding; TV2 đăng ký đúng một active public key/Worker theo schema; TV5 nạp private signer key qua secret không track, chứng minh sống qua restart và khớp với public key. Không ghi private key trong DB hoặc commit repository.
-- Planned K1→K2: **quiescent rotation** đã duyệt ở mức thiết kế, **không** retire active K1 khi Worker có RUNNING Attempt; lock/serialise với TX-ALLOCATE (TV2/TV4), drain, đổi key có kiểm soát, giữ K1 historical để verify retained receipts sau rotation; no key deletion khi FK còn tham chiếu.
+- TV3 xác nhận security binding; TV2 đăng ký public key theo schema (đúng một khóa active/Worker **ngoài cửa sổ rotation**; trong quiesce D-18 có hai hàng active và allocation bị chặn; partial unique index active-key là `SUPERSEDED_BY_D18`, không thêm); TV5 nạp private signer key qua secret không track, chứng minh sống qua restart và khớp với public key. Không ghi private key trong DB hoặc commit repository.
+- Planned K1→K2: **quiescent rotation** đã duyệt ở mức thiết kế, **không** retire active K1 khi Worker có RUNNING Attempt; giữ K1 historical để verify retained receipts sau rotation; no key deletion khi FK còn tham chiếu. *(Cập nhật 2026-11-19, D-18/E-C3 `APPROVED_DESIGN_DIRECTION_CONDITIONAL`: tuần tự 4 bước — đăng ký K2 làm khóa active thứ hai = quiesce marker chặn **allocation mới**; drain; triển khai K2 + self-check; retire K1 sau khi recheck active rows đúng `{K1,K2}` và không còn RUNNING. Khóa advisory Worker lấy **trước** Listing (shared cho `TX-ALLOCATE`, exclusive cho đăng ký/retire key). Không thêm partial unique index active-key. Hàng active thứ hai chỉ là rào chắn fail-closed tạm thời, không phải cho phép nhiều khóa active lâu dài. Thứ tự khóa mới cần L2 source reconciliation `database-design.md` §11.1.)*
+- **G1 live-signer proof (`C-IF-07/08`, được chọn có điều kiện):** Manager gửi nonce 32 byte tới Simulator bằng `MANAGER_DISPATCH_TOKEN`, Simulator ký domain `GPU-MARKETPLACE:SIGNER-PROOF:V1\n`; Manager verify với khóa active duy nhất trong DB **ngoài** UoW rồi giữ `SignerReadiness(worker_id,key_id,public_key_fingerprint,proof_expires_at)` chỉ trong bộ nhớ. TV2 so khớp dưới khóa Worker advisory + Listing, không HTTP trong UoW. TTL, timeout, nonce lifetime, backoff: **`PENDING_PARAMS`**. Endpoint cần L2 API Contract change request. Chi tiết: `Phase_2C_v0.9.md` §7.2.
 - Khi **nghi private key bị lộ**, không tiếp tục sử dụng/rotate theo planned path. Fail closed với new use, escalate owner incident policy. Cách disposition kết quả ký trước đó, RUNNING và historical evidence là `NEEDS_OWNER_DECISION`; **không** tự giả định key revoked = invalid historical signatures.
 - `P2E-CACHE-GAP-01`: Simulator cache RAM không chứng minh `409 EXECUTION_CONFLICT` sau cold restart cùng Attempt/different immutable dispatch. TV3 cần tham gia threat analysis, nhưng **TV5/TV1/lead** sở hữu quyết định design; không tự mở DB access cho Simulator hoặc sửa request V1.
 
 ## 5. Nhiệm vụ TV3 — 6 chuẩn bị và 11 triển khai
 
-### A. Trước coding gate: 6 việc có thể làm NGAY ở mức tài liệu, không sửa GitHub
+### A. Giai đoạn 1 (hoàn thiện kiến trúc): 6 việc ở mức tài liệu
+
+Theo thông báo quy trình 2026-11-08, kết quả của 6 việc dưới đây đi vào **PR docs** từ nhánh `docs/phase2c-tv3-design` để review chéo, không còn là tài liệu chỉ để trên máy. Lần tự review đầu ghi trong `Phase_2C_v0.9.md` §6; các artefact tên riêng trong cột "Đầu ra" có thể là mục trong §6 hoặc file riêng, tùy lead chốt.
 
 | ID | Việc phải thực hiện chi tiết | Đầu ra / người cần ACK |
 |---|---|---|
@@ -145,7 +163,18 @@ RejectedV1Receipt(inbox_row_id, rejection_code)
 | **TV3-P2C-03** | **Freeze HTTP callback + strict parser contract.** Chốt method/path, content-type/UTF8, `body_size_max`, JSON depth, duplicate members/unknown fields, `401/404/409/422/202`, original raw byte ownership; phân biệt parse 422 với sig-invalid-then-202; 202 only after committed Inbox. | `CALLBACK_HTTP_CONTRACT.md`, `WIRE_BOUND_PARAMS.md`; TV1/TV2/TV5 ACK |
 | **TV3-P2C-04** | **Freeze Verifier → Finalizer typed port.** Chọn immutable fields/evidence fingerprint, signer read context, `Rejected` error-code enum, concurrency/stale evidence behavior; xác định ai re-read under locks; chính sách multiple-result_id, nonwinner Inbox state và all-on-time scan. Không giao TV3 commit. | `VERIFIED_RECEIPT_PORT.md`, error matrix, anti-TOCTOU recipe; TV1/TV2/TV5 ACK |
 | **TV3-P2C-05** | **Freeze key provisioning/rotation/incident gating.** TV5 private key origin/restore, TV2 public key registration, TV4 readiness/allocation guard, TV1 startup & rotation orchestrator; phân biệt planned K1→K2 với suspect compromise. Đề xuất incident options cho lead, không tự duyệt. | `SIGNER_KEY_LIFECYCLE.md`, incident decision request, historical K1 test cases; TV1/TV2/TV4/TV5 ACK và owner decision riêng khi cần |
-| **TV3-P2C-06** | **Lập verification/test matrix và kế hoạch nhánh.** Map `P2C-ACC-01..09`, `P2C-DRT-01..18`, `WIRE/SIG/API-INT/COM` vào case/fixture/owner; lập danh sách dependency PostgreSQL/Compose, explicit coding gate, one-branch plan, hash/CI fields và phân loại skipped/blocked. | `TV3_PHASE2_TEST_MATRIX.md`, `TV3_INTERFACE_ACK.md`, `TV3_CODING_GATE.md`; TV1 approve coding gate riêng |
+| **TV3-P2C-06** | **Lập verification/test matrix và kế hoạch nhánh.** Map `P2C-ACC-01..09`, `P2C-DRT-01..18`, `WIRE/SIG/API-INT/COM` vào case/fixture/owner; lập danh sách dependency PostgreSQL/Compose, explicit coding gate, kế hoạch chia task (một task = một nhánh = một PR), hash/CI fields và phân loại skipped/blocked. | `TV3_PHASE2_TEST_MATRIX.md`, `TV3_INTERFACE_ACK.md`, `TV3_CODING_GATE.md`; TV1 approve coding gate riêng |
+
+**Ma trận truy vết `TV3-P2C-01..06` → section/tài liệu thực tế (2026-11-19):** các "artefact" bên dưới hiện nằm trong `Phase_2C_v0.9.md` và file này, **chưa** tách thành file riêng. Nếu lead muốn file riêng thì cắt từ các section dưới đây.
+
+| Việc | Nằm ở đâu hiện nay | Trạng thái |
+|---|---|---|
+| `P2C-01` (V1 + baseline) | Spec §3, ADR-004, DR-C1, App. C1; handoff §4.1 | Nội dung đủ; fixture WIRE/SIG chưa chạy (`NOT_RUN`); TV1/TV5 ACK chờ |
+| `P2C-02` (auth/threat) | Spec §2.2, §1, DR-C6, App. C1/C4; handoff §4.2; `P2C-NET-*` | Chưa có file riêng `INTERNAL_AUTH_MATRIX.md`/`THREAT_MODEL_CALLBACK.md`; nội dung nằm trong các section này |
+| `P2C-03` (HTTP callback + parser) | Spec §6.2, §6.3 item 1-2, DR-C2, §7.5; `P2C-DRT-02/19` | Bound 16,384 byte/depth 4 `PROPOSED_FOR_ACK`, chờ TV1 ACK; bound là `PENDING_PARAMS` cho tới khi ACK |
+| `P2C-04` (Verifier → Finalizer) | Spec §6.6.1-6.6.6, §7.2.1, §7.4, §7.9; handoff §4.3; `C-IF-06/10` | V-OUT được duyệt có điều kiện; ACK exact-SHA TV1/TV2/TV5 chờ |
+| `P2C-05` (key lifecycle + incident gating) | Spec §6.4, §6.6.5, §7.2, §7.2.1, §7.3, DR-C4; `C-IF-07/08/09` | G1 và quiesce được duyệt có điều kiện; endpoint cần L2 change request; incident `C-IF-09` còn mở |
+| `P2C-06` (test matrix + coding gate) | Spec DR-C8, §7.6; handoff §7-§8 | 27 case `P2C-DRT` (`01..26` và `06b`), `P2C-KEY-01..11`, `P2C-SIGN-01..10`: tất cả `NOT_RUN`; coding gate do TV1 |
 
 **Đầu ra PRE_CODE bắt buộc:** 6 artefact hoặc nhóm artefact bên trên; không cần tạo nhánh/PR code để gọi là hoàn tất. Review của TV1 và từng owner consumer phải ghi **cụ thể phiên bản/SHA**, không dùng 'đã xem' chung chung.
 
@@ -163,7 +192,7 @@ RejectedV1Receipt(inbox_row_id, rejection_code)
 | **TV3-P2C-14** | **Security verification for key lifecycle:** test K1→K2 planned rotate with TV2/TV5, historical K1 retained while FK in use, missing-key fail-closed and cold Simulator restart reloading private signer; inspect rotation/allocation race with TV4. | `P2C-KEY-*`, `P2C-DRT-11/12/14` evidence; emergency compromise only fail-closed/escalation until owner policy. |
 | **TV3-P2C-15** | **Negative security suite:** malformed JSON/duplicate keys/invalid I-JSON and huge payload, wrong-direction token, impersonation, replay/collision, signature tampering, forged key, logs/headers, client-facing route exposure. | Test matrix covers accepted design `WIRE/SIG/API-INT/P2C-*`, each result has SHA/fixture/oracle; no leaked private key, token or oracle. |
 | **TV3-P2C-16** | **Cross-owner PG/HTTP concurrency & crash tests:** cùng TV2/TV5 ép hai callback same-ID đến đồng thời; deadline exact µs, post-terminal duplicate, two `result_id`, Manager crash before/after finalization, invalid-first-valid-later across multiple batches. | Real restricted-role PostgreSQL + HTTP + Docker Compose/Simulator E2E; guaranteed 1 signed result/Job, one release/reputation; evidence both lock/commit orders. TV3 chỉ owner security assertions, TV2/TV5 owner DB/business fixtures. |
-| **TV3-P2C-17** | **Review/handoff PR:** trong một nhánh thống nhất cho công việc TV3, cập nhật module docs/trace, chạy relevant unit/PG/Compose CI, kiểm secret scanning, ghi exact HEAD SHA và giao TV1, TV2, TV5, TV4 phần key readiness. | `TV3_DELIVERY_REPORT.md`, CI links, `P2C-ACC` results, signed config checklist, producer+consumer ACK, independent human review before merge. |
+| **TV3-P2C-17** | **Review/handoff theo từng PR:** mỗi task 07–16 là một nhánh và một PR riêng vào `main`; PR cuối tổng hợp delivery report, cập nhật module docs/trace, chạy relevant unit/PG/Compose CI, kiểm secret scanning, ghi exact HEAD SHA và giao TV1, TV2, TV5, TV4 phần key readiness. | `TV3_DELIVERY_REPORT.md`, CI links, `P2C-ACC` results, signed config checklist, producer+consumer ACK, independent human review before merge. |
 
 **Thứ tự phụ thuộc đề xuất:** `07,08` có thể bắt đầu sau coding gate và contract V1; `09,10,11` cần TV1 route wiring + TV2 Inbox port; `12,13` cần TV2 trusted key/context read + TV5 Finalizer type ACK; `14,16` cần TV4/TV5 runnable runtime và PostgreSQL. Không vượt qua interface gate bằng cách dùng fake repository làm bằng chứng PG pass.
 
@@ -173,7 +202,7 @@ RejectedV1Receipt(inbox_row_id, rejection_code)
 |---|---|---|---|
 | `C-IF-01` | Manager dispatch token vs Simulator callback token vs JWT, startup failure semantics | TV3 security + TV1 runtime + TV5 simulator | `PENDING_ACK` |
 | `C-IF-02` | Callback HTTP route, size/depth, strict JSON, 202/401/404/409/422, raw error/log redaction | TV3 API handler + TV1 app wiring + TV5 sender | `PENDING_ACK/PARAMS` |
-| `C-IF-03` | Inbox exact original raw compare, same-ID collision, SELECT ACL and unknown COMMIT | TV2 DB producer + TV3 HTTP/TV5 client | `PENDING_ACK` |
+| `C-IF-03` | Inbox duplicate theo SHA-256 + trusted binding (D-01 Option C; original bytes vẫn được lưu nguyên), same-ID collision, SELECT ACL and unknown COMMIT | TV2 DB producer + TV3 HTTP/TV5 client | `PENDING_ACK` |
 | `C-IF-04` | `received_at` clock after Listing/Job lock, duplicate post-terminal, exact deadline | TV2 UoW + TV3 ingress + TV1 fallback | `PENDING_ACK` |
 | `C-IF-05` | Trusted `(worker_id,key_id)` lookup, RFC8785+Ed25519 fixed bytes, signer semantic | TV2 key read + TV3 verifier + TV5 signer | `PENDING_ACK` |
 | `C-IF-06` | `VerifiedV1Receipt/RejectedV1Receipt` fields, provenance, stale recheck, stable rejection reasons | TV3 producer + TV1 caller + TV2 UoW + TV5 finalizer | `PENDING_ACK` |
@@ -182,6 +211,50 @@ RejectedV1Receipt(inbox_row_id, rejection_code)
 | `C-IF-09` | Emergency key compromise classification: new use stops, retained evidence/running job disposition | TV3/TV5 + TV1 lead decision | `NEEDS_OWNER_DECISION` |
 | `C-IF-10` | Distinct `result_id`/attempt, ordered candidates, multi-batch on-time before fallback, nonwinner state | TV2 Inbox + TV3 verifier + TV5 finalizer + TV1 Manager | `PENDING_ACK` |
 | `C-IF-11` | Phase1 merged base, native runtime roles/grants, #42 impact, code authorization | TV1 group lead + TV2 DB + TV3 security | `PENDING_BASELINE/CODING_GATE` |
+
+**Cập nhật 2026-11-19:** cột "Status" ở bảng trên vẫn đúng ở mức `PENDING_ACK`; thêm thông tin: hướng thiết kế của `C-IF-06/10` (V-OUT), `C-IF-07/08` (G1 + hai khóa quiesce) đã được lead duyệt có điều kiện (`APPROVED_DESIGN_DIRECTION_CONDITIONAL`) nhưng **chưa có ACK exact-SHA** nào; `C-IF-09` vẫn `NEEDS_OWNER_DECISION`; `C-IF-07` còn S-10/D-03 (danh tính provisioning `worker_public_keys`). Danh sách ACK cần xin và SHA tham chiếu: `Phase_2C_v0.9.md` §7.7. Cần **hai review L2 độc lập của con người trên HEAD cuối**, ngoài các ACK tương thích producer/consumer.
+
+**Trạng thái review/ACK theo từng PR (lấy từ GitHub API ngày 2026-11-19, giờ UTC; verdict ghi nguyên văn).** Mọi mục dưới đây là review dạng `COMMENTED` hoặc comment; **không có GitHub `Approve` nào**, và `ACK_WITH_ACTIONS` **không phải** approval. Review của TV4 tự ghi là Codex-assisted, không phải review độc lập của con người. Review chỉ có hiệu lực với đúng SHA ghi trong bảng; HEAD hiện tại bị sửa thì cần review lại.
+
+| PR (HEAD hiện tại) | Reviewer | SHA được review | Verdict (nguyên văn) | Thời điểm (UTC) |
+|---|---|---|---|---|
+| #46 (`f58acd4`) | TV1 | `a27526e` (revision request) | `ACK_WITH_ACTIONS / HOLD DOCS GATE` | 2026-11-18 18:23 |
+| #46 | TV4 | `20d67c8` | `ACK_WITH_ACTIONS` | 2026-11-18 18:58 |
+| #46 | TV1 | `5838e23` | `ACK_WITH_ACTIONS / HOLD DOCS GATE` | 2026-11-18 19:07 |
+| #46 | TV4 | `0ca059c` | `ACK_WITH_ACTIONS` | 2026-11-18 19:16 |
+| #46 | — | `f58acd4` (HEAD hiện tại) | **chưa có review nào ở SHA này** (TV2 đẩy lúc 2026-11-18 19:20) | — |
+| #47 (`001619d`) | TV2 | `81ef608` (cũ) | `ACK_WITH_ACTIONS` for this scope | 2026-11-13 16:14 |
+| #47 | TV4 | `001619d` | `ACK_WITH_ACTIONS` | 2026-11-18 18:58 |
+| #48 (`813aa3e`) | TV2 | `b8be725` (cũ) | `ACK_WITH_ACTIONS` for this scope | 2026-11-09 03:23 |
+| #48 | TV1 | `b399118` (revision request) | `ACK_WITH_ACTIONS / HOLD DOCS GATE` | 2026-11-18 19:15 |
+| #48 | — | `813aa3e` (HEAD hiện tại) | **chưa có review nào ở SHA này** (TV4 xin re-review lúc 2026-11-18 19:31) | — |
+| #50 (`edb247f`) | TV3 | `c8c241c` (cũ) | `ACK_WITH_ACTIONS` for the 2C ↔ 2E scope | 2026-11-13 08:36 |
+| #50 | TV2 | `edb247f` | `ACK_WITH_ACTIONS` for this scope; the actions are editorial | 2026-11-18 18:01 |
+| #50 | TV4 | `edb247f` | `ACK_WITH_ACTIONS` | 2026-11-18 18:58 |
+| #50 | TV1 | `edb247f` | `ACK_WITH_ACTIONS / HOLD DOCS GATE` | 2026-11-18 19:19 |
+| #50 | TV3 | `edb247f` | **chưa review lại** (việc còn nợ của TV3) | — |
+| #49 (`62bded7` trước bản sửa này) | TV2 | `942383f` (cũ) | `ACK_WITH_ACTIONS` for this scope | 2026-11-09 03:23 |
+| #49 | TV5 | `9b337f5` (cũ) | `ACK_WITH_ACTIONS` for TV3↔TV5 scoped design | 2026-11-13 06:27 |
+| #49 | TV1 | `62bded7` | `ACK_WITH_ACTIONS / HOLD DOCS GATE` (COMMENT review only) | 2026-11-13 10:51 |
+| #49 | TV1 | `62bded7` (revision request) | `ACK_WITH_ACTIONS / HOLD DOCS GATE` | 2026-11-18 19:11 |
+| #49 | TV4 | — | chưa có review trên #49 | — |
+
+Đọc bảng: chưa PR nào có hai review L2 độc lập của con người ở HEAD hiện tại. Các ACK của TV2/TV5 trên #49 là ở SHA cũ (`942383f`, `9b337f5`) và cần xin lại sau bản sửa này.
+
+**Cập nhật trạng thái (đọc GitHub API 2026-11-19 sau 15:35 UTC).** Bảng trên giữ nguyên làm **lịch sử**; dòng "#50 TV3 chưa review lại" đã được giải quyết. HEAD hiện tại: #46 `c495677`, #47 `001619d`, #48 `813aa3e`, #50 `52c23ea`, #49 = HEAD ghi trong comment công bố bản sửa `C-FINAL`. Các review/comment mới:
+
+| PR | Reviewer | SHA | Verdict (nguyên văn) | Thời điểm (UTC) |
+|---|---|---|---|---|
+| #46 | TV3 | `f58acd4` | `ACK_WITH_ACTIONS` for this scope | 2026-11-19 00:59 |
+| #46 | TV2 (tác giả, comment) | `c495677` | trả lời 4 action của TV3 ở `f58acd4`; TV3 chưa xác nhận ở `c495677` | 2026-11-19 07:08 |
+| #47 | TV3 | `001619d` | `ACK_WITH_ACTIONS` for this scope | 2026-11-19 01:13 |
+| #48 | TV3 | `813aa3e` | `ACK_WITH_ACTIONS` for `D-IF-07` | 2026-11-19 01:06 |
+| #50 | TV3 | `edb247f` | `ACK_WITH_ACTIONS` for the 2C ↔ 2E scope | 2026-11-19 00:55 |
+| #50 | TV5 (tác giả) | `52c23ea` | commit mới "reconcile cross-phase review findings"; chưa có review ở SHA này | 2026-11-19 13:31 |
+| #49 | TV3 (tác giả, comment) | `65798a4`, rồi `f3edb94` | trả lời revision request; sửa wording số khóa active | 2026-11-19 00:51, 06:16 |
+| #49 | TV1 (comment) | `f3edb94` | `ACK_WITH_MINOR_ACTIONS` (`C-FINAL-01..04`) | 2026-11-19 15:35 |
+
+Vẫn **không có GitHub `Approve` nào**; `ACK_WITH_ACTIONS`/`ACK_WITH_MINOR_ACTIONS` không phải approval. Theo TV1 (2026-11-19), lead tự điều phối ACK liên Phase, quyết định L2, cross-phase architecture freeze và docs gate.
 
 **Mẫu ACK mỗi owner:** `Producer/consumer; design file+SHA; port methods/params/return/status/error; test IDs and evidence; code SHA; ACK_COMPATIBLE|ACK_WITH_ACTIONS|BLOCK; reviewer link`. Không chấp nhận 'đã thấy/CI xanh' chung chung. Trước khi thay đổi chuẩn ADR đã chốt phải review owner + downstream affected-owner theo đúng interphase change control.
 
@@ -194,9 +267,21 @@ RejectedV1Receipt(inbox_row_id, rejection_code)
 | `P2C-DRT-01` | callback đúng Bearer / missing / JWT / opposite token | Chỉ callback Bearer đúng mới có write; others 401/no DB effect | TV3/TV1/TV5 |
 | `P2C-DRT-02` | duplicate/extra/malformed JSON, invalid UUID/time/I-JSON | Mọi bad envelope 422, không có PENDING eligible | TV3 |
 | `P2C-DRT-03` | frozen ADR-004 Ed25519 vector giữa two runtimes | Same JCS/prefix bytes; valid verify PASS, tamper FAIL | TV3/TV5 |
-| `P2C-DRT-04` | exact same raw result_id after terminal | 202 DUPLICATE; 1 row, original received_at unchanged | TV2/TV3 |
-| `P2C-DRT-05` | same ID but raw whitespace/order changed | 409 COLLISION, original bytes intact | TV2/TV3 |
-| `P2C-DRT-06` | concurrent duplicate/collision two DB sessions | UNIQUE winner; loser rollback/re-read; no new row | TV2/TV3 |
+| `P2C-DRT-04` | cùng `result_id`, cùng SHA-256 và binding (gửi lại byte gốc) sau khi Job terminal | 202 DUPLICATE; 1 row, `received_at` đã lưu không đổi | TV2/TV3 |
+| `P2C-DRT-05` | cùng ID nhưng body đổi whitespace/thứ tự member (SHA-256 khác) | 409 COLLISION, byte gốc và `envelope_sha256` đã lưu nguyên vẹn; oracle là so digest + binding (D-01 Option C), không phải so byte literal | TV2/TV3 |
+| `P2C-DRT-06` | concurrent duplicate/collision hai DB session | UNIQUE winner; loser nhận 0 row từ `ON CONFLICT DO NOTHING` không có target, probe mới quyết định; không thêm row | TV2/TV3 |
+| `P2C-DRT-06b` | catalog `result_inbox` unique constraints | Đúng hai: PK và `uq_result_inbox_result_id` | TV2/TV3 |
+| `P2C-DRT-19` | body 16,384/16,385 byte, depth 4/5, chunked, sai Content-Length | Mọi lỗi `422`, không có Inbox row | TV1/TV3/TV5 |
+| `P2C-DRT-20` | V-OUT verdict cũ/lệch (row đổi, hash khác, Job đã terminal) | Không có business effect | TV2/TV3 |
+| `P2C-DRT-21` | row đã admit nhưng parser drift/envelope malformed | Giữ `PENDING`, alert, fallback bị chặn | TV3 |
+| `P2C-DRT-22` | mã housekeeping nằm trong `RejectedV1Receipt` | Bị từ chối; enum đóng 4 mã | TV2/TV3 |
+| `P2C-DRT-23` | cô lập protected oracle | Verifier và Manager/Finalizer không có SELECT `simulation_references`; chữ ký hợp lệ ≠ oracle truth | TV2/TV3/TV5 |
+| `P2C-DRT-24` | restart và quá deadline: callback, reconcile, finalize | Row đúng hạn đã lưu vẫn được xử lý; row muộn bị loại | TV1/TV2/TV3/TV5 |
+| `P2C-KEY-10` | receipt K1 đã lưu đúng hạn, K2 đăng ký, Worker ở quiesce hai khóa | Manager verify và finalize K1 theo luật thường; drain tiếp tục (cả biến thể sau khi K1 retire) | TV2/TV3/TV5 |
+| `P2C-KEY-11` | registry khóa không đọc được (lỗi DB/timeout) | Row giữ `PENDING`, **không** phải `UNKNOWN_KEY` | TV2/TV3 |
+| `P2C-DRT-25` | timeout/exception verifier lặp lại trên một candidate đã admit | Giữ `PENDING`, retry có giới hạn rồi alert escalation; không mã reject, không `SYSTEM_FAULT`; Job khác vẫn chạy (`C-FINAL-03`, §7.9) | TV1/TV3 |
+| `P2C-DRT-26` | cô lập verifier thuần | Module verify chạy khi không có DB/Session/mạng và vẫn verify được vector ADR-004 và vector proof G1; chỉ adapter đọc khóa (`C-FINAL-01`, §7.2.1) | TV1/TV2/TV3 |
+| `P2C-SIGN-01..10` | G1: restart không bundle, bundle sai, Manager restart, proof replay/sai worker, domain separation, không HTTP dưới khóa, restart trong TTL, proof K1 cũ sau K2, input xấu, không phản hồi | Chi tiết `Phase_2C_v0.9.md` §6.6.5 item 9 và §7.2; tất cả `NOT_RUN` | TV1/TV3/TV5 (+TV2/TV4) |
 | `P2C-DRT-07` | callback COMMIT completed but HTTP ACK lost | retry exact bytes/id returns duplicate, no false ack | TV2/TV3/TV5 |
 | `P2C-DRT-08` | wrong Ed25519 signature, schema otherwise valid | 202 STORED; Manager REJECTED; 0 terminal/reputation | TV3/TV2/TV5 |
 | `P2C-DRT-09` | signed wrong worker/listing/job/attempt/key | Context reject and 0 accepted Signed Result | TV3/TV2 |
@@ -210,19 +295,25 @@ RejectedV1Receipt(inbox_row_id, rejection_code)
 | `P2C-DRT-17` | actual native API/Manager PostgreSQL logins, Simulator isolation | Least privilege; no Simulator SQL identity; no read oracle | TV2/TV3/TV5 |
 | `P2C-DRT-18` | crash before/after finalize COMMIT, retry same/different ID | Exactly one accepted result/release/eligible contribution | TV1/TV2/TV3/TV5 |
 
-**Tình trạng:** toàn bộ `P2C-DRT-01..18 = NOT_RUN`, các `P2C-ACC-01..09` chưa có evidence runtime; test vector authoring/self-check trong ADR không phải product PASS. Native-DB/Compose/cross-runtime crash tests phải dùng DB **disposable có safety marker và teardown cluster-wide credentials**; `backend/tests/test_phase1_runtime_http_postgres_e2e.py` trên #39 vẫn dùng `bootstrap_roles(..., rotate_password=True)` nhưng chưa thấy wrapper restore cùng file, dù PR #42 đã thêm wrapper cho Auth browser E2E.
+**Tình trạng:** toàn bộ `P2C-DRT-01..26` (và `06b`), `P2C-KEY-*`, `P2C-SIGN-*` = `NOT_RUN` (cập nhật 2026-11-19; trước đó `P2C-DRT-01..24`, ban đầu `01..18`), các `P2C-ACC-01..09` chưa có evidence runtime; test vector authoring/self-check trong ADR không phải product PASS. Native-DB/Compose/cross-runtime crash tests phải dùng DB **disposable có safety marker và teardown cluster-wide credentials**; trên `main`, `backend/tests/test_phase1_runtime_http_postgres_e2e.py` đã bọc `bootstrap_roles(..., rotate_password=True)` bằng fixture `restored_e2e_role_credentials` (dùng `role_credentials.restored_login_role_credentials` từ #42); test Phase 2 nào đổi mật khẩu role phải dùng lại helper này.
 
 ## 8. Công việc nhóm trưởng phải chốt để TV3 không bị kẹt
 
 | Gate/decision | Trạng thái cần làm rõ | Owner |
 |---|---|---|
-| `G0` | PR #39 được review đủ, merge vào `main` theo process; accepted base SHA/Alembic head/roles | TV1 + reviewers, không phải TV3 tự merge |
+| `G0` | **Đã đạt 2026-11-08:** PR #39 merge vào `main` (`aff538f`); base hiện tại `main@bee832e`, Alembic head `0005_listing_d7`; roles theo `0002_phase1b_grants` | TV1 (đã merge) |
 | `G1` | `C-IF-01..11` có source+consumer ACK, size/depth budgets, key bootstrap và typed verifier fields được freeze | TV1 + TV2/TV3/TV4/TV5 |
 | `G1-INCIDENT` | Key compromise incident policy đối với new signing, pending Inbox, RUNNING, retained signatures | Lead L2 security decision; chưa được phê duyệt |
 | `G1-CACHE` | `P2E-CACHE-GAP-01` dispatch conflict after cold restart: enforce via valid owner-approved design or L2 change-control | TV5+TV1+TV3, chưa được phê duyệt |
-| `G2` | Owner cho phép riêng **TV3 Phase2C code**, nêu scope, branch, dependencies; không mặc định từ approval Phase2 | TV1 |
+| `G2` | Theo thông báo 2026-11-08: code chỉ bắt đầu sau khi PR docs Phase 2C được review chéo, lead chốt và merge; sau đó từng task code có nhánh/PR riêng, phụ thuộc của task phải đã ACK. Lead xác nhận thông báo này có thay cho bản ghi G2 riêng hay không | TV1 |
 | `G3` | Phân phối test Docker/PG; không rotate password ở shared/persistent DB; native role proofs; signed vector + HTTP + crash barriers | TV2+TV3+TV5 |
 | `G4` | Independent human review, impacted owner ACKs tại exact SHA, CI Phase2 PASS; xét merge riêng | TV1 + TV2/TV3/TV4/TV5 |
+
+**Cập nhật 2026-11-19 cho các gate trên (không đổi trạng thái nào thành đạt):**
+- `G1`: các hướng L2 đã được duyệt có điều kiện (xem đầu file); vẫn thiếu ACK exact-SHA, L2 change request cho endpoint G1, L2 source reconciliation `TX-FINALIZE` và lock order, size/depth budget (TV1 ACK) và các tham số `PENDING_PARAMS`.
+- Mục còn OPEN: `D-03/S-10` (danh tính provisioning `worker_public_keys`), `D-16` (cold-restart dispatch conflict; lead ưu tiên phương án B cho MVP nhưng chưa duyệt đổi API Contract, TV5 lập đề xuất L2), `C-IF-09`, TTL/replay/restart-trong-TTL của G1, runtime budgets, `D-19`.
+- `G4`: cần **hai review L2 độc lập của con người** trên HEAD cuối, ngoài ACK producer/consumer; review `COMMENTED` cũ không tự áp dụng cho HEAD đã sửa.
+- **Sau `C-FINAL-01..04` (2026-11-19):** TV1 kiểm tra lần cuối HEAD mới rồi trực tiếp xử lý cross-phase architecture freeze và docs gate. Việc còn chờ lead: L2 change request cho endpoint G1; tham số `PENDING_PARAMS` (TTL proof, timeout, nonce lifetime, backoff, retry/escalation của runbook §7.9, budget scan/lock/body); source reconciliation `database-design.md` §9.2-05 (index `SUPERSEDED_BY_D18`), §11 `TX-FINALIZE` (E-C4), §11.1 lock order; trạng thái `D-02/E-C2`; `D-03/S-10`; `D-16`; `C-IF-09`; `D-19`; xử lý row hỏng dữ liệu ở runbook R2 (`NEEDS_OWNER_DECISION`).
 
 **Không đổi** số giây ADR-005 (Outbox scan 2s, lease 30s, callback/dispatch backoff 2/4/8/16/30, hard deadline `finish_due_at+120s`), không tự mở rộng Phase1 `/health/ready` (CR L2 chưa quyết), không thêm JWT refresh hay key-management service.
 
@@ -233,7 +324,7 @@ RejectedV1Receipt(inbox_row_id, rejection_code)
 - [ ] `CALLBACK_HTTP_CONTRACT.md` và `WIRE_BOUND_PARAMS.md` được TV1/TV2/TV5 ACK.
 - [ ] `VERIFIED_RECEIPT_PORT.md` với immutable fields, error enum, anti-TOCTOU proof được TV1/TV2/TV5 ACK.
 - [ ] `SIGNER_KEY_LIFECYCLE.md` + plan K1/K2; private-key provisioning TV5 và registered public key TV2 đã có đường kỹ thuật; incident vẫn `NEEDS_OWNER_DECISION` nếu chưa chốt.
-- [ ] `TV3_PHASE2_TEST_MATRIX.md` cho 18 case, đúng status và fixture.
+- [ ] `TV3_PHASE2_TEST_MATRIX.md` cho các case `P2C-DRT-01..26` (và `06b`), `P2C-KEY-01..11`, `P2C-SIGN-01..10`, đúng status và fixture (hiện tất cả `NOT_RUN`; chưa có file riêng, nội dung ở `Phase_2C_v0.9.md` §7.6 và §7 của file này).
 - [ ] Khi code được duyệt: parser, JCS/Ed25519, callback dependency/route, typed verifier, suite negative, integrated PG/HTTP/Compose và exact evidence.
 - [ ] `TV3_DELIVERY_REPORT.md` có Git HEAD/base, schema revision, CI links, từng test verdict, raw evidence digests (không có secret), ACK và reviewer độc lập.
 
@@ -251,4 +342,4 @@ Full CI URLs, human reviewer, ACK by consumer and merge disposition:
 Outstanding blockers and next responsible owner:
 ```
 
-**Một nhánh công việc thống nhất cho TV3 sau khi được cho phép.** Không tạo nhiều nhánh con không cần thiết; không đẩy source code hoặc cấp quyền runtime trước phê duyệt riêng. Các báo cáo/tài liệu đọc nội bộ có thể chuẩn bị mà không làm thay đổi GitHub.
+**Quy trình nhánh (cập nhật theo thông báo 2026-11-08, thay cho quy tắc "một nhánh thống nhất" trước đây):** Giai đoạn 1 dùng một nhánh docs `docs/phase2c-tv3-design` và một PR docs vào `main` để review chéo; chỉ merge khi không còn vấn đề chặn, đủ review và lead chốt. Giai đoạn 2: **một task = một nhánh = một PR** từ `main` mới nhất, có test và CI, review chéo, merge từng PR khi đủ điều kiện, không chờ hết Phase. Không push trực tiếp `main`, không tự merge PR của mình, không đẩy source code hoặc cấp quyền runtime trước khi docs và phụ thuộc của task được duyệt.
