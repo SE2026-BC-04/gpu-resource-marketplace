@@ -45,7 +45,7 @@ These **18 logical entities and their physical column/constraint design in Secti
 | 9 | `execution_attempts` | Manager | `attempt_id`, `job_id`, trusted `started_at`, `finish_due_at`, `hard_deadline_at` | Proposed one stable logical attempt per Job in MVP; HTTP resend reuses same attempt |
 | 10 | `allocations` | Manager | `id`, `job_id`, `listing_id`, `gpu_count`, active/released status, allocated/released timestamps | At most one allocation per Job; once released, never active again |
 | 11 | `execution_outbox` | Manager | `event_id`, `attempt_id`, event type, stable dispatch payload/reference, delivery state, retry due, lease owner/version/expiry, attempt counter | Dispatch event stored in same commit as RUNNING + allocation; claims are fenced |
-| 12 | `result_inbox` | API insert; Manager inspect/mark handled | `id`, untrusted `result_id` when parseable, claimed job/attempt, raw HTTP signed envelope, byte hash, trusted `received_at`, verification/processing state and rejection reason | `result_id` unique for parseable submissions; same ID with different bytes is conflict; reject invalid or late ingress |
+| 12 | `result_inbox` | API insert; Manager inspect/mark handled | `id`, untrusted `result_id` when parseable, claimed job/attempt, raw HTTP signed envelope, byte hash, trusted `received_at`, verification/processing state and rejection reason | `result_id` unique for parseable submissions; same ID with a different SHA-256 digest or trusted binding conflicts per D-01 Option C; reject invalid or late ingress |
 | 13 | `signed_results` | Manager | `result_id`, `job_id`, `attempt_id`, `worker_id`, `key_id`, original signed payload/envelope bytes, signature bytes, verification time | At most one ACCEPTED verified result per Job; original evidence immutable; historical key remains available |
 | 14 | `disputes` | API insert; Manager resolve | `id`, `job_id`, `client_id`, reason, `OPEN/RESOLVED`, `UPHELD/REJECTED`, trusted filing decision time, resolved time, explanation | At most one Dispute per Job, only for an eligible accepted result in `[terminal_at, terminal_at+7d)` |
 | 15 | `worker_reputation_aggregates` | Manager | `worker_id`, lifetime `successful_jobs`, `worker_fault_jobs`, update time | One aggregate per Worker, nonnegative; preserved after 23-day Job purge |
@@ -640,6 +640,7 @@ TX-SUBMIT:
 
 TX-ALLOCATE:
   BEGIN READ COMMITTED
+  LOCK per-Worker advisory SHARED for L.worker_id  # D-18: before Listing
   LOCK gpu_listings[L] FOR UPDATE    # scheduler may SKIP a locked LISTING
   REQUIRE L.status == ACTIVE
   SELECT first jobs WHERE listing_id=L AND status=QUEUED
@@ -669,9 +670,13 @@ TX-INBOX-INGRESS (after authenticating scoped Simulator token):
   BEGIN READ COMMITTED
   Read immutable J.listing_id as an UNLOCKED locator
   LOCK gpu_listings[J.listing_id], then LOCK jobs[J] FOR UPDATE
-  Find exact existing result_inbox.result_id, if present:
-      same full original_envelope_raw -> return original receipt ACK, no new row
-      different bytes -> ROLLBACK + RESULT_ID_CONFLICT
+  Probe retained result_inbox by result_id via restricted digest+trusted
+      Job/Attempt binding access (D-01 Option C):
+      SAME digest+binding -> return 202 DUPLICATE without timestamp/write
+      DIFFERENT digest or binding -> ROLLBACK + RESULT_ID_COLLISION
+      ABSENT -> proceed with a new bound Inbox candidate
+  Require CHECK envelope_sha256 = sha256(original_envelope_raw).
+  Concurrent unique loser must rollback and re-probe; no raw-byte SELECT.
   RECHECK J == RUNNING and execution_attempts(job_id=J,attempt_id=A)
   t = db_now()                         # AFTER Job lock; cannot be backdated
   IF t >= A.hard_deadline_at: ROLLBACK + LATE_RECEIPT
@@ -686,14 +691,19 @@ TX-FINALIZE / TX-DEADLINE-FALLBACK:
   Fresh-query pending Inbox for this bound Job, WHERE received_at < deadline,
       ORDER BY received_at,id; lock candidate rows only AFTER Job lock.
   For each candidate (bounded payload, no network I/O):
-      verify exact ADR-004 bytes, key_id/public key, Job/Listing/Worker/Attempt,
-      schema, signature and outcome/failure_reason;
-      INVALID -> Inbox=REJECTED and continue to next candidate;
+      use TV3 provisional pure V-OUT verifier result computed OUTSIDE locks;
+      re-read locked raw Inbox evidence, digest, bound identities, DB time,
+      original signed parts and PENDING state before any business write;
+      DEFINITIVE_INVALID (four TV3 codes) -> Inbox=REJECTED and continue;
+      TRANSIENT or admitted-schema-invariant fault -> keep Inbox=PENDING,
+          block later winner and deadline fallback (PrecedingPending);
       VALID -> INSERT immutable signed_results; Job -> terminal;
           Allocation ACTIVE -> RELEASED; Listing counter -= allocated GPU;
           INSERT one contribution for SUCCESS/WORKER_FAULT/NONE;
           increment matching lifetime aggregate only for eligible category;
           Inbox=ACCEPTED; COMMIT once, never finalize again.
+  IF any earlier on-time PENDING candidate remains: COMMIT no terminal effect
+      # Do not fallback or allow a later valid candidate to bypass it.
   IF no valid on-time candidate AND db_now() < hard_deadline_at:
       COMMIT rejected-inbox processing only; keep Job RUNNING.
   ELSE IF no valid on-time candidate AND db_now() >= hard_deadline_at:
@@ -719,7 +729,7 @@ TX-OPEN-DISPUTE:
                   next_retry_at=t)
   COMMIT                                # UNIQUE(disputes.job_id) decisive
 
-TX-RESOLVE-DISPUTE:
+TX-RESOLVE-DISPUTE:  # Phase 3 only, separately approved privileged reference read
   BEGIN READ COMMITTED
   Read dispute/job/listing IDs without row locks; LOCK Listing -> Job -> Dispute
   IF dispute already RESOLVED: COMMIT no-op
