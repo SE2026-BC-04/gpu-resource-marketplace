@@ -1,11 +1,15 @@
 # HANDOFF TV4 — Phase 2D: Strict FIFO Scheduling, Capacity Allocation & Concurrency
 
 **Owner:** TV4 `@VietNguyen865` — Listing/FIFO **policy owner**, phối hợp tích hợp Manager Scheduler.  
-**Version:** `v1.1 — FINAL-DESIGN-ALIGNED / REVIEWED_FOR_OWNER_APPROVAL`, 2026-11-07.  
-**Trạng thái:** `ACK_WITH_ACTIONS / AWAITING_LEAD_APPROVAL`; sau khi nhóm trưởng chốt sẽ là `APPROVED_HANDOFF_CONDITIONAL`, **không cấp quyền code**.  
-**Thiết kế chuẩn:** `Phase_2D_v0.9.md`, `P2D-GATE-01=APPROVED_DESIGN_CONDITIONAL`; so với 2A v0.9, 2B v1.3, 2C v0.9, 2E v1.8. Nội dung `PENDING_ACK`, `PENDING_PARAMS`, `NEEDS_OWNER_DECISION` vẫn chưa được duyệt tự động.  
-**GitHub snapshot đã kiểm tra:** [PR #39](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39) `open / draft / unmerged`, HEAD `6788505cbb68e09ad08ea2b96728bc6c69e8a32e`, base `main@1d8b1b2c52b759d99a072c3d0d889b375083a8c4`. PR [#42](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/42) **đã merge vào nhánh PR #39**, không phải `main`. PR [#17](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17) và [#31](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/31) đã merged.  
-**Phạm vi cập nhật:** chỉ tài liệu handoff/báo cáo, không sửa code, SQL, GitHub/PR hay database; test **Phase 2D `NOT_RUN`**.
+**Version:** `v1.2-docs-review-r2`, updated 2026-11-19; giữ tên file để không phá đường dẫn tham chiếu.
+
+**Trạng thái:** TV1 đã review #48 @ `b399118` với `ACK_WITH_ACTIONS / HOLD DOCS GATE`; TV3 review scope `D-IF-07` trên #48 @ `813aa3e` với `ACK_WITH_ACTIONS`, các action signer được cập nhật tại revision này. Vẫn `EXACT_HEAD_CROSS_REVIEW_PENDING / NO_CODE_AUTHORIZATION`; tự review/Codex không phải approval độc lập. Chưa code trước khi docs được merge và có coding gate riêng.
+
+**Thiết kế chuẩn:** [Phase 2D](../../../architecture/phases/phase2/Phase_2D_v0.9.md), bản rà soát `0.9-docs-review-20261119-r2`; giữ `P2D-GATE-01=APPROVED_DESIGN_CONDITIONAL`, đối chiếu #47 `001619d`, #46 `0ca059c`, #49 `f3edb94` (Phase 2C blob `a869dd7d4006981ac0d2478a2fb3b684f1f1a157`), #50 `edb247f8`. D-18/E-C3, G1 và Worker-first lock là `APPROVED_DESIGN_DIRECTION_CONDITIONAL`; D-19, TTL/replay/restart, provisioning/compromise và numeric budgets còn OPEN.
+
+**Baseline hiện tại:** `main@bee832eaf5463df20f6c6815174322871eb6685a` sau docs intake [#44](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/44). [#39](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39) đã merge bởi TV1, merge SHA `aff538f79997c6e2bfcf359b176a82f2cd9ecc53`, source head `3482bce3cc9726543b9345a5224d8db1b9fc6454`; #42 đã nằm trong baseline qua #39. #17/#31 đã merged. Read-only Alembic graph có một head `0005_listing_d7`; chưa kết nối DB để xác nhận installed revision/native role trong lần review này.
+
+**Phạm vi cập nhật:** chỉ hai file thiết kế/handoff TV4; không sửa application/test code, SQL, migration hay database. Nhánh `docs/phase2d-design-review`; [#45 giữ Draft/HOLD](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/45#issuecomment-6721101443) vì prototype được làm trước khi quy trình docs-first được làm rõ. CI/unit test của prototype không mở coding gate và không phải chứng cứ runtime allocation.
 
 ## 1. Mục tiêu tổng quát và điều kiện thành công
 
@@ -26,21 +30,21 @@ TV4 phải định nghĩa và (chỉ sau khi được cho phép) triển khai/ki
 
 | Công đoạn | TV4 chịu trách nhiệm | TV khác chịu trách nhiệm, không giao trùng |
 |---|---|---|
-| FIFO/head-of-line | Quy tắc chọn Job có `enqueue_seq` nhỏ nhất, không skip, classification `EMPTY/BLOCKED/ELIGIBLE`, business oracle | **TV2** viết SELECT/LOCK/UPDATE PostgreSQL đúng thứ tự; TV4 review SQL theo luật FIFO |
-| Manager Scheduler | Đề xuất policy quét Listing/cursor, kiểm thử tiến độ/liveness với budget | **TV1** giữ Supervisor, vòng lặp Scheduler, executor, shutdown, config và metrics integration |
+| FIFO/head-of-line | Pure policy nhận immutable scalar snapshot do TV2 tạo dưới khóa và trả `ELIGIBLE/EMPTY/HEAD_DOES_NOT_FIT/LISTING_NOT_ACTIVE`; không cầm ORM/Session, không tuyên bố COMMIT | **TV2** chọn head thật bằng `enqueue_seq`, viết SELECT/LOCK/UPDATE và map assessment sang `B-IF-06`; TV4 review theo luật FIFO |
+| Manager Scheduler | Đề xuất stable rotating cursor, fairness oracle và test tiến độ/liveness | **TV1** giữ Supervisor/vòng lặp, bounded scan, proof-call orchestration, executor, shutdown, config và metrics integration |
 | `TX-ALLOCATE` | Invariant, test oracle, contract với UoW, chỉ tích hợp bằng interface được ACK | **TV2** sở hữu một DB Session, transaction, lock, DB time, role/grants, atomic commit, error mapping |
 | Listing/Cancel/Resume | Xác nhận tương thích Listing Phase1, race policy và regression test; không mở rộng HTTP API | API Listing và `TX-CANCEL` Phase 1 giữ sở hữu hiện tại; **TV5** xác nhận lifecycle Job/Attempt/Outbox |
-| `RUNNING` dispatch retry | Chứng minh PAUSED không làm đổi Attempt và không allocate lần hai | **TV1** Dispatch Loop, **TV2** Outbox lease/fencing, **TV5** Simulator idempotency |
+| `RUNNING` dispatch retry | Chứng minh PAUSED không làm đổi Attempt và không allocate lần hai; chỉ `ACK_COMPATIBLE` với boundary D-19 | **TV1** Dispatch/HTTP, **TV2** normal Outbox và repair SQL/fence, **TV5** Simulator/Finalizer; D-19 vẫn cần L2 approval |
 | Key readiness/rotation | Ranh giới tạm PAUSE/quiescence đối với Listing và race với allocation; đề xuất fail closed | **TV3** security/key policy, **TV5** private signing key/Simulator, **TV2** key registry SQL; incident compromise cần quyết định riêng |
 | Finalization/release | Đối chiếu conservation sau khi Job terminal, kiểm tra không over/under-release | **TV5** business Finalizer/Reputation, **TV2** atomic release SQL, **TV1** điều phối |
 
-**TV4 không tự:** tạo Scheduler service thứ sáu, bảng mới, migration/GRANT, SQL `TX-ALLOCATE` song song với TV2, đổi API Submit/Cancel, đổi Signed Result V1, sửa token/JWT, xây Finalizer/Reputation, cho Simulator dùng DB, hoặc giữ HTTP call dưới PostgreSQL domain lock. Khi code, dùng **một nhánh/PR cho gói nhiệm vụ TV4** theo quy tắc nhóm; không phân nhánh nhỏ cho từng bài race.
+**TV4 không tự:** tạo Scheduler service thứ sáu, bảng mới, migration/GRANT, SQL `TX-ALLOCATE` song song với TV2, đổi API Submit/Cancel, đổi Signed Result V1, sửa token/JWT, xây Finalizer/Reputation, cho Simulator dùng DB, hoặc giữ HTTP call dưới PostgreSQL domain lock. **Thứ tự:** tự review/sửa docs → PR docs/review chéo → nhóm trưởng chốt và merge docs → code. Sau đó **một task = một nhánh = một PR** từ `main` mới nhất; không dùng một nhánh cho toàn Phase và không phải đợi cả Phase xong mới merge một task đủ cổng.
 
 ## 3. Nguồn bắt buộc phải đọc — chính xác phiên bản
 
-### 3.1. Năm file FINAL đã được nhóm trưởng chốt có điều kiện
+### 3.1. Năm file thiết kế baseline đã được nhóm trưởng chốt có điều kiện
 
-| Thứ tự | File | TV4 phải rút ra điều gì? | SHA256 của file tại thời điểm review |
+| Thứ tự | File | TV4 phải rút ra điều gì? | SHA256 Git blob tại `main@bee832e`, trước bản sửa này |
 |---|---|---|---|
 | 1 | `Phase_2D_v0.9.md` | `P2D-OPEN-01..03`; FIFO strict; `D-IF-01..09`; `P2D-TX/RACE/SCHED/DRT`; cảnh báo `reserved_gpu_count` | `fdb7f79a1b89b9ed911fddce67da1763ea88a5417ab946a3121f8701f8758c60` |
 | 2 | `Phase_2B_v1.3.md` | Native Manager UoW, 6 Phase2 tables, `allocated_gpu_count`, single-commit, `COMMIT_OUTCOME_UNKNOWN`, lock/grant | `27c59f3e2eddc2584fc9c904aacfc7d45aa323b8745ec77eb5775d59b1af3371` |
@@ -48,7 +52,7 @@ TV4 phải định nghĩa và (chỉ sau khi được cho phép) triển khai/ki
 | 4 | `Phase_2E_v1.8.md` | one Attempt/Outbox, Simulator dispatch identity, PAUSED RUNNING retry, single terminal/release | `90af557a46a0f7bcb663eb9d17de3a2db866c4c0b2f1e5006a9160eed2d6609f` |
 | 5 | `Phase_2C_v0.9.md` | signing-key readiness, planned K1→K2 rotation, key compromise incident chưa chốt | `d92901a412aaaaa3a2e601781b3991019de9eeee1f45b891564a64d3fbd33902` |
 
-**Lưu ý:** Mốc HEAD `44579ed` và thông tin #42 chưa merge ở một số phần lịch sử của các thiết kế là **snapshot cũ**. Sử dụng quyết định nghiệp vụ đã chốt và HEAD quan sát mới của PR #39; không hiểu `APPROVED_DESIGN_CONDITIONAL` là phê duyệt giao diện/API/code mới. Không tự sửa năm file FINAL trong lần handoff này.
+**Lưu ý:** Các hash trên là dấu mốc `main@bee832e`, không phải SHA của các revision đang cross-review. Nguồn producer hiện hành để ACK là #47 `001619d`, #46 `0ca059c`, #49 `f3edb94` (Phase 2C blob `a869dd7d4006981ac0d2478a2fb3b684f1f1a157`), #50 `edb247f8`; review trên SHA cũ không tự chuyển sang SHA mới. Mốc `44579ed` và trạng thái #39/#42 cũ trong tài liệu các Phase khác không thay baseline hiện tại. Revision này chỉ sửa hai file TV4; thay đổi ảnh hưởng Phase khác cần owner nguồn và consumer xác nhận. Conditional approval hoặc merge #44 không hoàn tất review chéo.
 
 ### 3.2. Files GitHub phải đọc trên baseline thực tế
 
@@ -60,9 +64,9 @@ TV4 phải định nghĩa và (chỉ sau khi được cho phép) triển khai/ki
 - `backend/src/gpu_marketplace/jobs/{submit,cancel}.py`, `backend/src/gpu_marketplace/repositories/{job_submit,jobs,commit_outcome}.py` — TX-SUBMIT idempotency, CANCEL serialize với Allocation tương lai, commit-unknown classification.
 - `backend/src/gpu_marketplace/manager/service.py` — **hiện còn** `_foundation_idle_runner`, chưa có Phase2 Manager Scheduler.
 - `backend/tests/{test_phase1_runtime_http_postgres_e2e,test_listing_repository_postgres,test_listing_d7_postgres,test_jobs_submit_adapter_postgres,test_jobs_cancel_adapter_postgres}.py` — chỉ có baseline Phase1, không phải TV4 Phase2 PASS.
-- `backend/migrations/versions/0001_phase1b_baseline.py` đến `0005_listing_d7.py` — snapshot migrations quan sát trên PR39, **không đoán** Phase 2 migration cha cho đến khi #39 được chấp nhận trên `main` và `alembic heads/version` được xác nhận.
+- `backend/migrations/versions/0001_phase1b_baseline.py` đến `0005_listing_d7.py` — migration graph hiện tại trên main; TV2 phải xác nhận actual installed revision, native roles/grants và migration cha Phase 2 trước khi triển khai DB. Một head trong source không phải bằng chứng DB đã migrate.
 
-**Đã kiểm tra PR:** #17 và #31 merged; #39 Draft/open; #42 merged vào nhánh #39. Không có bằng chứng scheduler `TX-ALLOCATE` đã được triển khai ở HEAD đang xét. CI Phase1 trên #39 không đồng nghĩa các test `P2D-*` PASS.
+**Bằng chứng Phase1:** #17/#31/#39 merged, #42 đã vào main qua #39. Bốn test Submit ↔ Pause/Resize đã được bổ sung và PASS tại [CI head `3482bce`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/actions/runs/42385995533), ghi trong [TV4 re-review](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39#pullrequestreview-5813339600); không tiếp tục ghi đây là gap còn thiếu. [Audit khi role bị từ chối sớm](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39#discussion_r4502535120) vẫn là follow-up riêng cần lead ghi disposition. Không suy từ việc merge sang finding đã sửa, hoặc từ CI Phase1 sang Phase2 `P2D-*` PASS.
 
 ## 4. Các quy tắc đã duyệt — KHÔNG được mở lại khi code
 
@@ -72,7 +76,7 @@ Ví dụ Listing L1 có `total=4`, `allocated=2`, còn `free=2`: `J_A` là QUEUE
 
 - `enqueue_seq` là nguồn xác định accepted order, không dùng `submitted_at`, UUID, Job ID hoặc thời điểm trình duyệt.
 - Chọn `QUEUED` head trong **Listing đang khóa**; một Job bị lock hoặc thiếu tài nguyên không được coi là lý do bỏ qua nó để chọn Job sau.
-- `FOR UPDATE SKIP LOCKED` **chỉ có thể** dùng cho việc chia các **Listing claims** khi đã được TV1/TV2/TV4 duyệt; **cấm** dùng để nhảy qua Job đầu hàng đợi.
+- Contract TV1/TV2 hiện tại không dùng `SKIP LOCKED` cho Listing hay Job; lock bận dùng timeout hữu hạn và `Noop(LOCK_BUSY)`, sau đó quay lại Listing ở lượt sau. Không nhảy qua Job đầu hàng.
 - Nếu head đã `CANCELLED`, nó không còn thuộc tập `QUEUED`; lần xét sau có thể chọn Job QUEUED tiếp theo.
 - `total_gpu_count` không được giảm dưới `allocated_gpu_count` hoặc `MAX(requested_gpu_count)` của Jobs đang QUEUED; CPU/GPU được quan sát từ DB sau Listing lock, không từ UI.
 
@@ -80,7 +84,7 @@ Ví dụ Listing L1 có `total=4`, `allocated=2`, còn `free=2`: `J_A` là QUEUE
 
 Một Scheduler tick có thể xét nhiều Listing nhưng **mỗi `TX-ALLOCATE` chỉ giữ một Listing và tối đa một head**; commit/rollback độc lập. TV2 phải bảo đảm trong **cùng transaction**: Listing `allocated_gpu_count += demand`, Job `QUEUED → RUNNING`, tạo duy nhất `Allocation`, `ExecutionAttempt`, `ExecutionOutbox` cùng IDs ổn định. Thời điểm `started_at` từ `clock_timestamp()` sau lock; deadline `finish_due_at = started_at + duration_seconds`, `hard_deadline_at = finish_due_at + 120s`. **Không gửi HTTP** khi còn giữ Listing/Job lock.
 
-> **Erratum cần đóng bằng ACK TV2+TV4:** thiết kế Phase2D v0.9 có một dòng pseudocode dùng nhầm `reserved_gpu_count`; cột PostgreSQL thực tế và đúng là **`gpu_listings.allocated_gpu_count`**. Handoff này sử dụng tên cột đúng. Không tạo cột `reserved_gpu_count` và không im lặng sửa lại bản thiết kế FINAL đã chốt.
+> **Erratum X-01 được đề xuất sửa trong PR docs này:** §7.3 thiết kế trước đó dùng nhầm `reserved_gpu_count`; đã căn lại thành **`gpu_listings.allocated_gpu_count`** theo schema và Database Design §11.3 A. Không thêm/đổi tên cột. TV4 đưa sửa lỗi ra review; còn cần TV2 và nhóm trưởng xác nhận, chưa tự ghi ACK thay họ.
 
 ### 4.3. Scheduler 2 giây **cấu hình được**, không phải SLA — `P2D-OPEN-03=APPROVED`
 
@@ -99,16 +103,16 @@ Một Scheduler tick có thể xét nhiều Listing nhưng **mỗi `TX-ALLOCATE`
 
 ### 4.5. Khóa ký Worker và biến cố chưa chốt
 
-Planned K1→K2 rotation theo thiết kế **quiescent**: tạm PAUSE tất cả Listing liên quan, chờ mọi RUNNING Attempt kết thúc, TV2/TV3/TV5 kiểm tra và thay key theo giao thức an toàn, sau đó mới RESUME phù hợp. TV4 cần ngăn **new allocation với key chưa sẵn sàng** theo hợp đồng đã ACK. **Cách xác minh signer-readiness nguyên tử, khóa nhiều Listing và chính sách xử lý khi key bị lộ còn `PENDING_ACK / NEEDS_OWNER_DECISION`; không tự thêm API, bảng, HTTP gọi trong lock hay đọc private key.** Test phụ thuộc chưa chốt giữ `BLOCKED`.
+Theo quyết định có điều kiện D-18/E-C3 của TV1, allocation lấy Worker advisory shared trước Listing→Job; đăng ký/kích hoạt key lấy exclusive. Hai key active là hàng rào chặn allocation khi drain RUNNING; kích hoạt kiểm tra đúng {K1,K2}, K2 sẵn sàng và không còn RUNNING; nếu lỗi phải khôi phục signer K1 trước khi bỏ hàng rào. Manager lấy G1 proof ngoài UoW và truyền `SignerReadiness`; TV2 recheck worker/key/fingerprint/expiry dưới khóa. Nếu trả `Blocked(SIGNER_NOT_READY)`, Manager invalidation proof cache cho Worker đó; không thay đổi hàng đợi/capacity. Simulator restart trong TTL proof còn hiệu lực có thể không được Manager nhận biết, nên allocation vẫn có thể xảy ra rồi deadline fallback `SYSTEM_FAULT` không phạt Worker; đây là residual risk `P2C-SIGN-07` (#49 @ `f3edb94`), không phải oracle “no allocation”. Hướng này còn source L2, exact-SHA ACK, TTL/replay/restart và incident policy; tests `NOT_RUN`, chưa code.
 
 ## 5. Sáu nhiệm vụ chuẩn bị trước khi nhóm trưởng cho phép code
 
 | ID | Nhiệm vụ / chủ trì | Việc cần làm cụ thể | Bàn giao / tiêu chí chốt |
 |---|---|---|---|
-| `TV4-P2D-01` | **Freeze Phase1 baseline** | Kiểm tra trạng thái #17/#31/#39/#42, source SHA đã vào `main`, `alembic heads/version`, Listing ownership/ACTIVE/PAUSED/Capacity, Submit/Cancel replay; ghi open P2 audit/race của #39. | Bảng baseline Git SHA/migration/role & danh sách `PENDING_PHASE1_GATE`; chưa dùng PR39 Draft làm approved main. |
+| `TV4-P2D-01` | **Freeze Phase1 baseline** | Ghi main/source/merge SHA ở đầu file, một head `0005_listing_d7`, evidence bốn Submit-Pause/Resize barriers; TV2 xác nhận installed DB revision/native roles; lead ghi disposition audit còn mở. | Baseline source đã cập nhật; DB runtime identity/audit disposition còn chờ. Không gộp gap đã sửa với follow-up chưa xử lý. |
 | `TV4-P2D-02` | **Chốt FIFO và capacity oracle** | Đọc `Phase_2D_v0.9`, so thực schema `jobs.enqueue_seq`, phép chọn QUEUED head; xác nhận một Listing/transaction, bảng kết quả QUEUED/PAUSED/Blocked. Báo erratum `reserved_gpu_count → allocated_gpu_count` cho TV2+lead. | Policy spec/decision table và erratum ACK; không đổi FIFO hoặc thêm column. |
-| `TV4-P2D-03` | **Freeze `allocate_one_listing` port** | TV4 policy + TV2 UoW + TV1 caller + TV5 Job semantics: input, typed outcome, stable IDs, native role, lock order, timeout, `LOCK_BUSY`, COMMIT unknown, no-op commit/rollback và cách đối chiếu DB sau unknown. | ACK cho `D-IF-01/02/05/06/08`, interface snapshot theo source & consumer SHA; không code trước khi chốt tác động. |
-| `TV4-P2D-04` | **Chốt Listing scan/fairness/resource budget** | Cùng TV1+TV2 quyết định stable Listing order, rotating cursor, skip Listing lock, per-tick max Listing/time budget, executor/DB pool/statement timeout, startup/shutdown và metrics. | `D-IF-03/04` ACK, có bộ tham số **được chọn qua review/đo**, không tự gán mặc định ngoài tick 2s. |
+| `TV4-P2D-03` | **Freeze `allocate_one_listing` port** | TV4 policy + TV2 UoW + TV1 caller + TV5 Job semantics: input/outcome/IDs, native role, lock order/timeout, `LOCK_BUSY`, COMMIT unknown; giữ EMPTY/BLOCKED COMMIT no-op theo DB Design, chốt cleanup kết quả khác và reconciliation. | ACK cho `D-IF-01/02/05/06/08`, interface snapshot theo source & consumer SHA; không code trước khi chốt tác động. |
+| `TV4-P2D-04` | **Chốt Listing scan/fairness/resource budget** | Cùng TV1+TV2 chốt stable order/cursor, lock timeout và quay lại Listing sau, per-tick budget, executor/DB pool, startup/shutdown và metrics; contract hiện tại không dùng Listing `SKIP LOCKED`. | `D-IF-03/04` ACK, thông số chọn qua review/đo, không tự gán mặc định ngoài tick 2s. |
 | `TV4-P2D-05` | **Chốt race/key readiness** | Lập 2 commit orders cho Pause/Resume/Capacity PATCH/Hardware PATCH/Cancel/Allocate; TV3/TV5 chốt signer readiness, K1→K2, no HTTP under DB lock; phản hồi `X-01/X-04`. | Race truth table, `D-IF-06/07` ACK; companion owner decision về compromised key nếu cần. Test phụ thuộc `BLOCKED` tới khi được phép. |
 | `TV4-P2D-06` | **Chuẩn bị deterministic test & code gate** | Chốt fixtures > cycle budget, FIFO head quá lớn, 2 native PostgreSQL sessions + barriers, schema/role safety, expected row snapshots, test IDs, review responsibilities; thu thập quyền code riêng. | Ma trận `P2D-TX/RACE/SCHED/DRT`, kế hoạch test, reviewer + gate; không chạy migration/test phá dữ liệu trên persistent DB. |
 
@@ -119,16 +123,16 @@ Planned K1→K2 rotation theo thiết kế **quiescent**: tạm PAUSE tất cả
 | ID | Nhiệm vụ TV4 | Công việc kỹ thuật cụ thể của TV4 (không lấn ownership) | Đầu ra / điều kiện PASS |
 |---|---|---|---|
 | `TV4-P2D-07` | **FIFO policy thuần** | Viết/hoàn thiện logic chính sách: thứ tự `enqueue_seq`, chọn first QUEUED, từ chối head over free/INACTIVE, không backfill; quy tắc next Job khi head Cancelled. Không đọc UI snapshot để quyết định. | Tests unit: tie timestamps/UUID vẫn theo seq; head không fit→BLOCKED; Listing khác được xét. |
-| `TV4-P2D-08` | **Tích hợp port TV2 `TX-ALLOCATE`** | Cùng TV2 kiểm SQL lock Listing→Job, conditional status/capacity/identity, một UoW; TV4 chỉ implement policy/adapter theo giao diện thống nhất, không tự thêm DB transaction writer. | Một head, một Allocation/Attempt/Outbox và counter delta nguyên tử; DB conservation đúng. |
-| `TV4-P2D-09` | **Kết quả typed và lỗi** | Xác định kết quả `ALLOCATED/EMPTY_QUEUE/BLOCKED_CAPACITY/INACTIVE_LISTING/...` (tên chỉ proposal), diễn giải `LOCK_BUSY`, `DEPENDENCY_UNAVAILABLE`, `COMMIT_OUTCOME_UNKNOWN`; chỉ cho TV1 retry theo ACK, không blind retry khi lost ACK. | TV1/TV2/TV5 signoff; unknown COMMIT reconcile từ DB trước quyết định, không duplicate. |
+| `TV4-P2D-08` | **Tích hợp port TV2 `TX-ALLOCATE`** | Cùng TV2 kiểm Worker advisory shared→Listing→Job, proof/key, conditional status/capacity/identity, một UoW; TV4 chỉ implement policy/adapter sau docs gate. | Một head, một Allocation/Attempt/Outbox và counter delta nguyên tử; DB conservation đúng. |
+| `TV4-P2D-09` | **Kết quả typed và lỗi** | Chốt một vocabulary: policy thuần `ELIGIBLE/EMPTY/HEAD_DOES_NOT_FIT/LISTING_NOT_ACTIVE`; UoW `Allocated/Blocked/Noop/CommitOutcomeUnknown`; exception `DependencyUnavailable`. Diễn giải `LOCK_BUSY`; chỉ cho TV1 retry theo ACK, không blind retry khi lost ACK. | TV1/TV2/TV5 signoff theo exact SHA; unknown COMMIT reconcile từ DB trước quyết định, không duplicate. |
 | `TV4-P2D-10` | **Listing scan policy và fairness** | Thiết lập policy stable order, cursor wrap, per-cycle bounded scan và starvation regression; tích hợp với Scheduler loop của TV1 và UoW TV2, không tự tạo supervisor độc lập. | `P2D-SCHED-01..05`, DRT-09/10 PASS khi thực chạy; số scan và DB calls có giới hạn. |
 | `TV4-P2D-11` | **Listing PAUSE/RESUME/PATCH vs Allocate** | Kiểm chứng/rà guard của Listing Phase1 cùng `TX-ALLOCATE`: PAUSE-first vs alloc-first, capacity downsize vs alloc, hardware edit khi nonterminal, RESUME only permits later schedule. Không sửa API Listing nếu không qua change control. | Barriers cho cả hai commit orders; no overcommit, no forbidden edit/alloc when PAUSED. |
 | `TV4-P2D-12` | **Cancel/Submit/two-Managers races** | Cùng TV2/TV5 test Cancel-first và Allocate-first, hai Manager chọn cùng head; replay key cũ/body cũ trên PAUSED vs key mới; không cho `SKIP LOCKED` ở Job. | Job trạng thái hợp lệ; đúng 1 Allocation/Attempt/Outbox; Cancel QUEUED-only; retained replay 200. |
 | `TV4-P2D-13` | **PAUSED retry / outbox integration** | Cùng TV1/TV2/TV5 xác nhận resend same Attempt/event/payload, lease fencing, probe+hard deadline, không reserve lần hai; chỉ test/ACK contract, **TV4 không code HTTP client/Outbox SQL**. | Lost ACK khi PAUSED không phát sinh Allocation mới, stale owner không ACK lease mới. |
-| `TV4-P2D-14` | **Planned key-rotation readiness** | Xây dựng test cho PAUSE-all Listings, drain RUNNING, quiescent K1→K2, reopen hợp lệ; TV3/TV5 cung cấp policy/keys, TV2 khóa/read. Chưa có ACK thì làm test design và đánh `BLOCKED`. | Không allocate với signer unavailable, không deadlock/không lộ khóa; không tự kết luận xử lý compromised key. |
+| `TV4-P2D-14` | **Planned key-rotation readiness** | Thiết kế test hai thứ tự Worker advisory, quiesce hai key, drain RUNNING, stale K1 proof sau K2 và restore K1 khi rollback; TV3/TV5 cung cấp policy, TV2 khóa/read. | Không bypass FIFO hoặc đổi counter khi signer chưa sẵn sàng; runtime `NOT_RUN`; TTL/restart/compromise còn mở. |
 | `TV4-P2D-15` | **Unit/property tests** | Test chính sách thuần: FIFO/head oversized, gap trong seq, PAUSED vs ACTIVE, cancellation, scan wrap, cursor restart, idempotent retry view; fake test chỉ chứng minh policy. | `P2D-TX/SCHED` liên quan PASS theo test riêng; không gán fake unit PASS cho PG concurrency. |
 | `TV4-P2D-16` | **PG & E2E concurrency acceptance** | Trên disposable PostgreSQL16 có role native: 2+ sessions, deterministic barriers cả hai commit orders, snapshot Job/Listing/Allocation/Attempt/Outbox; rollback injection, commit lost-ACK, Manager restart, 2 Manager, resource saturation. | `P2D-DRT-01..15` + `P2D-RACE-01..08` + DBTX/API-LIST liên quan đạt PASS/ghi BLOCKED đúng nguyên nhân; CI exact SHA. |
-| `TV4-P2D-17` | **Bàn giao PR và review** | Một nhánh/PR TV4; cung cấp policy files, interface port SHA, config/metrics đã ACK, SQL/race evidence TV2 cùng kiểm, test manifest, đỏ/green logs và known findings, re-review độc lập. | Lead TV1 xét merge khi dependencies/CI/ACK đủ, không tự approve PR của chính mình. |
+| `TV4-P2D-17` | **Bàn giao PR và review** | Sau docs gate, mỗi task dùng nhánh/PR riêng; cung cấp policy files, interface port SHA, config/metrics đã ACK, SQL/race evidence theo đúng phạm vi, test manifest và known findings; re-review độc lập khi đổi head. | Mỗi task được xét merge khi đủ cổng; full integration cần đủ acceptance toàn phần. Không tự approve/merge. |
 
 **Cảnh báo giao việc:** `TV4-P2D-08` là **phối hợp tích hợp và test** giao dịch của TV2, không phải lệnh TV4 cùng viết một implementation SQL khác. `TV4-P2D-10` là policy quét; runtime scheduling loop của TV1. `TV4-P2D-13` là acceptance contract, không chuyển ownership Dispatch. Không code những task phụ thuộc chưa được ACK.
 
@@ -139,37 +143,49 @@ Planned K1→K2 rotation theo thiết kế **quiescent**: tạm PAUSE tất cả
 ```text
 Scheduler loop do TV1 sở hữu:
   mỗi tick (default configurable 2s):
-    take <= agreed_max_listings from stable rotating Listing-ID scan
-    for listing_id in eligible scan:
-       await bounded_executor_call(TV2.allocate_one_listing, listing_id)
-       log typed result, advance cursor after inspected Listing
+    take <= agreed_max_listings/time budget from stable rotating Listing-ID hint scan
+    for listing_id in inspected scan:
+       advance volatile cursor after this Listing regardless of EMPTY/BLOCKED/PAUSED/LOCK_BUSY
+       wrap at end; after restart start a conservative fresh DB scan
+       use queued-work hint only to avoid unnecessary G1 calls, never as authorization
+       readiness = bounded_G1_proof_per_worker(timeout, concurrency_budget, TTL_cache)
+       invalidate cache on expiry/Manager restart/active-key or approved lifecycle change
+       if missing/expired/key-mismatched readiness:
+          report Blocked(SIGNER_NOT_READY); continue; revisit after wrap/later cycle
+       result = await bounded_executor_call(TV2.allocate_one_listing, listing_id, readiness)
+       log only safe typed result; continue other Listings
     ensure Dispatch & Finalization workers/DB pool are not starved
 
 TX-ALLOCATE do TV2 viết (1 Listing, 1 UoW, READ COMMITTED):
-  begin with native gpm_manager_app session;
-  LOCK Listing[list_id] FIRST; recheck ACTIVE + total + allocated
-  if INACTIVE: return INACTIVE_LISTING (no mutation)
-  SELECT exact earliest still-QUEUED Job by enqueue_seq ASC
-       FOR UPDATE (NEVER SKIP LOCKED Job head)
-  if none: return EMPTY_QUEUE (no mutation)
-  if head.requested_gpu_count > total_gpu_count - allocated_gpu_count:
-       return BLOCKED_CAPACITY(head_id) (no mutation, do not try next)
-  // signer readiness guard ONLY according to separately ACKed contract
+  begin with one native gpm_manager_app Session
+  LOCK Worker advisory shared; LOCK/recheck Listing; SELECT+LOCK true enqueue_seq head
+       (NEVER SKIP LOCKED Job head)
+  build immutable scalar PolicySnapshot; no ORM/Session escapes
+  assessment = TV4 pure policy:
+       ELIGIBLE | EMPTY | HEAD_DOES_NOT_FIT | LISTING_NOT_ACTIVE
+  EMPTY -> COMMIT no-op -> Noop(NO_QUEUED_HEAD)
+  LISTING_NOT_ACTIVE -> COMMIT no-op -> Blocked(LISTING_NOT_ACTIVE)
+  HEAD_DOES_NOT_FIT -> COMMIT no-op -> Blocked(HEAD_DOES_NOT_FIT)
+  missing Listing / bounded lock timeout -> ROLLBACK -> Noop(LISTING_NOT_FOUND | LOCK_BUSY)
+  recheck sole active key + worker/key/fingerprint + DB-time expiry under locks
+  mismatch -> COMMIT no-op -> Blocked(SIGNER_NOT_READY)
+  // ELIGIBLE does not mean committed and cannot authorize dispatch
   t = PostgreSQL clock_timestamp() after locks
-  UPDATE gpu_listings.allocated_gpu_count += head.requested_gpu_count
-        using approved conditional capacity guard
-  UPDATE exact Job QUEUED -> RUNNING, set started_at=t
+  guarded UPDATE gpu_listings.allocated_gpu_count and exact Job QUEUED -> RUNNING
   INSERT one active Allocation; one immutable Attempt; one Outbox event
   finish_due_at = t + duration_seconds
   hard_deadline_at = finish_due_at + 120 seconds
-  COMMIT ALL; output ALLOCATED(job_id, attempt_id, outbox_event_id)
+  COMMIT ALL; output Allocated(job_id, attempt_id, event_id)
   if exception BEFORE definite rollback: rollback whole UoW
-  if COMMIT_OUTCOME_UNKNOWN: stop; reconcile stored rows via new trusted session,
-      never blindly allocate/reserve again
-  // no HTTP, no second DB Session inside domain lock
+  if CommitOutcomeUnknown(listing_id,job_id,attempt_id,event_id): stop and call
+      reconcile_allocation(expected=(listing_id,job_id,attempt_id,event_id))
+      complete exact graph -> AllocationCommitted (even terminal/released)
+      absent graph + Job QUEUED -> AllocationNotCommitted
+      partial/contradictory/wrong ID -> AllocationUnknown; alert; no blind retry
+  // no proof/HTTP and no second DB Session inside locks/UoW
 ```
 
-**Lưu ý về return/no-op:** Cách xử lý `commit` hay `rollback` cho các kết quả không ghi dữ liệu, kiểu outcome/exceptions và chiến lược `LOCK_BUSY` vẫn `PENDING_ACK`; pseudocode không tự phê duyệt interface. Không kéo một live SQLAlchemy Session từ thread/executor sang coroutine khác.
+**Lưu ý về return/no-op:** chỉ dùng một bộ UoW outcomes của `B-IF-06`; các tên `ALLOCATED/EMPTY_QUEUE/BLOCKED_CAPACITY/INACTIVE_LISTING` không phải boundary thứ hai. EMPTY/head không fit/inactive/signer-not-ready COMMIT no-op; missing Listing/LOCK_BUSY rollback. `DependencyUnavailable` là exception đã sanitize. Không kéo live SQLAlchemy Session/locked ORM qua thread/coroutine. Xem [Phase 2D §7.3/7.8](../../../architecture/phases/phase2/Phase_2D_v0.9.md#73-single-uow-tx-allocate-and-proposed-result-port); pseudocode chưa phải signature Python/SQL được duyệt.
 
 ## 8. Truth table cạnh tranh — mỗi race phải kiểm tra cả hai thứ tự commit
 
@@ -182,25 +198,27 @@ TX-ALLOCATE do TV2 viết (1 Listing, 1 UoW, READ COMMITTED):
 | `RESUME ↔ ALLOCATE` | RESUME commit trước: scheduler xét FIFO/capacity vào tick phù hợp | ALLOCATE lock trước trên PAUSED: no-op, RESUME sau không làm backdated allocation | Không tạo Job hay Outbox lúc PAUSED |
 | `2 MANAGERS ↔ SAME HEAD` | Một claim/commit hợp lệ | Manager đến sau re-read latest FIFO/state | Exactly one per Job, counter matches ACTIVE sum |
 | `CANCEL HEAD ↔ NEXT FIFO` | Cancel xóa head khỏi QUEUED, next QUEUED trở thành head | Allocate đã thắng -> không được Cancel RUNNING | Không skip head chỉ vì lock/capacity |
-| `K1→K2 ROTATE ↔ ALLOCATE` | Quiescent pause/drain/key ready trước khi resume | Allocation thắng trước pause thì phải drain RUNNING trước rotation | `BLOCKED` tới khi TV3/TV5/TV2/TV4 ACK recipe |
+| `K1→K2 ROTATE ↔ ALLOCATE` | Exclusive key lock thắng: hai key chặn allocation; K2 activation làm stale K1 proof bị từ chối | Shared allocation thắng: rotation chờ commit và drain RUNNING trước activation | Cả hai thứ tự, stale proof/fingerprint/expiry; `NOT_RUN`, exact ACK pending |
 | `PAUSED ↔ DISPATCH RETRY` | Đã RUNNING: retry cùng Attempt/outbox/payload hợp lệ | New allocation trên PAUSED: bị chặn | No duplicate allocation; hard deadline không dời |
-| `COMMIT ACK LOST ↔ RETRY` | Nếu COMMIT đã durable: reconcile and no-op | Nếu definite rollback: retry có kiểm soát theo TV2/TV1 | không double count; evidence ở session mới |
+| `COMMIT ACK LOST ↔ RETRY` | Durable exact graph: `AllocationCommitted`, kể cả terminal/released | Absent+QUEUED: `AllocationNotCommitted`; partial/wrong Event ID: `AllocationUnknown` | expected 4 IDs, fresh Session, không blind retry/double count |
 
 ## 9. Interface/ACK matrix — còn phải đóng trước triển khai
 
 | Mã chuẩn | Nội dung cần chốt và producer → consumer | Người phải ACK | Tình trạng hiện tại |
 |---|---|---|---|
-| `D-IF-01` | FIFO business policy, typed `AllocationDecision`, output head IDs: TV4 → TV2/TV1/TV5 | TV1+TV2+TV4+TV5 | `PENDING_ACK` |
-| `D-IF-02` | One UoW sync, native `gpm_manager_app`, Listing→Job lock, commit uncertainty: TV2 → TV4/TV1 | TV1+TV2+TV4 | `PENDING_ACK` |
-| `D-IF-03` | Stable Listing cursor, Listing-only `SKIP LOCKED`/progress: TV4+TV2 → TV1 | TV1+TV2+TV4 | `PENDING_ACK` |
-| `D-IF-04` | 2s scan config, bounded Listing/time/executor/DB pool: TV1+TV2+TV4 | TV1+TV2+TV4 | `PENDING_PARAMS` |
-| `D-IF-05` | PAUSED RUNNING retry same Attempt/event, no reserve: TV1+TV2 → TV5/TV4 | TV1+TV2+TV4+TV5 | `PENDING_ACK` |
-| `D-IF-06` | Cancel/Pause/Resize vs allocate error/race, phase1 guard: TV2+TV4+TV5 | TV2+TV4+TV5 | `PENDING_ACK` |
-| `D-IF-07` | Signer readiness and planned rotation K1→K2; separate compromise response: TV3+TV5/TV2 → TV4/TV1 | TV2+TV3+TV4+TV5; lead for incident | `PENDING_ACK / OWNER_DECISION_REQUIRED` |
-| `D-IF-08` | Release, deadline/finalizer counter reconciliation: TV5+TV2 → TV4/TV1 | TV1+TV2+TV4+TV5 | `PENDING_ACK` |
-| `D-IF-09` | Phase1 PR39 baseline audit and R3 Submit-Pause/Resize barrier | TV1+TV2+TV4+TV5 | `PENDING_PHASE1_GATE` |
+| `D-IF-01` | TV4 pure snapshot assessment → TV2 mapping/TV1 Scheduler; #46 `0ca059c`, #47 `001619d` | TV1+TV2+TV4+TV5 | `PENDING_EXACT_HEAD_ACK` |
+| `D-IF-02` | TV2 one-UoW/native role/Worker→Listing→Job/cleanup/reconcile → TV1+TV4 | TV1+TV2+TV4 | `PENDING_EXACT_HEAD_ACK` |
+| `D-IF-03` | TV4+TV1 stable rotating cursor/advance/wrap/revisit → TV2 integration | TV1+TV2+TV4 | `PENDING_EXACT_HEAD_ACK` |
+| `D-IF-04` | TV1 2s config + proof/scan/time/executor/DB budgets → TV2+TV4 | TV1+TV2+TV4 | `PENDING_PARAMS / MEASUREMENT` |
+| `D-IF-05` | TV1/TV2/TV5 same-Attempt retry + proposed separate `B-IF-06R` → TV4 PAUSED boundary | TV1+TV2+TV4+TV5 | `TV4_ACK_COMPATIBLE / D-19 OPEN` |
+| `D-IF-06` | TV2+TV4 Cancel/Pause/Resize vs allocate mapping → TV5 lifecycle | TV2+TV4+TV5 | `PENDING_EXACT_HEAD_ACK` |
+| `D-IF-07` | TV3 G1/key + TV2 locked recheck + TV1 bounded calls → TV4/TV5 | TV1+TV2+TV3+TV4+TV5 | `APPROVED_DESIGN_DIRECTION_CONDITIONAL / EXACT_SHA_ACK_PENDING` |
+| `D-IF-08` | TV2/TV5 release/finalizer/reconciliation → TV1/TV4; #46 `0ca059c`, #50 `edb247f8` | TV1+TV2+TV4+TV5 | `PENDING_EXACT_HEAD_ACK` |
+| `D-IF-09` | TV1/TV2 baseline/native roles/audit disposition → TV4/TV5 | TV1+TV2+TV4+TV5 | `BASELINE_RECORDED / AUDIT_DISPOSITION_PENDING` |
 
 **ACK mẫu:** `producer SHA + consumer SHA + interface fields + typed errors + reviewer account + scenario IDs + disposition (ACK_COMPATIBLE / ACK_WITH_ACTIONS / BLOCKED)`. `PENDING` không được thay bằng PASS dựa vào cùng một người tự xác nhận PR mình viết. Không dùng ACK của TV1 thay thế người consumer bị ảnh hưởng.
+
+**D-19 boundary:** TV4 ghi `ACK_COMPATIBLE` cho semantics PAUSED/same Attempt-event-payload và việc tách repair khỏi allocation, **không** approve D-19. Normal Outbox claim/ACK/retry là Outbox-only. `B-IF-06R` là port đề xuất riêng với Listing → Job → Outbox, repair fence/lease riêng và HTTP sau COMMIT; không tạo Allocation/Attempt/Event, không kéo dài deadline. TV4 không sở hữu repair SQL, columns/grants/guards, HTTP client hoặc Finalizer. TV1/TV2/TV5 và lead vẫn phải phê duyệt L2 trước code.
 
 ## 10. Bài kiểm thử và tiêu chí nghiệm thu (tất cả `NOT_RUN`)
 
@@ -218,18 +236,18 @@ TX-ALLOCATE do TV2 viết (1 Listing, 1 UoW, READ COMMITTED):
 | ID | Stimulus cụ thể | PASS oracle (mới là thiết kế, chưa test) |
 |---|---|---|
 | `P2D-DRT-01` | Cùng `submitted_at`, khác `enqueue_seq` | Xét đúng Job có seq thấp hơn dù UUID đảo thứ tự |
-| `P2D-DRT-02` | Listing lock bận và queue có nhiều Job | Chỉ skip Listing claim nếu policy cho phép; không skip FIFO head Job |
+| `P2D-DRT-02` | Listing lock bận và queue có nhiều Job | Timeout -> `LOCK_BUSY`, rollback, xét Listing khác rồi quay lại; không `SKIP LOCKED` Listing/Job |
 | `P2D-DRT-03` | Head cần 4/free 2, Job sau cần 1, Listing khác đủ | Cả hai Job ở Listing bị block vẫn QUEUED; Listing khác tiến được |
 | `P2D-DRT-04` | Cancel true head trước tick | Tiếp theo dùng QUEUED head còn lại, không allocation cũ |
 | `P2D-DRT-05` | Inject DB lỗi giữa counter/job/child inserts | Rollback toàn bộ, không partial GPU/Attempt/Outbox |
-| `P2D-DRT-06` | COMMIT thành công nhưng mất ACK | Re-read thấy child rows, không reserve thêm |
+| `P2D-DRT-06` | COMMIT thành công nhưng mất ACK; reconcile expected 4 IDs và biến thể Event ID sai | Exact graph `Committed`; sai Event ID `Unknown`; không reserve/Attempt/Event thêm |
 | `P2D-DRT-07` | Allocate→PAUSE, mất dispatch ACK | Retry same Attempt/event/payload; không tăng counter/lùi deadline |
 | `P2D-DRT-08` | Resize và Allocate cả hai commit orders | `allocated<=total`, queued max guard đúng, không 409 sai ưu tiên |
-| `P2D-DRT-09` | Listings > cycle budget, blocked head, Manager restart | Bounded scan và các Listing sau vẫn được xét qua các vòng |
-| `P2D-DRT-10` | SQL chậm + Dispatch/Finalizer due | Scheduler không monopolize executor/DB pool; budget/metrics đúng |
+| `P2D-DRT-09` | Listings > budget, một Listing lock liên tục, oversized head, thêm Listing hai phía cursor, wrap/restart | Cursor tiến sau mọi outcome, wrap/discover rows mới, Listing hợp lệ không bị đói |
+| `P2D-DRT-10` | SQL + G1 proof chậm khi Dispatch/Finalizer due | Timeout/concurrency budget giữ; Scheduler không monopolize HTTP/executor/DB pool |
 | `P2D-DRT-11` | Hai Manager claim cùng Listing/head | Không overcommit, một Attempt/Allocation/Outbox cho Job |
 | `P2D-DRT-12` | Planned K1→K2 rotation có Job RUNNING/QUEUED | Quiescent policy đúng; `BLOCKED` nếu contract chưa ACK |
-| `P2D-DRT-13` | Crash trước và sau TX commit | Trước không partial; sau giữ một durable allocation/Outbox để recover |
+| `P2D-DRT-13` | Crash trước/sau COMMIT; complete/absent/partial/wrong-ID graph | `NotCommitted/Committed/Unknown` đúng contract, không blind retry |
 | `P2D-DRT-14` | Native `gpm_api_app` thử Manager UPDATE; Manager role thử legal allocation | API không có quyền allocate; Manager theo least privilege và SQL emitted |
 | `P2D-DRT-15` | Lease Outbox cũ hết hạn rồi bị worker mới claim | Fencing không cho stale worker ghi đè; không duplicate business effect |
 
@@ -245,23 +263,24 @@ TX-ALLOCATE do TV2 viết (1 Listing, 1 UoW, READ COMMITTED):
 
 ## 11. Gates và thứ tự công việc để tránh xung đột
 
-**G0 — Phase1 accepted baseline (chưa đạt theo snapshot #39):** PR39 review đầy đủ, xử lý/deferral P2 audit và Submit-vs-Pause/Resize barriers, vào `main`; freeze SHA, Alembic head, roles/triggers. PR42 merge vào PR39 không tự giải quyết gate này.
+**G0 — Freeze baseline:** #39 đã merge, #42 đã vào main qua #39; source SHA/migration graph và Phase1 barrier evidence ở đầu file/§3.2. Lead/TV2 còn xác nhận audit disposition, actual installed DB revision và native roles/triggers. Không ghi lại #39 là Draft hoặc barrier đã có là chưa có.
 
-**G1 — Handoff/Interface review:** nhóm trưởng chốt handoff có điều kiện; TV1/TV2/TV4/TV5 ACK `D-IF-01..09` theo phạm vi, `D-IF-04` có resource budget cụ thể, TV3/TV5 đủ signer/key readiness và owner quyết định incident khi cần. `reserved_gpu_count` erratum phải ghi nhận chính thức để tránh triển khai sai.
+**G1 — Hoàn thiện và merge docs trước code:** TV4 tự review/sửa hai file trên nhánh `docs/phase2d-design-review`; TV2 review chéo FIFO/TX-ALLOCATE, TV1 điều phối và review tương thích, TV3/TV5 ACK phần bị ảnh hưởng. Chốt câu hỏi ở Phase 2D §7.8 (`D-IF-01..09`, erratum, no-op, resource budget, signer). Chỉ khi không còn vấn đề chặn, đủ review độc lập và nhóm trưởng chốt mới merge PR docs. Tự review/Codex không thay review chéo; design tests `NOT_RUN` không bị báo thành PASS.
 
-**G2 — Coding authorization riêng:** nhóm trưởng cho phép code Phase2 với phạm vi và sequence phù hợp. TV4 không triển khai SQL `TX-ALLOCATE` thay TV2 trước khi TV2 interface ổn định; TV1 Scheduler có thể dùng stub ở unit level để chuẩn bị nhưng không được claim E2E PASS.
+**G2 — Code theo từng task, sau G1:** lấy main mới nhất đã merge docs, xác nhận phụ thuộc của task và tạo một nhánh/PR riêng cho task đó. Policy thuần cũng phải chờ G1; không code trước rồi dùng CI để hợp thức hóa. TV4 không viết SQL TX-ALLOCATE thay TV2. PR #45 giữ Draft/HOLD; sẽ được phân loại lại theo một task sau docs gate, không tự động dùng làm nhánh triển khai cả Phase.
 
-**G3 — PostgreSQL acceptance:** triển khai xong TV2 UoW/schema/grants; chạy toàn bộ `P2D-TX/RACE/SCHED/DRT`, native roles, both commit orders, restart, pressure, no-regression Listing/Submit/Cancel Phase1. Không tự merge chỉ vì `pytest` tổng xanh khi test critical skipped.
+**G3 — Test đúng phạm vi task:** policy-only có unit evidence; integration sau khi TV2/TV1 sẵn sàng phải có PostgreSQL/native-role/barrier tests tương ứng. Full Phase2D acceptance vẫn cần các `P2D-TX/RACE/SCHED/DRT`, restart/pressure và Phase1 regression được giao. Không lấy policy unit PASS thay PG, hoặc bắt một task chờ test không thuộc phạm vi của nó. Critical skipped/blocked không được coi là PASS.
 
-**G4 — Merge/Integration:** source+consumer ACK đúng SHAs, independent human reviewer theo mức L1/L2, CI exact head, integration with TV1/TV5 proof, no unresolved P0/P1/P2 blockers; lead mới có quyền chốt merge khi các dependency sẵn.
+**G4 — Review/merge từng task:** source+consumer ACK đúng SHAs, review độc lập theo L1/L2 và CI/test đúng head/phạm vi; task đủ cổng có thể merge, không cần chờ toàn Phase. Không tự merge PR mình viết. Sau đó tạo task tiếp theo từ main mới; TV1 điều phối full integration và lead chốt các vấn đề thiết kế còn mở.
 
 ## 12. File bàn giao và biểu mẫu báo cáo tiến độ
 
 **TV4 bàn giao khi xong:** policy spec/diagrams, source (sau code gate) và tests, typed port/ACK matrix, code SHA, per-run DB evidence, `P2D-*` manifest, metrics, limitations, review disposition. Tập trung vào ranh giới TV4 thay vì báo cáo code thuộc TV2/TV1 là do mình viết.
 
 ```text
-[TV4-P2D-HANDOFF v1.1]
-Source branch/HEAD SHA:
+[TV4-P2D-HANDOFF v1.2-docs-review]
+Docs PR/reviewed SHA / cross-owner ACK / lead decision / merge SHA:
+Code task ID (only after docs gate) / source branch/HEAD SHA:
 Accepted main SHA / Alembic heads + version / native role identities:
 Phase2D FINAL SHA / erratum disposition (allocated_gpu_count):
 D-IF-01..09 producer/consumer ACK + source SHA:
@@ -275,4 +294,19 @@ Test IDs and statuses (PASS/FAIL/BLOCKED/NOT_RUN), CI URLs:
 Independent reviewer and remaining findings / merge recommendation:
 ```
 
-**Kết luận handoff v1.1:** đủ chi tiết để nhóm trưởng giao chuẩn bị, yêu cầu các cặp owner/consumer ACK và cho thành viên biết chính xác mình phải code/test **sau coding gate**. Những điểm còn chờ không bị tự coi là đã hoàn tất bởi tài liệu: `D-IF-*`, numeric budget, signer readiness, compromised-key policy, erratum nguồn, Phase1 PR39 accepted SHA và toàn bộ test Phase2 `NOT_RUN`.
+**Kết luận tự review:** đồng bộ hướng D-18/G1 đã duyệt có điều kiện với #46 @ `0ca059c`, #47 @ `001619d`, #49 @ `f3edb94` (Phase 2C blob `a869dd7d4006981ac0d2478a2fb3b684f1f1a157`), #50 @ `edb247f`; đây không thay source L2 hay human approval. Còn exact-SHA cross-owner ACK, D-19 repair, numeric proof/scan/resource budgets, TTL/replay/restart, provisioning, incident policy và audit disposition. Toàn bộ runtime Phase2 `NOT_RUN`; docs gate và coding authorization là các quyết định riêng.
+
+## 13. Bàn giao revision theo review TV1 ngày 2026-11-19
+
+| Request | Section/file đã cập nhật | Trạng thái |
+|---|---|---|
+| `P1-01` pure policy ↔ TX-ALLOCATE | Handoff §2, §7, §9; Phase 2D §2.1, §7.3 | vocabulary/ownership đã freeze ở mức proposal; chờ exact-head ACK |
+| `P1-02` bound G1 calls | Handoff §7; Phase 2D §7.2/§7.4 | timeout/cache/concurrency/invalidation đã nêu; số cụ thể `PENDING_PARAMS` |
+| `P2-03` scan/fairness | Handoff §7, §10.2; Phase 2D §7.2/§7.5 | cursor advance/wrap/restart/new Listing/locked Listing test đã thêm |
+| `P2-04` commit unknown | Handoff §7–§10; Phase 2D §7.3/§7.5 | expected 4 IDs + three outcomes + wrong Event ID test đã thêm |
+| `P2-05` D-19 boundary | Handoff §9; Phase 2D §7.4 | TV4 `ACK_COMPATIBLE` only; D-19 vẫn OPEN/không code |
+| `P2-06` docs/source state | Header, §3, §9, §11–§12; Phase 2D header/§2.1/§7.1/§7.6–§7.9 | SHAs/conditional labels/open decisions cập nhật |
+| `P2-07` tests/handoff | §10 và bảng này; Phase 2D §7.5/§7.9 | giữ toàn bộ test families; Phase2 runtime/PG/concurrency/performance `NOT_RUN` |
+| TV3 `D-IF-07` follow-up | Handoff §4.5/§13; Phase 2D §7.4/§7.6/§7.9 | Bốn action signer được cập nhật; TV3 focused re-check còn chờ; whole-PR L2 vẫn pending |
+
+**Exact-head ACK cần lấy sau commit:** TV1 cho Scheduler/resource/integration và toàn bộ `D-IF-01..09`; TV2 cho pure-policy mapping, UoW/cleanup/reconcile, races và baseline; TV3 cho `D-IF-07`; TV5 cho `D-IF-01/05/06/07/08`; lead cho independent L2/docs-gate closure. Các mục còn OPEN: numeric budgets, G1 TTL/nonce/replay/restart/unavailable recovery, provisioning identity, compromise response, D-19, D-09 index và audit disposition. Không sửa application/test code, migration/config hoặc PR #45 trong revision này.
