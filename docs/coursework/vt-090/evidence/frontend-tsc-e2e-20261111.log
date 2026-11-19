@@ -1,0 +1,7 @@
+EXIT_CODE=0
+
+Run context:
+Branch: bt3/vt-090-async-job-progress
+Source HEAD: 6daeea368e6add6aefefe8540e637f938698cba4
+Node: v22.13.0 (repository expects Node 24)
+Command: & 'D:\Application\node.exe' node_modules/typescript/bin/tsc --noEmit --pretty false -p tsconfig.e2e.json

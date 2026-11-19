@@ -1,0 +1,50 @@
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+---------------------------xx-------------
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > VT090-P1-01 resumes status polling after Cancel 409 reconciliation returns RUNNING
+AssertionError: expected "vi.fn()" to be called 3 times, but got 2 times
+ ❯ src/ui/jobs/JobsPage.test.tsx:625:20
+    623|     expect(getJob).toHaveBeenCalledTimes(2);
+    624|     await advanceClock(1);
+    625|     expect(getJob).toHaveBeenCalledTimes(3);
+       |                    ^
+    626|     expect(detailStatus()).toHaveTextContent("Hoàn tất");
+    627|     await advanceClock(10000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > VT090-P1-02 aborts and ignores a late poll response during Cancel reconciliation, then resumes
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/ui/jobs/JobsPage.test.tsx:674:37
+    672|     await flushReactPromises();
+    673|     expect(detailStatus()).toHaveTextContent("Đang chạy");
+    674|     expect(latePollSignal?.aborted).toBe(true);
+       |                                     ^
+    675|     expect(activeGets).toBe(0);
+    676|     expect(getJob).toHaveBeenCalledTimes(3);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 40 skipped (42)
+   Start at  23:39:34
+   Duration  24.77s (environment 73%, setup 14%, import 9%, tests 2%, transform 2%)
+
+EXIT_CODE=1
+COMMAND= & D:\Application\node.exe node_modules/vitest/vitest.mjs run src/ui/jobs/JobsPage.test.tsx -t VT090-P1 --reporter=dot
+WORKDIR=frontend
+ENVIRONMENT=Windows; Node.js 22.13.0; Vitest 5.0.5
+SOURCE_BASELINE=cba097a9466e9ff257a489cc48dc3ae5b575e3d9
+EXPECTED_RED=2 regression tests failed: polling stopped after reconciliation (expected next GET count 3, received 2); in-flight GET signal was not aborted (expected true, received false)

@@ -1,0 +1,186 @@
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+----------------------xxxxxxxxxxxxxx··
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 14 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > polls a selected queued Job at the 2-second boundary and displays RUNNING
+AssertionError: expected "vi.fn()" to be called 2 times, but got 1 times
+ ❯ src/ui/jobs/JobsPage.test.tsx:555:20
+    553|     expect(getJob).toHaveBeenCalledTimes(1);
+    554|     await advanceClock(1);
+    555|     expect(getJob).toHaveBeenCalledTimes(2);
+       |                    ^
+    556|     expect(detailStatus()).toHaveTextContent("Đang chạy");
+    557|     expect(api.submitJob).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/14]⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > stops polling when the server reports terminal status COMPLETED
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  Hoàn tất
+Received:
+  Đang chờ
+ ❯ src/ui/jobs/JobsPage.test.tsx:573:28
+    571|
+    572|     await advanceClock(2000);
+    573|     expect(detailStatus()).toHaveTextContent(label);
+       |                            ^
+    574|     await advanceClock(12000);
+    575|     expect(getJob).toHaveBeenCalledTimes(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/14]⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > stops polling when the server reports terminal status FAILED
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  Thất bại
+Received:
+  Đang chờ
+ ❯ src/ui/jobs/JobsPage.test.tsx:573:28
+    571|
+    572|     await advanceClock(2000);
+    573|     expect(detailStatus()).toHaveTextContent(label);
+       |                            ^
+    574|     await advanceClock(12000);
+    575|     expect(getJob).toHaveBeenCalledTimes(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/14]⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > stops polling when the server reports terminal status CANCELLED
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  Đã hủy
+Received:
+  Đang chờ
+ ❯ src/ui/jobs/JobsPage.test.tsx:573:28
+    571|
+    572|     await advanceClock(2000);
+    573|     expect(detailStatus()).toHaveTextContent(label);
+       |                            ^
+    574|     await advanceClock(12000);
+    575|     expect(getJob).toHaveBeenCalledTimes(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/14]⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > never starts an overlapping poll while the previous GET is pending
+AssertionError: expected "vi.fn()" to be called 2 times, but got 1 times
+ ❯ src/ui/jobs/JobsPage.test.tsx:589:20
+    587|
+    588|     await advanceClock(2000);
+    589|     expect(getJob).toHaveBeenCalledTimes(2);
+       |                    ^
+    590|     await advanceClock(10000);
+    591|     expect(getJob).toHaveBeenCalledTimes(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/14]⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > ignores a delayed response from Job A after the user selects Job B
+AssertionError: expected "vi.fn()" to be called 2 times, but got 1 times
+ ❯ src/ui/jobs/JobsPage.test.tsx:612:20
+    610|     await selectJob(JOB_A);
+    611|     await advanceClock(2000);
+    612|     expect(getJob).toHaveBeenCalledTimes(2);
+       |                    ^
+    613|     fireEvent.click(screen.getByRole("button", { name: new RegExp(JOB_…
+    614|     await flushReactPromises();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/14]⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > clears the scheduled GET when the component unmounts
+AssertionError: expected 0 to be greater than 0
+ ❯ src/ui/jobs/JobsPage.test.tsx:634:32
+    632|     await selectJob();
+    633|     expect(getJob).toHaveBeenCalledTimes(1);
+    634|     expect(vi.getTimerCount()).toBeGreaterThan(0);
+       |                                ^
+    635|
+    636|     view.unmount();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/14]⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > invalidates an in-flight response when identity changes
+AssertionError: expected "vi.fn()" to be called 2 times, but got 1 times
+ ❯ src/ui/jobs/JobsPage.test.tsx:657:20
+    655|     await selectJob();
+    656|     await advanceClock(2000);
+    657|     expect(getJob).toHaveBeenCalledTimes(2);
+       |                    ^
+    658|     const otherIdentity = { ...user("CLIENT"), id: "bbbbbbbb-bbbb-4bbb…
+    659|     view.rerender(<JobsPage api={api} user={otherIdentity} />);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/14]⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > retries a transient network timeout with GET only
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > retries a transient HTTP 503 with GET only
+AssertionError: expected "vi.fn()" to be called 2 times, but got 1 times
+ ❯ src/ui/jobs/JobsPage.test.tsx:678:20
+    676|
+    677|     await advanceClock(2000);
+    678|     expect(getJob).toHaveBeenCalledTimes(2);
+       |                    ^
+    679|     await advanceClock(999);
+    680|     expect(getJob).toHaveBeenCalledTimes(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/14]⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > allows the fourth poll after exactly three transient failures
+AssertionError: expected "vi.fn()" to be called 2 times, but got 1 times
+ ❯ src/ui/jobs/JobsPage.test.tsx:699:20
+    697|
+    698|     await advanceClock(2000);
+    699|     expect(getJob).toHaveBeenCalledTimes(2);
+       |                    ^
+    700|     await advanceClock(1000);
+    701|     expect(getJob).toHaveBeenCalledTimes(3);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/14]⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > stops after the fourth consecutive transient failure and keeps explicit reload
+AssertionError: expected "vi.fn()" to be called 5 times, but got 1 times
+ ❯ src/ui/jobs/JobsPage.test.tsx:721:20
+    719|     await advanceClock(2000);
+    720|     await advanceClock(4000);
+    721|     expect(getJob).toHaveBeenCalledTimes(5);
+       |                    ^
+    722|     expect(screen.getByRole("alert")).toBeInTheDocument();
+    723|     expect(detailStatus()).toHaveTextContent("Đang chờ");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/14]⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > does not retry a non-transient 404 automatically
+AssertionError: expected "vi.fn()" to be called 2 times, but got 1 times
+ ❯ src/ui/jobs/JobsPage.test.tsx:737:20
+    735|
+    736|     await advanceClock(2000);
+    737|     expect(getJob).toHaveBeenCalledTimes(2);
+       |                    ^
+    738|     await advanceClock(10000);
+    739|     expect(getJob).toHaveBeenCalledTimes(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/14]⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > resets the transient failure counter after a successful poll
+AssertionError: expected "vi.fn()" to be called 3 times, but got 1 times
+ ❯ src/ui/jobs/JobsPage.test.tsx:754:20
+    752|     await advanceClock(2000);
+    753|     await advanceClock(1000);
+    754|     expect(getJob).toHaveBeenCalledTimes(3);
+       |                    ^
+    755|     await advanceClock(1999);
+    756|     expect(getJob).toHaveBeenCalledTimes(3);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/14]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  14 failed | 2 passed | 22 skipped (38)
+   Start at  22:27:09
+   Duration  5.63s (environment 53%, tests 30%, setup 7%, import 6%, transform 4%)
+
+EXIT_CODE=1

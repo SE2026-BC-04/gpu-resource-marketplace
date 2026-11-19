@@ -1,0 +1,38 @@
+# VT-090 frontend final verification
+Timestamp: 2026-11-10 00:16:00 +07:00
+Branch: bt3/vt-090-async-job-progress
+Source checkout SHA: 836dae7c211f3df56494d3a6b0e6764b8873d8ea
+Node runtime: v22.13.0
+Working directory: C:\Users\DELL\OneDrive\Tài liệu\ChatGPT\gpu resouce marketplace\gpu-resource-marketplace\frontend
+
+COMMAND: & 'D:\Application\node.exe' node_modules/vitest/vitest.mjs run --reporter=dot
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+·······················································································································································································································
+
+ Test Files  12 passed (12)
+      Tests  215 passed (215)
+   Start at  00:16:01
+   Duration  14.13s (environment 65%, tests 19%, setup 9%, import 4%, transform 2%)
+
+EXIT_CODE=0
+
+COMMAND: & 'D:\Application\node.exe' node_modules/typescript/bin/tsc -b --pretty false
+EXIT_CODE=0
+
+COMMAND: & 'D:\Application\node.exe' node_modules/typescript/bin/tsc --noEmit --pretty false -p tsconfig.e2e.json
+EXIT_CODE=0
+
+COMMAND: & 'D:\Application\node.exe' node_modules/vite/bin/vite.js build
+vite v8.3.4 building client environment for production...
+transforming...
+✓ 32 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.47 kB │ gzip:  0.30 kB
+dist/assets/index-BXTQOg9r.css    8.10 kB │ gzip:  2.46 kB
+dist/assets/index-CRFkRy35.js   262.12 kB │ gzip: 80.96 kB
+
+✓ built in 2.08s
+EXIT_CODE=0

@@ -1,0 +1,39 @@
+# VT-090 mutation: polling interval 2000ms -> 1000ms
+Timestamp: 2026-11-11 00:05:10 +07:00
+Branch: bt3/vt-090-async-job-progress
+Baseline source commit: 6daeea368e6add6aefefe8540e637f938698cba4
+File: frontend/src/ui/jobs/JobsPage.tsx
+Mutation: JOB_STATUS_POLL_INTERVAL_MS = 2000 -> 1000 (temporary only)
+Focused test: polls a selected queued Job at the 2-second boundary and displays RUNNING
+Assertion under test: no second GET before 2000ms; exactly one occurs at 2000ms.
+Command: & 'D:\Application\node.exe' node_modules/vitest/vitest.mjs run src/ui/jobs/JobsPage.test.tsx -t 'polls a selected queued Job at the 2-second boundary and displays RUNNING' --reporter=dot
+
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+-----------------------x-------------------
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > polls a selected queued Job at the 2-second boundary and displays RUNNING
+AssertionError: expected "vi.fn()" to be called 1 times, but got 2 times
+ ❯ src/ui/jobs/JobsPage.test.tsx:561:20
+    559|     expect(getJob).toHaveBeenCalledTimes(1);
+    560|     await advanceClock(1999);
+    561|     expect(getJob).toHaveBeenCalledTimes(1);
+       |                    ^
+    562|     await advanceClock(1);
+    563|     expect(getJob).toHaveBeenCalledTimes(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 42 skipped (43)
+   Start at  00:05:11
+   Duration  3.56s (environment 66%, tests 10%, import 8%, transform 8%, setup 8%)
+
+TEST_EXIT_CODE=1
+MUTATION_RESULT=KILLED
+Source restored byte-for-byte: True
+Restored_SHA256=A534A3B2B24131F27A91A2F15F6546A1F35A81F33B83867C0C54EFF0BD8A0DC8

@@ -1,0 +1,26 @@
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+
+----------------------------------x-----
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ui/jobs/JobsPage.test.tsx > VT-090 async status tracking and retry safety > allows the fourth poll after exactly three transient failures
+AssertionError: expected "vi.fn()" to be called 5 times, but got 4 times
+ ❯ src/ui/jobs/JobsPage.test.tsx:745:20
+    743|     expect(getJob).toHaveBeenCalledTimes(4);
+    744|     await advanceClock(4000);
+    745|     expect(getJob).toHaveBeenCalledTimes(5);
+       |                    ^
+    746|     expect(detailStatus()).toHaveTextContent("Đang chạy");
+    747|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 39 skipped (40)
+   Start at  22:57:47
+   Duration  2.84s (environment 70%, tests 10%, setup 8%, import 7%, transform 4%)
+
+EXIT_CODE=1\n

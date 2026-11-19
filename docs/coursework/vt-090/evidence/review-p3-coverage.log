@@ -1,0 +1,13 @@
+# VT-090 coverage availability check
+Timestamp: 2026-11-10 00:17:41 +07:00
+Branch: bt3/vt-090-async-job-progress
+Checkout SHA: 836dae7c211f3df56494d3a6b0e6764b8873d8ea
+Existing @vitest/coverage-v8: False
+Existing @vitest/coverage-istanbul: False
+Command: & 'D:\Application\node.exe' node_modules/vitest/vitest.mjs run --coverage --reporter=dot
+No package was installed.
+
+ MISSING DEPENDENCY  Cannot find dependency '@vitest/coverage-v8'
+
+EXIT_CODE=1
+Result classification: NOT_RUN if instrumentation could not load; this is not a coverage PASS or percentage.

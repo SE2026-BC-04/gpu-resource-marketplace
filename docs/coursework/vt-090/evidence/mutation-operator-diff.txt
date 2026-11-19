@@ -1,0 +1,13 @@
+diff --git a/frontend/src/ui/jobs/JobsPage.tsx b/frontend/src/ui/jobs/JobsPage.tsx
+index 296a17c..32d69ae 100644
+--- a/frontend/src/ui/jobs/JobsPage.tsx
++++ b/frontend/src/ui/jobs/JobsPage.tsx
+@@ -427,7 +427,7 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
+         if (!isCurrentRequest()) return;
+         if (isTransientStatusReadFailure(error)) {
+           consecutiveFailures += 1;
+-          if (consecutiveFailures > MAX_CONSECUTIVE_STATUS_READ_FAILURES) {
++          if (consecutiveFailures >= MAX_CONSECUTIVE_STATUS_READ_FAILURES) {
+             setDetailResult({ key: requestKey, job: currentJob, error, pollingMessage: null });
+             return;
+           }\n

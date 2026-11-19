@@ -1,0 +1,39 @@
+# VT-090 scoped Jobs coverage run
+Timestamp: 2026-11-11 00:01:29 +07:00
+Branch: bt3/vt-090-async-job-progress
+Source commit SHA: 6daeea368e6add6aefefe8540e637f938698cba4
+Node: v22.13.0
+Vitest: 5.0.5
+Provider: @vitest/coverage-v8 5.0.5
+Command: & 'D:\Application\node.exe' node_modules/vitest/vitest.mjs run src/ui/jobs/JobsPage.test.tsx src/ui/jobs/JobsPage.pairwise.test.tsx src/api/jobs.test.ts src/api/jobs.pairwise.test.ts --coverage.enabled --coverage.provider=v8 --coverage.include=src/ui/jobs/JobsPage.tsx --coverage.include=src/api/jobs.ts --coverage.include=src/api/authorizedFetch.ts --coverage.include=src/api/auth.ts --coverage.reporter=text --coverage.reporter=json --coverage.reporter=json-summary --coverage.reportsDirectory=../docs/coursework/vt-090/evidence/coverage-review-20261111
+
+
+ RUN  v5.0.5 C:/Users/DELL/OneDrive/Tài liệu/ChatGPT/gpu resouce marketplace/gpu-resource-marketplace/frontend
+      Coverage enabled with v8
+
+
+ Test Files  4 passed (4)
+      Tests  103 passed (103)
+   Start at  00:01:31
+   Duration  33.69s (environment 69%, tests 14%, setup 11%, import 4%, transform 1%)
+
+ % Coverage report from v8
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+-------------------|---------|----------|---------|---------|-------------------
+All files          |   81.99 |    73.78 |   85.29 |   86.44 |
+ api               |   67.66 |    59.69 |   71.79 |   73.13 |
+  auth.ts          |    23.4 |     1.96 |   15.38 |   24.32 | 61-129
+  ...rizedFetch.ts |   81.25 |       75 |     100 |     100 | 14,26-29
+  jobs.ts          |   85.57 |    80.45 |     100 |   90.58 | ...81-184,208,227
+ ui/jobs           |   90.13 |    86.57 |   93.65 |   93.38 |
+  JobsPage.tsx     |   90.13 |    86.57 |   93.65 |   93.38 | ...18-519,552-557
+-------------------|---------|----------|---------|---------|-------------------
+
+=============================== Coverage summary ===============================
+Statements   : 81.99% ( 378/461 )
+Branches     : 73.78% ( 304/412 )
+Functions    : 85.29% ( 87/102 )
+Lines        : 86.44% ( 338/391 )
+================================================================================
+EXIT_CODE=0

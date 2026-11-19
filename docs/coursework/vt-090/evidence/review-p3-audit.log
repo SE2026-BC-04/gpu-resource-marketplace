@@ -1,0 +1,71 @@
+# VT-090 final scope and evidence audit
+Timestamp: 2026-11-10 00:25:40 +07:00
+Checkout SHA (before final evidence commit): 836dae7c211f3df56494d3a6b0e6764b8873d8ea
+Changed paths including staged changes: 46 before this audit log; 47 including this audit log
+Scope audit: PASS
+git diff --check and staged check: exit 0
+Markdown relative links: PASS (0 broken)
+Secret-pattern scan: PASS targeted-pattern scan; matches=0; gitleaks available=False
+Historical benchmark files match current committed content: PASS
+Reflection whitespace word count: 303 (required 250–350)
+Coverage: NOT_RUN; provider missing, captured in review-p3-coverage.log
+The path list below omits this self-referential audit file; it is an additional in-scope evidence artifact.
+
+Changed paths:
+docs/coursework/vt-090/ai-test-review.md
+docs/coursework/vt-090/ai-usage-log.md
+docs/coursework/vt-090/coverage-flaky-review.md
+docs/coursework/vt-090/evidence/ai-test-review-focused.log
+docs/coursework/vt-090/evidence/backend-jobs-unit.log
+docs/coursework/vt-090/evidence/baseline-frontend-jobs.log
+docs/coursework/vt-090/evidence/flaky-repeats.log
+docs/coursework/vt-090/evidence/frontend-final-tests-pre-review.log
+docs/coursework/vt-090/evidence/frontend-final-tests.log
+docs/coursework/vt-090/evidence/frontend-final-typecheck-build.log
+docs/coursework/vt-090/evidence/green-frontend-polling-initial.log
+docs/coursework/vt-090/evidence/mutation-mutant-failure.log
+docs/coursework/vt-090/evidence/mutation-operator-diff.txt
+docs/coursework/vt-090/evidence/mutation-original-pass.log
+docs/coursework/vt-090/evidence/mutation-restored-pass.log
+docs/coursework/vt-090/evidence/pairwise-regeneration.log
+docs/coursework/vt-090/evidence/performance-run.log
+docs/coursework/vt-090/evidence/red-frontend-polling.log
+docs/coursework/vt-090/evidence/review-final-frontend.log
+docs/coursework/vt-090/evidence/review-p1-green.log
+docs/coursework/vt-090/evidence/review-p1-red.log
+docs/coursework/vt-090/evidence/review-p2-pairwise.log
+docs/coursework/vt-090/evidence/review-p3-backend.log
+docs/coursework/vt-090/evidence/review-p3-coverage.log
+docs/coursework/vt-090/evidence/review-p3-mutation-final.log
+docs/coursework/vt-090/evidence/review-p3-performance-run.log
+docs/coursework/vt-090/generate-pairwise.mjs
+docs/coursework/vt-090/implementation-plan.md
+docs/coursework/vt-090/mutation-report.md
+docs/coursework/vt-090/pairwise-cases.json
+docs/coursework/vt-090/performance-report.md
+docs/coursework/vt-090/performance/README.md
+docs/coursework/vt-090/performance/results-local.json
+docs/coursework/vt-090/performance/results-review.json
+docs/coursework/vt-090/performance/run-status-load.mjs
+docs/coursework/vt-090/performance/run-status-load.test.mjs
+docs/coursework/vt-090/README.md
+docs/coursework/vt-090/reflection.md
+docs/coursework/vt-090/repository-audit.md
+docs/coursework/vt-090/specification.md
+docs/coursework/vt-090/test-strategy.md
+docs/coursework/vt-090/traceability.md
+frontend/src/api/jobs.pairwise.test.ts
+frontend/src/ui/jobs/JobsPage.pairwise.test.tsx
+frontend/src/ui/jobs/JobsPage.test.tsx
+frontend/src/ui/jobs/JobsPage.tsx
+
+Out-of-scope paths:
+
+
+Broken relative links:
+
+
+Secret scan matches:
+
+
+Diff check output:
