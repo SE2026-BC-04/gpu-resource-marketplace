@@ -203,14 +203,14 @@ The following are **design acceptance requirements** for later implementation, *
 
 ### 6.2. Proposed callback outcome mapping (`C-IF-02`, `C-IF-03`; `PROPOSED_FOR_ACK`)
 
-HTTP names come from API Contract §13.2 and are not changed. Port names are TV2's `B-IF-02` proposal.
+HTTP names come from API Contract §13.2 and are not changed. Port names are TV2's `B-IF-02` proposal. **2026-11-19:** the duplicate/collision rows use the D-01 Option C test (SHA-256 digest plus trusted binding, `APPROVED_DESIGN_DIRECTION_CONDITIONAL`, §7.1) instead of a literal byte comparison; the earlier wording is kept in the rows only as marked history.
 
 | Stage | Condition | Port result (TV2) | HTTP (API Contract §13.2) | Inbox row |
 |---|---|---|---|---|
 | Before UoW (TV3) | Missing, malformed, wrong-direction or end-user token | — | `401` | none |
 | Before UoW (TV3) | Body over bound, wrong `Content-Type`, invalid UTF-8/JSON, duplicate member, schema or wire-format violation | — | `422 INVALID_SIGNED_ENVELOPE` | none |
-| In UoW | Same `result_id`, identical bytes and bound context | `ExactDuplicate` | `202 DUPLICATE` | none new; original `received_at` |
-| In UoW | Same `result_id`, different bytes or context | `Collision` | `409 RESULT_ID_COLLISION` | none |
+| In UoW | Same `result_id`, same SHA-256 digest and same trusted binding (D-01 Option C; superseded wording: "identical bytes") | `ExactDuplicate` | `202 DUPLICATE` | none new; original stored `received_at` |
+| In UoW | Same `result_id`, different SHA-256 digest or different trusted binding (D-01 Option C; superseded wording: "different bytes or context") | `Collision` | `409 RESULT_ID_COLLISION` | none |
 | In UoW | Claimed Job/Attempt unknown or not bindable | `Ineligible(unbound)` | `404 RESULT_CONTEXT_NOT_FOUND` | none |
 | In UoW | Job not `RUNNING`, stale attempt, or `received_at >= hard_deadline_at` | `Ineligible(not_running \| late)` | `409 RESULT_NOT_ACCEPTABLE` | none |
 | In UoW | New, bound, on-time candidate committed | `Stored` | `202 STORED` | one `PENDING` row |

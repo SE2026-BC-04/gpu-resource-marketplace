@@ -210,6 +210,33 @@ Theo thông báo quy trình 2026-11-08, kết quả của 6 việc dưới đây
 
 **Cập nhật 2026-11-19:** cột "Status" ở bảng trên vẫn đúng ở mức `PENDING_ACK`; thêm thông tin: hướng thiết kế của `C-IF-06/10` (V-OUT), `C-IF-07/08` (G1 + hai khóa quiesce) đã được lead duyệt có điều kiện (`APPROVED_DESIGN_DIRECTION_CONDITIONAL`) nhưng **chưa có ACK exact-SHA** nào; `C-IF-09` vẫn `NEEDS_OWNER_DECISION`; `C-IF-07` còn S-10/D-03 (danh tính provisioning `worker_public_keys`). Danh sách ACK cần xin và SHA tham chiếu: `Phase_2C_v0.9.md` §7.7. Cần **hai review L2 độc lập của con người trên HEAD cuối**, ngoài các ACK tương thích producer/consumer.
 
+**Trạng thái review/ACK theo từng PR (lấy từ GitHub API ngày 2026-11-19, giờ UTC; verdict ghi nguyên văn).** Mọi mục dưới đây là review dạng `COMMENTED` hoặc comment; **không có GitHub `Approve` nào**, và `ACK_WITH_ACTIONS` **không phải** approval. Review của TV4 tự ghi là Codex-assisted, không phải review độc lập của con người. Review chỉ có hiệu lực với đúng SHA ghi trong bảng; HEAD hiện tại bị sửa thì cần review lại.
+
+| PR (HEAD hiện tại) | Reviewer | SHA được review | Verdict (nguyên văn) | Thời điểm (UTC) |
+|---|---|---|---|---|
+| #46 (`f58acd4`) | TV1 | `a27526e` (revision request) | `ACK_WITH_ACTIONS / HOLD DOCS GATE` | 2026-11-18 18:23 |
+| #46 | TV4 | `20d67c8` | `ACK_WITH_ACTIONS` | 2026-11-18 18:58 |
+| #46 | TV1 | `5838e23` | `ACK_WITH_ACTIONS / HOLD DOCS GATE` | 2026-11-18 19:07 |
+| #46 | TV4 | `0ca059c` | `ACK_WITH_ACTIONS` | 2026-11-18 19:16 |
+| #46 | — | `f58acd4` (HEAD hiện tại) | **chưa có review nào ở SHA này** (TV2 đẩy lúc 2026-11-18 19:20) | — |
+| #47 (`001619d`) | TV2 | `81ef608` (cũ) | `ACK_WITH_ACTIONS` for this scope | 2026-11-13 16:14 |
+| #47 | TV4 | `001619d` | `ACK_WITH_ACTIONS` | 2026-11-18 18:58 |
+| #48 (`813aa3e`) | TV2 | `b8be725` (cũ) | `ACK_WITH_ACTIONS` for this scope | 2026-11-09 03:23 |
+| #48 | TV1 | `b399118` (revision request) | `ACK_WITH_ACTIONS / HOLD DOCS GATE` | 2026-11-18 19:15 |
+| #48 | — | `813aa3e` (HEAD hiện tại) | **chưa có review nào ở SHA này** (TV4 xin re-review lúc 2026-11-18 19:31) | — |
+| #50 (`edb247f`) | TV3 | `c8c241c` (cũ) | `ACK_WITH_ACTIONS` for the 2C ↔ 2E scope | 2026-11-13 08:36 |
+| #50 | TV2 | `edb247f` | `ACK_WITH_ACTIONS` for this scope; the actions are editorial | 2026-11-18 18:01 |
+| #50 | TV4 | `edb247f` | `ACK_WITH_ACTIONS` | 2026-11-18 18:58 |
+| #50 | TV1 | `edb247f` | `ACK_WITH_ACTIONS / HOLD DOCS GATE` | 2026-11-18 19:19 |
+| #50 | TV3 | `edb247f` | **chưa review lại** (việc còn nợ của TV3) | — |
+| #49 (`62bded7` trước bản sửa này) | TV2 | `942383f` (cũ) | `ACK_WITH_ACTIONS` for this scope | 2026-11-09 03:23 |
+| #49 | TV5 | `9b337f5` (cũ) | `ACK_WITH_ACTIONS` for TV3↔TV5 scoped design | 2026-11-13 06:27 |
+| #49 | TV1 | `62bded7` | `ACK_WITH_ACTIONS / HOLD DOCS GATE` (COMMENT review only) | 2026-11-13 10:51 |
+| #49 | TV1 | `62bded7` (revision request) | `ACK_WITH_ACTIONS / HOLD DOCS GATE` | 2026-11-18 19:11 |
+| #49 | TV4 | — | chưa có review trên #49 | — |
+
+Đọc bảng: chưa PR nào có hai review L2 độc lập của con người ở HEAD hiện tại. Các ACK của TV2/TV5 trên #49 là ở SHA cũ (`942383f`, `9b337f5`) và cần xin lại sau bản sửa này.
+
 **Mẫu ACK mỗi owner:** `Producer/consumer; design file+SHA; port methods/params/return/status/error; test IDs and evidence; code SHA; ACK_COMPATIBLE|ACK_WITH_ACTIONS|BLOCK; reviewer link`. Không chấp nhận 'đã thấy/CI xanh' chung chung. Trước khi thay đổi chuẩn ADR đã chốt phải review owner + downstream affected-owner theo đúng interphase change control.
 
 ## 7. Các bài kiểm thử bắt buộc và tiêu chí PASS
