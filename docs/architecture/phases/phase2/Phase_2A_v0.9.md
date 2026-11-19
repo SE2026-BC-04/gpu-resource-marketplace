@@ -1,18 +1,22 @@
 # Phase 2A - Manager Runtime, Orchestration and Integration (TV1)
 
-> **Phase 2A deep-review revision (2026-11-07):** Consolidates already-approved Phase 2D/2E design decisions with the PR #39 baseline, and proposes explicit lock/candidate/lifecycle safeguards. Existing owner approvals remain in force; **new technical clarifications marked `PROPOSED_FOR_ACK` are not automatically approved**. PR #39 HEAD `44579ed84605` was verified open/Draft/unmerged. No Phase 2 coding or GitHub write authorization.
+> **Historical snapshot (2026-11-07):** This revision consolidated approved Phase 2D/2E design decisions and proposed explicit lock/candidate/lifecycle safeguards. At that snapshot PR #39 HEAD `44579ed84605` was open/Draft/unmerged, and no GitHub write authorization had been given. That PR status is historical and is superseded by the current baseline below.
+>
+> **Current review update (2026-11-08):** PR #39 is merged. The accepted source baseline is `main@bee832eaf5463df20f6c6815174322871eb6685a` (merge commit for PR #44; PR #39 merge commit `aff538f79997c6e2bfcf359b176a82f2cd9ecc53`). The latest PR #39 workflow on its final head `3482bce3cc9726543b9345a5224d8db1b9fc6454` passed all four jobs in Actions run `42385995533`. The repository migration graph has one head, `0005_listing_d7`; this review did not inspect an applied database or run a migration. PR #45 (TV4 policy implementation) and PR #46 (TV2 pre-code design) are open and do not provide merged Phase 2 transaction/schema/grant interfaces. Phase 2 runtime verification remains `NOT_RUN`.
 
 > **Repository:** `SE2026-BC-04/gpu-resource-marketplace`  
-> **Target repository path:** `docs/architecture/phases/phase2a_manager_integration.md`  
-> **Document version/date:** `v0.9-deep-review-proposal / 2026-11-07`  
+> **Target repository path:** `docs/architecture/phases/phase2/Phase_2A_v0.9.md`
+> **Document version/date:** `v0.9-deep-review-proposal / review update 2026-11-08`
 > **Document status:** `APPROVED_DESIGN_CONDITIONAL / V0.9_REVIEW_PROPOSED / NOT_APPROVED_FOR_IMPLEMENTATION`  
 > **Proposed documentation owner:** TV1 - Team lead (`@thangSy221105`)  
-> **Review log:** `P2-OVERALL-01` = direction accepted for continued review; `P2A-DEC-01` = `APPROVE_WITH_REVISIONS`; `P2A-OPEN-01` = supervisor fail-fast **APPROVED**; `P2A-DEC-02` = three independent logical worker groups **APPROVED**; `P2A-OPEN-03` = Async Supervisor + Bounded Executor **APPROVED**; `P2A-OPEN-04` = Option A bounded Graceful Shutdown + PostgreSQL recovery **APPROVED AT DESIGN LEVEL** (exact shutdown budget and external restart configuration remain pending). **`P2A-OPEN-02` has been superseded by approved `P2D-OPEN-03`: configurable 2-second default Scheduler scan; batching/fairness/resource limits remain pending cross-owner sizing.** `P2A-GATE-01` = **Option A, APPROVED_DESIGN_CONDITIONAL** (team-lead review decision): 2A scope, ownership and proposed Manager architecture are accepted **for documentation only**, with specialist parameters/ACKs and Phase 1 baseline still pending. This is NOT a code, merge or implementation authorization.  
-> **Runtime verification:** `NOT_RUN`. **Human cross-owner ACKs:** `PENDING`. **GitHub changes made by this revision:** `NONE`.
+> **Review log:** `P2-OVERALL-01` = direction accepted for continued review; `P2A-DEC-01` = `APPROVE_WITH_REVISIONS`; `P2A-OPEN-01` = supervisor fail-fast **APPROVED**; `P2A-DEC-02` = three independent logical worker groups **APPROVED**; `P2A-OPEN-03` = Async Supervisor + Bounded Executor **APPROVED**; `P2A-OPEN-04` = Option A bounded Graceful Shutdown + PostgreSQL recovery **APPROVED AT DESIGN LEVEL** (exact shutdown budget and external restart configuration remain pending). **`P2A-OPEN-02` has been superseded by approved `P2D-OPEN-03`: configurable 2-second default Scheduler scan; batching/fairness/resource limits remain pending cross-owner sizing.** `P2A-GATE-01` = **Option A, APPROVED_DESIGN_CONDITIONAL** (team-lead review decision): 2A scope, ownership and proposed Manager architecture are accepted **for documentation only**. The accepted Phase 1 baseline is now recorded; Phase 2 schema/grants, specialist parameters and cross-owner ACKs remain pending. This is NOT a code, merge or implementation authorization.
+> **Runtime verification:** `NOT_RUN`. **Human cross-owner ACKs:** scoped TV2/TV3 `ACK_WITH_ACTIONS` already exist on PR #47 at `81ef608`; exact-SHA full interface approval remains `PENDING`. **Original 2026-11-07 statement that GitHub changes were NONE:** historical snapshot.
+>
+> **TV1 design reconciliation (2026-11-19; docs only):** TV1 selected **Verifier Option A** (TV3-owned pure module inside the existing Manager integration, no new verifier service) and **Blockchain Option A** (off-chain immutable evidence in Phase 2, future Phase 4 EVM integration only). These choices are recorded as `P2A-DEC-03/04` below; neither authorizes on-chain code, migrations, a new table, runtime tests, PR merge or a coding gate. Conditional L2 directions on PR #46 [lead comment](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46#issuecomment-6849327771) are the current cross-phase design authority where they supersede this file's 2026-11-08 snapshot.
 
 ## 0. Authority, current baseline, and review discipline
 
-This is one of **five documentation work packages** (`2A` through `2E`) for five team members. It plans the integration runtime but does **not** grant TV1 authority to implement another owner's domain module. The approved SRS, ADR-001..008, Database Design, API Contract, Module Design and Test Design are the binding sources. Where this draft introduces a new choice, mark it `PROPOSED` or `OPEN`, never silently revise an accepted contract.
+This is one of **five documentation work packages** (`2A` through `2E`) for five team members. It plans the integration runtime but does **not** grant TV1 authority to implement another owner's domain module. The approved SRS, ADR-001..008, Database Design, API Contract, Module Design and Test Design are the binding sources, **subject to explicitly recorded later L2 supersessions** such as the lead's PR #46 conditional decisions. The affected normative files still require owner-authored reconciliation before implementation. Where this draft introduces a new choice, mark it `PROPOSED` or `OPEN`, never silently revise an accepted contract.
 
 The `main` implementation inspected while preparing this design has an existing `manager` service and the entry points:
 
@@ -22,7 +26,24 @@ The `main` implementation inspected while preparing this design has an existing 
 - `backend/src/gpu_marketplace/common/config.py` and `common/database.py`: shared configuration and synchronous SQLAlchemy engine.
 - `compose.yaml`: **five existing services**, including the one Manager process. No extra process/container is proposed.
 
-**Phase 1 gate:** the integrated Phase 1 baseline must first be accepted on `main` with recorded commit SHA, applicable test evidence, current Alembic head and impacted owner ACKs. At this deep-review check (2026-11-07), PR #39 HEAD `44579ed` was still open/Draft/unmerged; this is a snapshot, **not** a permanent assertion about PR status. The actual baseline must be rechecked before any Phase 2 implementation.
+**Phase 1 gate:** the integrated Phase 1 baseline is now recorded on `main` as `bee832eaf5463df20f6c6815174322871eb6685a`; PR #39 merged at `aff538f79997c6e2bfcf359b176a82f2cd9ecc53`. Its final PR head `3482bce3cc9726543b9345a5224d8db1b9fc6454` has a successful four-job Actions run `42385995533`. A read-only inspection of the repository Alembic graph found the single source head `0005_listing_d7`; this is not evidence that any particular database has that revision applied. The Phase 2 schema and grants are not present on this `main`, and no database/migration was run for this review. These Phase 2 prerequisites and all relevant owner ACKs remain open.
+
+### 0.1. Current review findings and dependency state (2026-11-08)
+
+This update records the current repository evidence and clarifies historical status. It does not approve new contracts or supersede any accepted ADR.
+
+| Severity | Finding | Disposition in this docs review |
+|---|---|---|
+| P0/P1 | No confirmed P0/P1 documentation finding in the reviewed baseline. Runtime and Phase 2 integration behavior have not been tested. | No Phase 2 runtime PASS is claimed; implementation remains unauthorized. |
+| P2 | Phase 2 schema, restricted Manager grants and transaction/UoW adapters are absent from merged `main`; TV2 PR #46 is an open pre-code proposal. | Record DB-dependent interfaces as `BLOCKED` or `PENDING_ACK` in Appendix C; do not treat PR #46 as accepted schema or ACK. |
+| P2 | TV4 PR #45 provides a pure DB-free FIFO/capacity assessment and unit tests; it does not implement TX-ALLOCATE, DB locking, Scheduler mounting or runtime integration. | Keep Scheduler/TX-ALLOCATE cross-owner ACK pending. The `reserved_gpu_count`/`gpu_listings.allocated_gpu_count` erratum awaits TV2/lead confirmation; do not edit TV4-owned docs here. |
+| P2 | The current Manager healthcheck runs in a separate process and checks only PostgreSQL; it cannot observe in-process worker-group state. | Clarify that the approved supervisor must fail the Manager process on fatal required-loop failure. A new endpoint or process-shared signal is not approved; degraded diagnostics remain internal/redacted until separately agreed. |
+| P2 | The Simulator cold-restart cache conflict `P2E-CACHE-GAP-01` remains `NEEDS_OWNER_DECISION`; exact cross-owner interfaces and resource budgets remain open. | Preserve the decision and pending statuses; no inferred ACKs. |
+| P3 | The file metadata and several mandatory-reading links were stale or pointed to missing consolidated readiness/decision/test-plan files. | Correct the target path and links below; state that no consolidated files exist in this baseline and link the actual Phase 2 specs/handoffs. |
+
+**PR #39 debt status:** the final PR #39 owner comment reports the audit findings `P2-PGROLE`, `P2-LISTING-AUDIT`, `P2-JOBS-AUDIT` and the Submit↔Pause/Resize race finding as addressed; CI on final PR head passed. This document review did not independently re-audit those changes. `CR-GPU-INT-01-READY-01` remains an L2 proposal without an owner decision; production Scrypt C1 evidence remains a production gate; a separate role-rejection audit follow-up is still listed by open PR #45 and is not established as resolved by PR #39 merge.
+
+**Open review work:** PR #45 is TV4's Draft pure policy slice; PR #46 is TV2's Draft pre-code schema/grant/UoW proposal. Neither PR is a merged implementation dependency or independent owner ACK. Current interface details and required reviewers are listed in Appendix C.
 
 ## 1. Goal, scope, and what counts as success
 
@@ -54,6 +75,8 @@ flowchart LR
 - **API owns** Login/RBAC, Listing edits, `TX-SUBMIT`, Client `QUEUED`-only `TX-CANCEL`, public read projections and `TX-INBOX-INGRESS` for raw callback bytes. It does **not** run FIFO, verify-and-finalize receipts or write reputation contributions.
 - **Manager owns** `TX-ALLOCATE`, durable Outbox claim/ACK/retry, Inbox verification and finalization/deadline fallback, one-time allocation release and contribution/aggregate updates. Its orchestration layer delegates those decisions; it never reimplements separate copies of the business policies.
 - **Simulator owns** deterministic mock execution and its private Worker Ed25519 key. It does not access PostgreSQL or protected oracle/reference fields.
+- **Verifier Option A (TV1, 2026-11-19):** TV3 owns a pure, non-mutating V1 verification module called by the existing Manager orchestration; it is a **logical trust boundary, not an extra container/process**. V-OUT verification occurs before TV2's Finalization UoW and is re-bound to the locked original evidence before any commit.
+- **Phase 4 Blockchain Option A (TV1, 2026-11-19):** `Worker/Job/Attempt/Inbox/Result` identity, canonical result hash and accepted status remain authoritative **off-chain**. Future chain writes must be a separate asynchronous, idempotent integration after the PostgreSQL business commit and may not block or roll back Finalization. No new Phase 2 contract/table, EVM SDK, wallet, smart contract or funds are authorized.
 - **PostgreSQL** owns durable state, trusted clocks, transaction boundaries and serialization. An HTTP `202` is **not** Job completion. A valid Worker signature is a claim, **not** a comparison with protected ground truth; future Dispute adjudication remains in Phase 3.
 
 ### 2.1. Three logical worker groups inside ONE Manager
@@ -86,13 +109,13 @@ These are **logical responsibilities, not three new services**. **Approved `P2A-
 
 | Call direction | Input / trigger | Observable output | Mandatory constraints | Responsible design owner |
 |---|---|---|---|---|
-| TV1 -> TV4 scheduler port | Due scan context, trusted DB access boundary, stop request | Count/IDs of allocated or blocked work; typed retryable/fatal error | Select **actual** FIFO head by `enqueue_seq`; Listing before Job locks; no later Job on blocked head | TV4 policy, TV2 DB, TV1 wiring |
-| TV4 policy -> TV2 allocation UoW | Listing ID plus FIFO-head selection policy executed **within the same TV2-owned transaction** | One committed `RUNNING` Job + allocation + attempt + stable Outbox event, or no commit | **Never pass a locked ORM Job or SQLAlchemy Session between executor calls/transactions**; TX itself locks Listing then head Job; no network before COMMIT | TV2 transaction/TV4 policy, TV1 wiring; `PROPOSED_FOR_ACK` |
-| TV1 -> TV2 Outbox port | Due events, fence owner/version | Stable `event_id`, `attempt_id`, retry due and state changes | `TX-OUTBOX-CLAIM/ACK/RETRY` locks Outbox only; stale owner cannot ACK | TV2, review TV1 |
-| TV1 -> Simulator dispatch adapter | Approved `job_id`/`attempt_id`/stable event + allowed input | Transport status or typed timeout/error | `simulation_input` **exactly** `{"workload_profile":"demo-v1"}`; private oracle never sent; HTTP `202` is not terminal | TV5 wire, TV3 service token, TV1 orchestration |
-| Simulator -> API (NOT Manager) | Dedicated authenticated signed callback | Durable Inbox `202`, exact duplicate or rejected response | API controls `TX-INBOX-INGRESS`; trusted DB receive time after Listing/Job locks | TV3 API ingress, TV2 DB, TV5 Simulator |
-| TV1 -> TV3 verifier | Durable candidate bytes + persisted context and registered key | Valid/invalid typed verdict and reason, **no DB terminal mutation** | ADR-004 exact 11 fields, RFC 8785 JCS/Ed25519, context/key match | TV3; consumed by TV5 finalizer |
-| TV1 -> TV5 finalizer/fallback | Verified eligible candidate or due deadline | Committed terminal/release/contribution outcome, or harmless no-op | DBTX lock order; once-only business effects; on-time candidate precedence | TV5 domain, TV2 transaction, TV1 integration |
+| TV1 -> TV4 scheduler port | Due Listing scan, bounded budget, Worker signer-readiness prefilter, stop request | Listing scan progress, per-Listing typed outcome | TV4 pure FIFO policy is called **inside** TV2's single TX-ALLOCATE UoW; no bypass of actual `enqueue_seq` head; stale/missing signer proof cannot allocate | TV4 policy, TV2 transaction, TV1 wiring |
+| TV4 policy -> TV2 allocation UoW | `listing_id` and `SignerReadiness(worker_id,key_id,public_key_fingerprint,proof_expires_at)` produced by the G1 live proof gate outside locks | `Allocated(job_id,attempt_id,event_id)`, `Blocked(LISTING_NOT_ACTIVE/HEAD_DOES_NOT_FIT/SIGNER_NOT_READY)`, `Noop(NO_QUEUED_HEAD/LISTING_NOT_FOUND/LOCK_BUSY)`, or `CommitOutcomeUnknown` | **Worker advisory shared lock first** (registration/activation exclusive), then Listing and FIFO head Job. Recheck sole active DB key, worker/key/fingerprint and unexpired proof under locks. One executor UoW; no HTTP or live ORM Session crossing calls | TV2 DB and TV4 policy; TV1 producer/consumer ACK pending |
+| TV1 -> TV2 Outbox port | Due immutable P1 event and observed owner/version | `FencedClaim`, `ACK/RETRY/EXHAUSTED` or stale no-op | Claim due PENDING or expired CLAIMED only; CAS transition requires `state=CLAIMED` + `lease_owner` + `lease_version`. Expired owner may still ACK **unless takeover**; never normal-reclaim ACKED/EXHAUSTED. Missing-receipt repair is a separately reviewed port | TV2 DB, TV1 coordination, TV5 repair ACK pending |
+| TV1 -> Simulator dispatch adapter | Persisted P1 ten-key immutable Outbox payload and stable `event_id/attempt_id` | Authenticated HTTP status/timeout/auth/config fault | One deterministic serializer gives byte-identical HTTP bodies on retry/takeover/restart; no oracle/seed/secret; HTTP 202 is only transport acceptance. HTTP 401 is a redacted auth/config failure, **not** a successful dispatch, and never starts a new Attempt | TV5 transport, TV3 service auth, TV1 orchestration |
+| Simulator -> API (NOT Manager) | Direction-authenticated original signed callback bytes | `202 STORED/DUPLICATE`, `409 RESULT_ID_COLLISION`, typed non-acceptance or retryable fault | TV2 B-IF-02 uses stored `received_at` from `INSERT ... RETURNING` after Listing/Job locks; equality with deadline is late. D-01 Option C: compare SHA-256 digest **and trusted Job/Attempt binding**, retaining raw bytes; cryptographic equivalence is not literal byte equality | TV3 ingress/auth, TV2 DB, TV5 sender |
+| TV1 -> TV3 verifier | Durable Inbox original bytes/hash, persisted binding, registered historical public key | `VerifiedV1Receipt` / definitive `RejectedV1Receipt` / retryable `VerifierUnavailable` | Four post-admission rejection codes only: `UNKNOWN_KEY`, `KEY_WORKER_MISMATCH`, `CONTEXT_MISMATCH`, `INVALID_SIGNATURE`. DB/key registry unavailability, parser drift and broken key invariant **fail closed**, keep PENDING and retry; no terminal write. V-OUT outside the DB lock window | TV3 module, TV1 wiring, TV2/TV5 consumers |
+| TV1 -> TV5 finalizer/fallback | Frozen V-OUT receipt bound to `inbox_id,result_id,envelope_sha256,job_id,attempt_id,worker_id,listing_id,key_id`, or due `job_id` | `Finalized`, `PrecedingPending`, `AlreadyTerminalNoop`, `BindingMismatchNoop`, `ContinueCandidateScan` or unknown COMMIT | TV2 UoW locks Listing→Job→Allocation→Inbox, rechecks original hash/identities/status/stored time and pure extracted signed bytes. Earliest on-time PENDING blocks later winner/fallback. One terminal/release/contribution; **no Worker advisory lock in Finalize/Ingress** | TV5 policy, TV2 UoW, TV3 verifier, TV1 coordination |
 | TV1 -> observability | Lifecycle state, per-group result and request/attempt correlation | Redacted logs and readiness/diagnostics evidence | No JWT, Bearer, private key, seed, expected digest, raw signed secret or PII leak | TV1 with TV3 security review |
 
 **Integration contract status:** these rows define expected responsibilities only. Exact Python interfaces, DTOs, exception categories and source-file ownership are `PROPOSED` until the respective owner ACKs. Do not introduce duplicate layers or alter an approved contract merely to match an invented port name.
@@ -101,17 +124,27 @@ These are **logical responsibilities, not three new services**. **Approved `P2A-
 
 - **Transaction-local FIFO selection:** `allocate_one_listing(listing_id)` owns one complete transaction. TV4 policy and TV2 row access are invoked in that same UoW, never via passing a previously locked Job entity or live Session across threads. TV4/TV2 must approve the precise call contract and barrier tests.
 - **Inbox locator vs row lock:** a dispatcher/Manager may read an unlocked candidate locator to find `job_id` and `listing_id`. It must not hold an Inbox `FOR UPDATE` lock or an uncommitted Inbox claim while waiting to lock Listing and Job; that inversion can deadlock against `TX-INBOX-INGRESS`/`TX-FINALIZE`. Any durable claim marker must be committed in a short independent operation that has no dependent Job/Listing row locks, then revalidated under `Listing -> Job -> Allocation -> Inbox` in finalization.
-- **Verifier proof:** TV3 may produce a typed, non-mutating `VerifiedV1Receipt`, but TV5/TV2 must re-read the durable Inbox evidence identity/hash, bound Job/Attempt, authenticated Worker key and terminal status under the required DB locks. A stale precheck cannot authorize a write. Signature verification and domain finalization must remain separate responsibilities.
+- **V-OUT proof and rejection:** TV3 produces `VerifiedV1Receipt` or a *definitive* `RejectedV1Receipt` outside domain locks. TV2/TV5 must re-read `inbox_id`, `result_id`, `envelope_sha256 = sha256(original_envelope_raw)`, Job/Attempt/Worker/Listing/key binding, stored `received_at` and PENDING status under the locks; `extract_signed_parts_v1` must reproduce the carrier's `payload_jcs_raw` / `signature_raw`. Mismatch means **no mutation**; dependency/parser/invariant failure leaves Inbox PENDING and is retryable/fail-closed, not a definitive rejection. Neither signature validity nor transport 202 proves the simulated outcome is correct; protected reference comparison is a separate Phase 3 dispute activity.
 - **Bounded Inbox processing:** a bounded scan cannot declare `SYSTEM_FAULT` merely because a batch found no valid candidate; it must prove that **every committed on-time candidate** for the Job has been durably accepted/rejected/inspected, including a later batch. Candidate order is `(received_at, inbox id)` using DB-trusted timestamps, not Worker-supplied `finished_at` or callback arrival in RAM.
 - **Cold restart:** two distinct `result_id` values may be created for the same logical Attempt if Simulator loses its RAM cache. They remain separate Inbox candidates; the first eligible *valid* candidate by trusted order may win, but the unique accepted result per Job and one terminal/release/contribution are enforced transactionally. Global conflict detection across Simulator restart is not promised by a RAM-only cache.
 
 These are review clarifications and proposed executable interfaces, **not** evidence that TV2/TV3/TV4/TV5 have ACKed a transaction design or that a working verifier/Manager exists.
 
+### 2.4. TV1 decisions and cross-phase contract freeze (2026-11-19)
+
+**P2A-DEC-03 — Verifier Option A (`TV1_APPROVED_DESIGN_DIRECTION`).** Keep the TV3 V1 verifier as a pure module used by the existing Manager. No separate Verifier process, service, schema or network hop. TV3 owns parsing/JCS/Ed25519 and a typed verdict; TV1 schedules the call; TV2/TV5 own the locked, atomic business write. A bad or unknown *registered* key can yield a definitive typed rejection, but an unavailable key store, inconsistent key registry, parser/invariant failure or transient verifier dependency yields `VerifierUnavailable`: preserve PENDING and retry. Module-level trust separation must still be testable.
+
+**P2A-DEC-04 — Blockchain Option A (`TV1_APPROVED_DESIGN_DIRECTION`).** Phase 2 retains original signed bytes and their SHA-256 in PostgreSQL under the existing 10+6+2 phased catalog. In Phase 4 an optional EVM integration may later anchor **only approved public identifiers, immutable digests and committed evidence references**. Do not send raw receipts, protected `simulation_references`, private keys, credential material, sensitive user data or mutable reputation projections on-chain. Future anchoring must be a post-commit, at-least-once/idempotent consumer and may require a separate L2 contract at that phase; no "atomic PostgreSQL + blockchain" claim. The 23-day retention and Phase 3 open-dispute hold still govern off-chain proof availability; an on-chain hash alone cannot restore purged raw proof.
+
+**Inherited L2 conditional decisions (lead, PR #46 @ `531805b`):** D-01=C (SHA-256+CHECK+trusted binding), D-05/D-13=P1 (ten-key immutable dispatch), D-06=fenced CAS (repair separately pending), D-18/E-C3=two-active-key quiesce and Worker-first advisory lock (no active-key partial unique index), signer G1=nonce-based proof-of-possession, E-C4=V-OUT, D-17=`INSERT ... RETURNING received_at`, D-12=first-contributing UPSERT. These are design directions **not** final code signatures, SQL runtime results, PR merge approval or implementation permission; API Contract, Database Design and other owners' specs must be reconciled under L2 change control.
+
+**Still open (not decided by DEC-03/04):** D-03/S-10 provisioning writer; D-16 contradictory dispatch after Simulator cold restart; distinct authorized ACKED-receipt repair; key compromise; signer-proof TTL/replay/Simulator restart; config resource bounds; exact-SHA TV2–TV5 ACKs and the independent L2 human review. Nothing in these two decisions reopens already approved Phase 2 safety invariants.
+
 ## 3. Runtime lifecycle design
 
 ### 3.1. Startup (proposed order)
 
-1. Load and validate `Settings`, required service secrets and DB connection configuration using approved sources. Never log secret values. Fail startup on missing/invalid mandatory security configuration.
+1. Load and validate `Settings`, required service secrets and DB connection configuration using approved sources. Validate `MANAGER_DISPATCH_TOKEN` and `SIMULATOR_CALLBACK_TOKEN` independently (each >=256 bits of entropy, distinct, nonempty, correctly encoded); a missing, malformed, weak or identical token is **fatal without retry**. Never log secret values. Only transient DB unavailability can use bounded startup backoff.
 2. Create the **existing** Manager-side SQLAlchemy engine and check PostgreSQL connectivity. Verify the configured Phase 2 schema/migration compatibility against the **actual accepted** `main` baseline (TV2 owns the check and exact expected Alembic revision). No hardcoded guessed future head.
 3. Construct runtime adapters by dependency injection: DB ports, scheduler policy, fenced outbox delivery, verifier, finalization and required transport clients. Only instantiate a component after its owner-approved interface is available.
 4. Initialize the three supervised worker groups and register cancellation/failure reporting. **Do not mark Manager ready** until required groups are started and required infrastructure checks pass.
@@ -162,13 +195,13 @@ The TV1 runtime owns a **supervisor** that tracks each required group as `STARTI
 | Unit | Authoritative writer | Lock/commit discipline | TV1's permitted role |
 |---|---|---|---|
 | `TX-SUBMIT`, `TX-CANCEL` | API | Listing then Job; Job + protected Reference atomic on submit; cancel only own `QUEUED` | Consume accepted Job/Listing contract; no second implementation |
-| `TX-ALLOCATE` | Manager | Listing -> **actual FIFO-head** Job, then allocation/attempt/outbox in same commit | Schedule/invoke TV4 and TV2 ports |
+| `TX-ALLOCATE` | Manager | **Worker advisory (shared) → Listing → actual FIFO-head Job**; live G1 proof outside lock and DB-key/proof fingerprint recheck under lock, then allocation/attempt/outbox in one commit | Invoke TV2 port with TV4 pure policy, no HTTP in the transaction |
 | `TX-OUTBOX-CLAIM/ACK/RETRY` | Manager | Short fenced Outbox-only transactions; HTTP afterwards | Coordinate retry/claim and transport, not hand-roll SQL |
 | `TX-INBOX-INGRESS` | API | Authenticated callback; Listing -> Job; trusted `received_at` after locks | Never redirect callback to Manager or treat `202` as verification |
 | `TX-FINALIZE` | Manager | Listing -> Job -> Allocation -> Inbox -> Contribution -> Aggregate; one terminal/release/contribution commit | Invoke TV3 verifier and TV5/TV2 finalizer |
 | `TX-DEADLINE-FALLBACK` | Manager | At deadline evaluate all committed on-time Inbox candidates first; fallback only if none valid | Trigger due work; no direct ad hoc Job status write |
 
-**Binding rules (not proposed choices):** FIFO uses `jobs.enqueue_seq`; when the head cannot fit, do not bypass it. `SKIP LOCKED` may be used for eligible Listing/Outbox claims, **not for the FIFO-head queued Job**. The active GPU count matches the sum of active allocations after each committed transaction. API and Manager never race by using different lock orders. Transaction ownership does not change just because TV1 performs integration.
+**Binding rules (not proposed choices):** FIFO uses `jobs.enqueue_seq`; when the head cannot fit, do not bypass it. The **Listing scan is an unlocked locator**; Listing lock contention returns `Noop(LOCK_BUSY)` under `lock_timeout`. `SKIP LOCKED` is reserved for **Outbox** claims, not Listing locking or the FIFO-head queued Job. The active GPU count matches the sum of active allocations after each committed transaction. API and Manager never race by using different lock orders. Transaction ownership does not change just because TV1 performs integration.
 
 ## 5. Required interaction sequences
 
@@ -187,7 +220,7 @@ sequenceDiagram
     Client->>API: Submit Job (Phase 1)
     API->>DB: TX-SUBMIT: QUEUED + protected reference
     M->>S: Due scheduling iteration
-    S->>DB: TX-ALLOCATE (Listing -> FIFO head Job)
+    S->>DB: TX-ALLOCATE (Worker advisory shared -> Listing -> FIFO head Job; signer proof recheck)
     DB-->>S: COMMIT RUNNING + allocation + attempt + outbox
     M->>D: Dispatch due Outbox
     D->>DB: Fenced claim; COMMIT/UNLOCK
@@ -198,7 +231,7 @@ sequenceDiagram
     DB-->>API: Durable Inbox COMMIT
     API-->>SIM: 202 ingress only
     M->>V: Process committed Inbox candidate
-    V->>DB: Check signing context, finalization locks
+    V->>DB: V-OUT result; under Listing/Job locks recheck persisted evidence and signed parts
     V->>DB: TX-FINALIZE terminal + release + contribution
     DB-->>V: COMMIT once
 ```
@@ -246,7 +279,7 @@ An approved rule already permits an existing `RUNNING` Job to continue after Lis
 
 | Failure / race | Required Manager behavior | Durable check / test references |
 |---|---|---|
-| Missing config, required secret, unsupported Alembic head | Fail readiness/startup; do not run business writers; no default secret fallback | `P2A-ACC-01`, `P2A-ACC-05`; TV2 schema gate |
+| Missing/weak/equal service tokens, unsupported Alembic head or invalid grants | Fatal fail-closed startup; only transient DB connectivity receives bounded retry; no business writer starts | `P2A-ACC-01/05`; TV2 schema gate; TV3 secret matrix |
 | PostgreSQL unavailable at startup or intermittently | No fabricated result; visible degraded/failed state; retry or restart per reviewed supervisor policy | `P2A-ACC-03/05`; `QA-REL-01` |
 | Scheduler crashes or stalls | Supervisor detects missing progress and does not continue claiming full readiness | `P2A-ACC-05`; proposed stall-injection test |
 | Two schedulers compete for one Listing | TV2/TV4 transaction serializes; at most one allocation; FIFO head is not skipped | `DBTX-03/04`, `P2A-ACC-04` |
@@ -256,7 +289,7 @@ An approved rule already permits an existing `RUNNING` Job to continue after Lis
 | Outbox lease expiry / stale sender ACK | Fencing token rejects stale ACK; retry uses same logical attempt | `DBTX-07` |
 | Simulator HTTP timeout or lost `202` | Persist retry due per ADR-005; never hold DB lock across HTTP | `DBTX-07`, `E2E-02` |
 | Callback duplicate or same result ID with changed bytes | Exact replay no-op, original trusted received time retained; changed bytes conflict | `DBTX-08` |
-| Invalid signature / incorrect Job-Worker-attempt context | Reject candidate, keep Job RUNNING pending other valid candidate or deadline | `DBTX-11`, ADR-004 `WIRE`/`ENUM` |
+| Definitive invalid signature/context/key vs unavailable verifier or broken key invariant | Only a definitive four-code receipt is rejected. Dependency/parse invariant fault keeps Inbox PENDING, blocks fallback and retries without inventing a Worker fault | `DBTX-11`, `P2B-DRT-21/23`, TV3 V-OUT |
 | Manager restarts after eligible callback but after deadline | Process previously committed valid on-time Inbox before considering fallback | `DBTX-09` |
 | Callback exactly at deadline / fallback wins | Reject late/new callback, one `SYSTEM_FAULT` fallback when eligible; zero Worker penalty | `DBTX-10` |
 | Replay finalization/reputation after restart | One terminal, one release, one contribution or no contribution for SYSTEM_FAULT | `DBTX-12`, `P2A-ACC-04` |
@@ -273,9 +306,9 @@ An approved rule already permits an existing `RUNNING` Job to continue after Lis
 | PostgreSQL credentials/role | Existing API/Manager runtime, least privilege reviewed by TV2 | Inject the correct Manager DB access configuration | Give DB URL/password to Simulator or browser |
 | Manager -> Simulator internal Bearer | Dispatch-side Manager; Simulator validates | Wire per ADR-005; credential >=256 random bits | Reuse callback credential or user JWT |
 | Simulator -> API callback Bearer | Simulator; API validates | Ensure callback route is wired by API/TV3 | Route callback to Manager or log raw header |
-| Worker Ed25519 private key | Simulator only | No direct Manager access; consume signed claim via API Inbox | Place private key in PostgreSQL, Manager logs or frontend |
+| Worker Ed25519 private key | Simulator only | No direct Manager access; consume signed claim via API Inbox. G1 signer proof signs a fresh 32-byte nonce with a separate domain | Place private key in PostgreSQL, Manager logs or frontend |
 | Historical Worker verification public keys | Manager verified DB access, owner-approved grants | Inject verifier's read port | Accept public key from callback as authority |
-| Protected `simulation_references` | Trusted API/Manager only as approved | Preserve non-exposure boundary and eventual Phase 3 compatibility | Send seed, expected outcome/digest to Simulator/Worker/Client |
+| Protected `simulation_references` | Phase 1 API authorized insert only; Phase 2 Manager/Finalizer has **no SELECT grant** (TV2 D-14, G-03); a separately reviewed Phase 3 adjudication path may read it | Preserve off-chain oracle confidentiality and explicit Phase 3 role/change-control boundary | Grant Phase 2 Manager oracle SELECT or send seed/expected outcome/digest to Simulator/Worker/Client, logs or Phase 4 chain |
 
 **ADR-005 fixed transport parameters:** due scan 2s; fenced lease 30s; HTTP connect 2s/total 5s; persisted 2/4/8/16/30s backoff; missing-receipt probe at `finish_due_at + 10s`; hard deadline `finish_due_at + 120s`. This document does not change those values. **Scheduler scan:** `P2D-OPEN-03` approved a configurable default **2 seconds**, independently of ADR-005 Outbox/Receipt due-scan 2 seconds. This is a scan cadence, never a 2-second Job-start SLA. Bounded Listing batch/rotation and connection-pool sizing still need TV1/TV2/TV4 ACK.
 
@@ -293,12 +326,12 @@ Record per worker group: `name`, `started/stopped`, last successful scan, last e
 
 | Required artifact before Phase 2 code | Source / responsible owner | Evidence TV1 must collect | Status now |
 |---|---|---|---|
-| Accepted Phase 1 runtime baseline | `main`; Phase 1 lead and owners | Commit SHA, PR #39 status, applied E2E checks, component interface versions | `PENDING` |
-| Actual database revision and permissions | TV2; `alembic_version` against disposable/persistent rules | Schema head, reviewed 6-table migration plan, role ACL matrix | `PENDING` |
+| Accepted Phase 1 runtime baseline | `main`; Phase 1 lead and owners | `main@bee832eaf5463df20f6c6815174322871eb6685a`; PR #39 merge `aff538f`; final-head Actions run `42385995533` (4/4 jobs); source migration graph head `0005_listing_d7` | `PHASE1_BASELINE_RECORDED`; applied DB revision is not verified here |
+| Actual Phase 2 database revision and permissions | TV2; applied `alembic_version`, restricted grants and schema evidence | Phase 2 schema/grants/UoW are not on merged main; PR #46 is an open proposal | `PENDING_PHASE2B / BLOCKED` |
 | Auth and protected API contracts | TV3 | JWT/role scope, internal service token directions, callback boundary ACK | `PENDING` |
 | Listing and FIFO/capacity semantics | TV4 | Paused Listing and cancel race contract, scheduler input/output ACK | `PENDING` |
 | Job, Simulator and deterministic reference contract | TV5 | Current `TX-SUBMIT`, stable attempt, versioned oracle proposal review, signed claim/output compatibility | `PENDING` |
-| Integration test harness | TV1 with TV2-5 | Test case manifest, disposable PostgreSQL + controlled clocks/barriers, Compose runner and CI plan | `PENDING` |
+| Integration test harness | TV1 with TV2-5 | Test case manifest, disposable PostgreSQL + controlled clocks/barriers, Compose runner and CI plan | `PENDING`; Phase 2 tests `NOT_RUN` |
 
 Interphase changes require an explicit `NO_IMPACT` with rationale or a `POTENTIAL_IMPACT` / `CONFIRMED_IMPACT` record with **source owner and each affected consumer owner ACK**. TV1 coordinates; it does not sign for TV2-5 or self-approve its own PR. Changes to approved SRS/ADR/API/schema follow Change Control (review level and independent human reviewer requirements).
 
@@ -324,6 +357,18 @@ Interphase changes require an explicit `NO_IMPACT` with rationale or a `POTENTIA
 2. **Phase 2 implementation readiness:** Phase 1 accepted `main` baseline, Phase 2B-E documented compatibility/owner ACKs, relevant Phase 2 decisions closed, approved tests/CI plan, separate **explicit permission to code**.
 3. **Phase 2A runtime acceptance:** implemented Manager integrations and actual passing verification against agreed acceptance cases. A docs-only PR or merged Markdown file never equals a working Manager.
 
+### 9.2. New cross-owner regression gates after PR #46 L2 decisions (planned, `NOT_RUN`)
+
+| ID | Test setup | Required oracle |
+|---|---|---|
+| `P2A-ACC-13` | Cache live K1 G1 proof; register/activate K2; allocate concurrently with Worker shared/exclusive advisory locks in both commit orders | Cached K1 proof never allocates after K2 activation; missing/expired/fingerprint-mismatched readiness yields `Blocked(SIGNER_NOT_READY)`; K1-on-time Inbox still finalizes |
+| `P2A-ACC-14` | Inject unknown key, transient DB key lookup failure, two active keys, parser drift and a swapped rejection/verified receipt | Only four definitive TV3 codes mark a matching Inbox row REJECTED; unavailable/invariant faults leave PENDING; original hash, result_id and context are rechecked; no false fallback |
+| `P2A-ACC-15` | Dispatch P1 ten-key body; inject HTTP 401, ACK after lease expiry without takeover, takeover before ACK and lost-receipt repair | 401 not success and no new Attempt; same owner/version can ACK until takeover; stale owner updates zero rows; repair requires a separate authorized fenced port; payload bytes stable across restart |
+| `P2A-ACC-16` | Kill Manager after committed on-time Inbox; later page contains valid R2, or finalization COMMIT outcome unknown; restart after deadline | Recover by rescanning durable PENDING/status records; R2 can win if earlier candidate definitively rejected; no false SYSTEM_FAULT, duplicate release/contribution or blind retry |
+| `P2A-ACC-17` | Review immutable off-chain Worker/Job/Attempt/Inbox/Result evidence under 23-day retention and Phase 3 held-dispute fixtures | Identity/hash provenance remains verifiable only while retained; no Phase 2 on-chain call, extra table, oracle exposure or blockchain RPC dependency |
+
+No new tests have been executed by this docs-only revision; the above add to, rather than supersede, `TV1-T01..T16` and existing `P2B-DRT` cases.
+
 ## 10. Decision register and remaining conditions (conditional design approval)
 
 | ID | Design question and proposed path | Required review / exit |
@@ -333,8 +378,10 @@ Interphase changes require an explicit `NO_IMPACT` with rationale or a `POTENTIA
 | `P2A-OPEN-02` | **DESIGN CLOSED via `P2D-OPEN-03`:** Scheduler defaults to a configurable 2-second scan; one Listing per allocation transaction per `P2D-OPEN-01`. Rotating Listing-batch size, DB budgets and fairness tests remain `PENDING_ACK`; this is no Job-start SLA. | TV4 + TV2 + TV1 confirm batch and measured limits; tests `NOT_RUN` |
 | `P2A-OPEN-03` | **CLOSED / APPROVED:** Option A, `asyncio` supervisor + bounded blocking-I/O executor, one Session/UoW per complete DB unit in one executor context; bounded backpressure, cancellation-aware cleanup. **Exact worker/pool/SQL timeout sizes remain pending specialist review.** | TV1 + TV2 implementation detail ACK; eventual nonblocking/lock/cancellation tests `NOT_RUN` |
 | `P2A-OPEN-04` | **APPROVED DESIGN DIRECTION:** Option A bounded Graceful Shutdown and PostgreSQL-backed recovery. **OPEN PARAMETERS:** exact drain budget, executor/DB timeout coordination and external container restart policy; must not revise ADR-005 deadlines. | TV1 + TV2 + TV5 to approve numeric/config details; crash/restart tests remain `NOT_RUN` |
-| `P2A-OPEN-05` | **POLICY DESIGN RESOLVED, ACKs OPEN:** GPU-005-B is approved for Phase 1 reference creation on PR #39 and conditionally approved for Phase 2 output/simulator design; PAUSED RUNNING retry is approved as `P2D-OPEN-02`. Remaining items are signer provisioning, precise interface ACKs, PR #39 accepted baseline and actual Phase 2 tests. | TV1 coordinates named source/consumer ACKs; no inferred approval |
-| `P2A-OPEN-06` | **OPEN IMPLEMENTATION POLICY:** distinguish transient DB outage during startup from absent schema, grants or secret; define bounded retry/backoff, startup expiry and explicit process failure, without changing Phase 1 HTTP `/health/ready`. | TV1 + TV2 + TV3; fault-injection tests `NOT_RUN` |
+| `P2A-OPEN-05` | **POLICY DESIGN RESOLVED, ACKs OPEN:** GPU-005-B is approved for Phase 1 reference creation on PR #39 and conditionally approved for Phase 2 output/simulator design; PAUSED RUNNING retry is approved as `P2D-OPEN-02`. Remaining items are signer provisioning, precise interface ACKs, Phase 2 database schema/grants and actual Phase 2 tests. | TV1 coordinates named source/consumer ACKs; no inferred approval |
+| `P2A-OPEN-06` | **OPEN IMPLEMENTATION POLICY:** transient DB outage may use bounded retry/backoff. Missing/weak/identical secrets, invalid schema/grants and auth mismatch are fatal non-transient faults; no silent retry. Keep Phase 1 `/health/ready` unchanged. | TV1 + TV2 + TV3; exact retry budget still PENDING; tests `NOT_RUN` |
+| `P2A-DEC-03` | **TV1 APPROVED DESIGN DIRECTION (2026-11-19):** Verifier Option A, TV3 pure module inside current Manager process, no additional service; retain V-OUT and mandatory locked evidence recheck. | TV2/TV3/TV5 exact-SHA interface ACK and code tests pending; no coding/merge approval |
+| `P2A-DEC-04` | **TV1 APPROVED DESIGN DIRECTION (2026-11-19):** off-chain evidence during Phase 2; future Phase 4 optional on-chain digest anchoring after DB commit. | Phase 4 design separate; no Phase 2 schema, service or runtime change |
 
 **Review outcome:** `P2A-GATE-01` accepted the Manager runtime architecture and TV1's integration ownership **conditionally**. The remaining entries above are **not** deemed approved by choosing Option A. Phase 2B..2E owners must review their own detailed algorithms/interfaces; their future signatures, ACKs or numeric parameter decisions may trigger a documented revision of this 2A design rather than silent drift.
 
@@ -349,7 +396,7 @@ Interphase changes require an explicit `NO_IMPACT` with rationale or a `POTENTIA
 | `P2A-COND-03` | Confirm exact graceful-stop budget and its coordination with DB/HTTP timeouts and Compose stop grace; decide external restart policy separately | TV1 + TV2 + TV5, documented choice and abnormal-stop verification | `PENDING` |
 | `P2A-COND-04` | Review and ACK conceptual ports: API Inbox trust/auth, Manager verifier, Outbox, Simulator, signed result, finalization/reputation | Each affected TV2/TV3/TV4/TV5 owner and TV1; linkable independent cross-phase acknowledgements | `PENDING_ACK` |
 | `P2A-COND-05` | **Already approved in Phase 2 review:** GPU-005-B public deterministic reference/output (conditional), signed claim is not proof of compute, and retry of existing RUNNING Attempt under PAUSE. **Still confirm:** actual signer/key provisioning, exact output digest interop, security/DB grants and cross-owner interface ACKs. | TV1 + TV2 + TV3 + TV4 + TV5 review the same version/SHA and test design | `POLICY_APPROVED / INTERFACE_ACK_PENDING` |
-| `P2A-COND-06` | Confirm a real integrated Phase 1 baseline on `main` with latest SHA, Alembic revision, CI and E2E evidence; do not treat open/draft PR #39 as merged | Team lead + affected module owners; audited PR and test evidence | `PENDING_PHASE1_BASELINE` |
+| `P2A-COND-06` | Record the integrated Phase 1 baseline on `main`; separately establish the applied database revision and Phase 2 schema/grants before Phase 2 DB work | Team lead + TV2; merged PR and exact-head CI evidence, then applied-DB evidence under TV2's safe test rules | `PHASE1_BASELINE_RECORDED / PHASE2_DB_STATE_PENDING` |
 | `P2A-COND-07` | Before implementation, separately authorize a named Phase 2 coding slice and satisfy the existing human-review/change-control gates; execute the actual acceptance tests | Team lead authorization, source and consumer ACK links, tests `PASS/FAIL/NOT_RUN` | `NOT_AUTHORIZED / TESTS_NOT_RUN` |
 | `P2A-COND-08` | Set startup retry budget and fail-closed dependency classification (`P2A-OPEN-06`); do not imply a successful Manager readiness report from a DB-only `SELECT 1` | TV1 + TV2 + TV3; fault-injection and configuration tests | `STARTUP_POLICY_PENDING` | |
 
@@ -364,16 +411,17 @@ Interphase changes require an explicit `NO_IMPACT` with rationale or a `POTENTIA
 | `P2A-01` Manager lifecycle and dependency map | Sections 2, 2.2, 3; documented supervisor and stop/ready policy options | `APPROVED_DESIGN_CONDITIONAL` |
 | `P2A-02` Success/failure/restart sequences | Sections 4, 5 and 6; accepted transaction names and cross-module boundaries | `APPROVED_DESIGN_CONDITIONAL` |
 | `P2A-03` Config/secret/observability boundaries | Section 7; owner-specific authentication and privacy review | `APPROVED_DESIGN_CONDITIONAL / OWNER_ACK_PENDING` |
-| `P2A-04` Phase 1 -> 2 readiness/handoff | Section 8; baseline SHA, Alembic head, affected owner ACKs to be filled later | `AWAITING_BASELINE` |
+| `P2A-04` Phase 1 -> 2 readiness/handoff | Section 8; baseline SHA and source migration head recorded; Phase 2 DB state and affected owner ACKs remain outstanding | `BASELINE_RECORDED / PHASE2_DB_AND_OWNER_ACK_PENDING` |
 | `P2A-05` Test, release and rollback review | Section 9, failure matrix, evidence requirements and change-control gate | `APPROVED_DESIGN_CONDITIONAL / TESTS_NOT_RUN` |
 
 ### Mandatory reading for the Phase 2A owner and reviewers
 
-- [SRS](../../requirements.md), [FR](../../functional-requirements.md), [NFR](../../non-functional-requirements.md).
-- [System Architecture](../system-architecture.md), [Quality Attributes](../quality-attributes.md), [Module Design](../../design/module-design.md), [Database Design](../../design/database-design.md), [API Contract](../../design/api-contract.md), [Test Design](../../design/test-design.md).
-- [ADR-001..008](../decisions/); especially ADR-002 (DB trust), ADR-003 (Outbox/Inbox), ADR-004 (V1 signed result), ADR-005 (retry/deadline), ADR-008 (stack).
-- [Phase 1E](phase1e_job_submission_queue.md), [GPU-005-B Phase 1 approved reference specification; Phase 2 conditionally approved in local review](phase1e_gpu005_reference_technical_specification.md), [Phase 2 readiness and handoffs](../../development/phase2_readiness_and_handoffs.md), [Phase 2 decision register](../../development/phase2_decision_register.md), [Phase 2 test plan](../../design/phase2_test_and_acceptance_plan.md).
-- [Contribution Rules](../../../CONTRIBUTING.md), [Team Rules](../../development/team-contribution-rules.md), [Change Control](../../development/change-control.md), [Interphase Change Control](../../development/interphase-change-control.md).
+- [SRS](../../../requirements.md), [FR](../../../functional-requirements.md), [NFR](../../../non-functional-requirements.md).
+- [System Architecture](../../system-architecture.md), [Quality Attributes](../../quality-attributes.md), [Module Design](../../../design/module-design.md), [Database Design](../../../design/database-design.md), [API Contract](../../../design/api-contract.md), [Test Design](../../../design/test-design.md).
+- [ADR-001..008](../../decisions/); especially ADR-002 (DB trust), ADR-003 (Outbox/Inbox), ADR-004 (V1 signed result), ADR-005 (retry/deadline), ADR-008 (stack).
+- [Phase 1E](../phase1e_job_submission_queue.md), [GPU-005-B Phase 1 approved reference specification; Phase 2 conditionally approved in local review](../phase1e_gpu005_reference_technical_specification.md).
+- Phase 2 design set: [2A](Phase_2A_v0.9.md), [2B](Phase_2B_v1.3.md), [2C](Phase_2C_v0.9.md), [2D](Phase_2D_v0.9.md), [2E](Phase_2E_v1.8.md). Handoffs: [TV1](../../../development/handoffs/phase2/HANDOFF_TV1_Phase2A_v1.2.md), [TV2](../../../development/handoffs/phase2/HANDOFF_TV2_Phase2B_v1.1.md), [TV3](../../../development/handoffs/phase2/HANDOFF_TV3_Phase2C_v1.1.md), [TV4](../../../development/handoffs/phase2/HANDOFF_TV4_Phase2D_v1.1.md), [TV5](../../../development/handoffs/phase2/HANDOFF_TV5_Phase2E_v1.1.md). There is no consolidated Phase 2 readiness document, decision register or test-plan file in this baseline.
+- [Contribution Rules](../../../../CONTRIBUTING.md), [Team Rules](../../../development/team-contribution-rules.md), [Change Control](../../../development/change-control.md), [Interphase Change Control](../../../development/interphase-change-control.md).
 
 ## 12. Approval and evidence register
 
@@ -386,16 +434,22 @@ Interphase changes require an explicit `NO_IMPACT` with rationale or a `POTENTIA
 | `P2A-OPEN-03` | Option A: Async Supervisor + Bounded Executor for synchronous SQLAlchemy DB units; Session/UoW lifecycle stays within one executor context; exact limits/timeout sizing not yet approved | `APPROVED_DESIGN_SLICE / TESTS_NOT_RUN` |
 | `P2A-OPEN-04` | Option A: bounded Graceful Shutdown on SIGTERM/SIGINT, stop new claims, finish/rollback active DB units when possible, safe incomplete-shutdown reporting, durable recovery after restart; numeric budget and external restart policy not yet approved | `APPROVED_DESIGN_DIRECTION / PARAMS_PENDING / TESTS_NOT_RUN` |
 | `P2A-OPEN-02` | Scheduler default 2-second configurable scan approved through `P2D-OPEN-03`; remaining batch/rotation/pool decisions separate | `DESIGN_CLOSED / PARAMS_PENDING` |
-| `P2A-GATE-01` | Team lead chose Option A: conditionally approve Phase 2A architecture, scope and TV1 ownership with parameters, cross-owner ACKs and Phase 1 gate explicitly pending | `APPROVED_DESIGN_CONDITIONAL / DOCS_ONLY` |
-| `P2A-v0.9-deep-review` | Consolidates approved 2D/2E policy and proposes new interop safeguards; this v0.9 text still awaits review, not an independent change to an approved ADR/contract | `REVIEW_PROPOSED / NO_GITHUB_CHANGE` |
-| Phase 1 `main`/PR #39 gate | Must recheck latest merge status, commit SHA, migration head, test evidence | `PENDING` |
-| TV2/TV3/TV4/TV5 ACK | No real cross-phase ACK inferred from this draft | `PENDING` |
+| `P2A-GATE-01` | Team lead chose Option A: conditionally approve Phase 2A architecture, scope and TV1 ownership; Phase 1 baseline recorded, while Phase 2 schema/grants, parameters and cross-owner ACKs remain open | `APPROVED_DESIGN_CONDITIONAL / DOCS_ONLY` |
+| `P2A-DEC-03/04` | TV1 selected integrated pure Verifier module and future Phase 4 off-chain-to-chain anchoring boundary on 2026-11-19; details in §2.4 | `TV1_DESIGN_DIRECTION_RECORDED / CODE_NOT_AUTHORIZED` |
+| PR #46 lead L2 conditional decision | D-01=C; D-05/13=P1; D-06=fenced CAS; D-18/E-C3=two-key quiesce; G1 signer; E-C4=V-OUT; D-17 stored timestamp; D-12 UPSERT. Source reconciling and exact-SHA ACK still pending | `APPROVED_DESIGN_DIRECTION_CONDITIONAL / SOURCE_ACK_PENDING` |
+| `P2A-v0.9-deep-review` (2026-11-07 snapshot) | Original Phase 2A design supplement; historical PR #39 and GitHub status are retained below for traceability | `MERGED_TO_MAIN_IN_PR_44; BASELINE_SNAPSHOT_SUPERSEDED` |
+| Phase 1 `main`/PR #39 gate | `main@bee832eaf5463df20f6c6815174322871eb6685a`; PR #39 merge `aff538f`; final PR head CI run `42385995533`, 4/4 jobs; source graph head `0005_listing_d7` | `PHASE1_BASELINE_RECORDED`; applied DB revision not verified by this review |
+| Open Phase 2 dependency PRs | PR #45 pure TV4 policy; PR #46 TV2 pre-code DB design; neither merged or owner ACK for final executable contracts | `OPEN_PROPOSALS_ONLY` |
+| TV2/TV3/TV4/TV5 ACK | TV2 and TV3 each provided **scoped** `ACK_WITH_ACTIONS` on PR #47 at `81ef608`; their requested changes now appear in this document. TV4/TV5 and renewed exact-HEAD ACKs remain outstanding | `SCOPED_ACK_WITH_ACTIONS / FINAL_ACK_PENDING` |
 | Phase 2 runtime tests | Not requested or executed | `NOT_RUN` |
-| GitHub PR/merge/code | None performed by this docs-only revision | `NONE` |
+| Phase 2 source code/migration/config | No implementation changes in this review | `NONE` |
+| Current review update | Fixes baseline facts, stale references, readiness wording and records cross-owner contracts for review | `DOCS_ONLY / REVIEW_PENDING` |
 
-**Status summary:** `APPROVED_DESIGN_CONDITIONAL` under `P2A-GATE-01` (Option A). The team lead accepted the 2A design direction and responsibility boundaries **for documentation**, subject to `P2A-COND-01..07`. The file has **not been merged**, no source code or tests were executed, specialist ACKs are still pending, and implementation remains **NOT AUTHORIZED**.
+**Status summary:** `APPROVED_DESIGN_CONDITIONAL` under `P2A-GATE-01` (Option A). The original v0.9 design file is already on `main` through PR #44; this 2026-11-08 documentation update is pending review. No Phase 2 source code, migration or runtime tests were executed. Specialist ACKs and Phase 2 DB prerequisites remain pending, and implementation remains **NOT AUTHORIZED**.
 
-## Appendix PR39-A (2026-11-07): Manager baseline and scheduling integration
+## Appendix PR39-A (historical snapshot, 2026-11-07): Manager baseline and scheduling integration
+
+> The PR status, debt status and evidence statements in Appendix PR39-A/B describe the review point on 2026-11-07. For current baseline and dispositions, use §0.1 and Appendix C. Historical technical constraints remain in force unless an owner decision changes them.
 
 **Status:** `DESIGN-SUPPLEMENT / CROSS-OWNER ACK PENDING / NO IMPLEMENTATION AUTHORIZATION`.
 This appendix updates the Phase 1 candidate baseline; the existing `P2A-GATE-01` conditional design approval is unchanged. Source: PR #39 at HEAD `44579ed`, NOT merged into `main` at inspection time. Phase 1 API/Auth/Jobs/Listing E2E succeeded in GitHub Actions, but Manager scheduling, signed callback and Phase 2 finalization are not implemented by #39.
@@ -428,7 +482,7 @@ This appendix updates the Phase 1 candidate baseline; the existing `P2A-GATE-01`
 **Design clarification:** every unimplemented operation is specified here as a typed *conceptual* interface. Naming is proposed, not a binding Python signature. All affected owners must ACK the final executable interface before code.
 
 
-## Appendix PR39-B (v0.9 deep review): explicit integration gates and provenance
+## Appendix PR39-B (historical snapshot, v0.9 deep review): explicit integration gates and provenance
 
 **Evidence snapshot:** PR #39 at `44579ed846051dee9000078e1afd7e8ea62e7358` remained Draft/unmerged on 2026-11-07. Its GitHub Actions run `42350954394` had four successful jobs including Phase 1 browser/PostgreSQL E2E; **Phase 2 Manager, Simulator Signed Result, FIFO, callback and Reputation tests remain `NOT_RUN`**. PR #42 is a separate unmerged Auth browser test PR stacked on PR #39; do not silently include it in an accepted `main` baseline.
 
@@ -470,3 +524,30 @@ This appendix updates the Phase 1 candidate baseline; the existing `P2A-GATE-01`
 - `P2D-OPEN-01/02/03`, `P2E-GPU005B-GATE-01` and Phase 1 PR #39 protected-reference/replay decisions are **approved at the documented scopes**; this revision merely synchronizes them.
 - Sections marked `PROPOSED_FOR_ACK` require actual, versioned TV2/TV3/TV4/TV5 review; no implied approvals, code authorization or GitHub change.
 - Before Phase 2 code, explicitly record the accepted Phase 1 `main` SHA + Alembic head, approve the interop interfaces, and obtain a separate named Phase 2 coding authorization.
+
+## Appendix C (2026-11-08): Cross-owner interface review matrix
+
+**Purpose:** give TV2–TV5 concrete contracts to review before implementation. These are integration expectations derived from the current specifications and source review, not approved Python signatures. `ACK` is reserved for an explicit owner response tied to document/code revisions. No ACK is inferred from a draft PR or prior design approval.
+
+| Contract / purpose | Input → output | Success / error behavior | Call order and transaction boundary | Owners / current status |
+|---|---|---|---|---|
+| **Manager ↔ PostgreSQL transactions:** run each complete TV2-owned UoW with source/consumer contracts. | Durable IDs and typed request → result/no-op/unknown-commit | Business result returned only after Session commit/rollback and closure; unknown COMMIT triggers durable-graph reconciliation, never blind retry. TV2 `phase2_ready()` must verify R1/R2 native grants, guards and schema | One bounded executor call per UoW; no HTTP/await with Session active. Worker advisory lock only for allocate/key provisioning. | TV1+TV2: **design direction conditionally approved, code BLOCKED** pending implemented R1/R2 and exact-SHA ACK |
+| **Scheduler ↔ `TX-ALLOCATE`:** use TV4 FIFO pure policy through TV2 transaction. | `allocate_one_listing(listing_id, SignerReadiness)` → Allocated/Blocked/Noop/CommitOutcomeUnknown | Valid G1 proof matched to sole active key under the shared Worker advisory lock; two active keys block allocation. `LOCK_BUSY` is Noop for next scan, not Job-head bypass. `reconcile_allocation` reads durable graph even if Job terminal/Allocation RELEASED | Manager's unlocked Listing locator → Worker advisory shared → Listing → FIFO head Job → pure TV4 assessment → atomic writes. No HTTP in locks or Session across executor calls | TV1+TV2+TV4/TV3/TV5 key gate: **design conditionally approved; port not implemented** |
+| **Manager ↔ Signed Result Verifier:** invoke TV3 pure module (DEC-03 / V-OUT). | `VerifiedV1Receipt` or definitive `RejectedV1Receipt`; dependency/unavailable is a **third** non-verdict outcome | Unknown/mismatched registered key/context/bad signature → one of four definitive codes. DB lookup unavailable, key invariant 0/2 active unexpectedly or admitted-envelope extractor failure → fail closed, Inbox stays PENDING and retry. No Job/reputation write | Verify outside domain locks; bind verdict by inbox ID, result ID, hash, Job/Attempt/Worker/Listing/key; TV2/TV5 recheck locked original bytes and `extract_signed_parts_v1` | TV1+TV3+TV2+TV5: **scoped TV3 ACK_WITH_ACTIONS; final source/consumer ACK pending** |
+| **Dispatch ↔ Simulator:** same Attempt/event across delivery and repair. | Immutable P1 ten-key payload from TV2 Outbox → transport status or typed fault | HTTP 202 is transport only; 401 is auth/config fault. Fenced claim/ACK/RETRY/EXHAUSTED uses state+owner+version. Expired owner without takeover may ACK; takeover invalidates old fence; ACKED repair needs a distinct authorized port | TV2 short Outbox-only claim/ACK UoWs, HTTP outside locks, TV5 Simulator sends signed callback only to API. Bytes stable through retry/restart | TV1+TV2+TV3+TV5: **D-06 conditionally approved; repair/interop ACK pending** |
+| **Finalization ↔ PostgreSQL:** one accepted receipt and once-only business effects. | Verified receipt's full provenance → terminal result/release/contribution or no-op | V-OUT: re-read Inbox ID, `result_id`, `envelope_sha256` and original raw hash, typed context, signed parts and stored `received_at < hard_deadline_at`; enforce `PrecedingPending` for earlier eligible PENDING, first valid wins. Immutable signed result, release and reputation delta in one commit | Listing → Job → Allocation → Inbox → Contribution → Aggregate under TV2 UoW. **No Worker advisory lock** in Finalize; key historical rows retained. V-OUT verification performed outside locks | TV1+TV2+TV3+TV5: **E-C4 design approved conditionally; runtime BLOCKED** |
+| **Deadline/Inbox ↔ Finalizer:** exhaust committed eligible evidence before fallback. | Due Job and bounded unlocked locator → candidate processing, `ContinueCandidateScan`, fallback or no-op | A bounded page/cursor is **not** durable proof of exhaustion. After restart, re-query persisted PENDING/state, do not trust RAM cursor. Any on-time PENDING, including transiently unverifiable, blocks `SYSTEM_FAULT`; new callback at exact deadline is late | API stores `received_at` using `INSERT RETURNING` and commits ingress first; Manager V-OUT verifies; TV2/TV5 rechecks under Listing→Job locks. `deadline_fallback(job_id)` has no caller proof | TV1+TV2+TV3+TV5: **design conditionally approved; detailed ACK pending** |
+
+### C.1. Cross-phase issues requiring explicit disposition
+
+- **X-01 column erratum (TV1 design confirmation, 2026-11-19):** **`gpu_listings.allocated_gpu_count` is authoritative**; `reserved_gpu_count` is a stale pseudocode typo, not a new column. TV2/TV4 previously reported compatible source checks. TV4 owns correction in PR #48; TV1 makes no schema/TV4-file change here. Status: `TV1_CONFIRMED / TV4_DOCS_MERGE_PENDING`.
+- **Phase 2B integration:** PR #46 @ `a27526e` contains docs-only six-table/grant/UoW proposals and records the lead's conditional L2 D-xx decisions (PR #46 comment 6849327771). **Design directions are conditionally accepted; exact SQL interfaces, normative source reconciliation, native-role tests and final ACK remain open.** Status: `APPROVED_DESIGN_DIRECTION_CONDITIONAL / BLOCKED_FOR_CODE`.
+- **Phase 2D scope:** open PR #45's policy unit cases do not prove TX-ALLOCATE, real PostgreSQL locking, signer readiness or Manager runtime integration. Status: owner work in progress; no cross-owner ACK inferred.
+- **Phase 2E cold cache:** `P2E-CACHE-GAP-01 = NEEDS_OWNER_DECISION`; SQL finalization idempotency does not provide the Simulator's changed-payload conflict guarantee after cold restart. Status remains open.
+- **Phase 1 audit:** the PR #39 owner reports named audit/race findings addressed, but open PR #45 separately records a role-rejection audit follow-up. This docs review did not verify the exact follow-up source/disposition. Track independently; do not claim closed from merge/CI alone.
+
+### C.2. Review and implementation gates
+
+- Reviewers: TV2 `@TranVu2005` for DB/UoW and X-01; TV3 `@giakhanh-hub` for verifier/auth; TV4 `@VietNguyen865` for FIFO/capacity and X-01; TV5 `@NguyenDucThang-tb` for Simulator/finalization. Each ACK must identify reviewed producer/consumer versions and any conditions.
+- Cross-owner design ACK is separate from code-compatible ACK. TV2 and TV3 reviewed previous HEAD `81ef608` with `ACK_WITH_ACTIONS`; these are not approvals of this revised HEAD, TV4/TV5 have not provided final exact-SHA ACKs, and final interface freeze still requires each owner to cite matching source/consumer revisions.
+- No Phase 2 implementation, migration, production configuration or runtime PASS is authorized by this review update.
