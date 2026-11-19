@@ -63,6 +63,72 @@ Both are immutable, built only by the TV3 verifier. `result_id` is **non-NULL**:
 
 **Evidence:** TV2 `P2B-DRT-17/19..23`, TV3 V1 vectors and `P2E-DRT-10..18` are specifications only; every Phase 2 native-role PostgreSQL, concurrency, crypto and E2E test remains `NOT_RUN`.
 
+---
+
+## Exact producer contract reconciliation — 2026-11-19
+
+**Source tips inspected:** TV2 PR #46 `c4956777512efc260fbf180898af2c041d0a16d6`, `docs/development/handoffs/phase2/tv2-p2b-precode/P2B_UOW_INTERFACES.md` B-IF-05/07; TV3 PR #49 `e73fb107d15296a6f317d9bed25ce76fe0657ac2`, `docs/development/handoffs/phase2/HANDOFF_TV3_Phase2C_v1.1.md` C-IF-06/10 and C-FINAL-01/03, plus `docs/architecture/phases/phase2/Phase_2C_v0.9.md` §6.6/§7.2; PR #50 consumer baseline before this edit `52c23eabd6948ad7db13d3d39d65ed920d996c9a`. These are proposal/source references, not exact-SHA ACKs. E-C4 V-OUT remains conditionally selected; this typed contract is `PROPOSED — PENDING_ACK`, not an owner-approved public API.
+
+### Producer-defined immutable verdict field sets
+
+TV3 constructs these immutable values only after strict parsing and the applicable verification path. The names and semantics below reproduce the current producer field set; they do not add fields or define new wire formats.
+
+```text
+VerifiedV1Receipt(
+    schema_version,          # literal "1"
+    inbox_id,                 # retained Inbox row identity
+    result_id,                # non-null UUID from accepted ingress
+    envelope_sha256,          # SHA-256 of the retained original envelope bytes
+    job_id,
+    attempt_id,
+    worker_id,
+    listing_id,
+    key_id,                   # trusted registered signer key identity
+    outcome,                  # ADR-004 Signed Result V1 classification
+    failure_reason,           # V1 value paired with outcome
+    result_digest,            # signed V1 simulation-output digest
+    finished_at_wire,         # signed wire value; never the trusted receipt time
+    payload_jcs_raw,          # UTF-8(JCS(payload)); no domain prefix
+    signature_raw,            # exactly 64 decoded Ed25519 signature bytes
+)
+
+RejectedV1Receipt(
+    inbox_id,
+    result_id,                # non-null UUID from accepted ingress
+    envelope_sha256,
+    job_id,
+    attempt_id,
+    rejection_code,           # closed definitive post-ingress enum below
+)
+```
+
+The definitive `rejection_code` set is exactly `UNKNOWN_KEY`, `KEY_WORKER_MISMATCH`, `CONTEXT_MISMATCH`, `INVALID_SIGNATURE`. `NOT_SELECTED` and `ALREADY_TERMINAL` are TV2 housekeeping reasons, never verifier verdicts. A structure/schema failure on bytes already admitted by ingress (`INVALID_STRUCTURE`, `UNSUPPORTED_SCHEMA_VERSION`) is an invariant break, not a definitive rejection. Any such drift, extractor failure, key-store/dependency failure, timeout, or other transient verification error leaves the row `PENDING` and fails closed; it must not advance fallback. `finished_at_wire` is signed evidence only; trusted admission ordering/deadline use database `received_at`.
+
+### E-IF-09: exact bounded scan, durable progress and restart behavior
+
+Use the current TV2 B-IF-05 port without adding a durable cursor:
+
+```text
+iter_eligible_inbox(job_id, cursor, bound)
+    -> Batch(candidates, has_more, scanned_through)
+```
+
+- `cursor` is an in-memory pagination argument only. A batch is ordered by `(received_at, inbox_id)` and returns unsettled eligible `PENDING` rows with `received_at < hard_deadline_at`; `scanned_through` reports the scan boundary, not durable progress.
+- `has_more=True` means another bounded batch remains and **blocks deadline fallback**. Fallback also independently reads current PostgreSQL Inbox state; it never trusts a Manager cursor or cached “drained” flag.
+- `finalize_one` refuses a later candidate with `PrecedingPending` if an earlier on-time `PENDING` row exists under Listing → Job locks. A transient verifier failure leaves that earlier row PENDING, so the caller cannot skip it or report SYSTEM_FAULT.
+- A definitive rejection may settle that candidate, after which scanning continues in stored order. The first context-eligible valid candidate wins. If two candidates are valid, the first `(received_at, inbox_id)` candidate wins even when timestamps tie; `inbox_id` is the deterministic tie-breaker.
+- On Manager restart or after a crash, resume with `cursor=None` and re-read PENDING rows from PostgreSQL. Settled `ACCEPTED`/`REJECTED` rows are not returned, and idempotent finalizer/reject ports make concurrent/replayed work a no-op; no settled row gets a second finalization or reputation effect.
+- After a winner is committed, nonwinner settlement is separate TV2 housekeeping (`NOT_SELECTED` / `ALREADY_TERMINAL`), not a TV3 rejection verdict. No new Inbox state or persistence for cursor is authorized.
+- A candidate durably admitted with `received_at < hard_deadline_at` remains eligible for verification/finalization after the deadline or process restart. A new late callback is not made on-time by `finished_at_wire`.
+
+Required scenario coverage is mapped to existing TV2 tests `P2B-DRT-06/-20/-21/-23/-37`, TV3 `P2C-DRT-20/21/24`, and Phase 2E `P2E-DRT-12/-13/-14/-16`, with additional Phase 2E IDs `P2E-DRT-21..28` in the Test and Release Plan. G1 coverage also includes TV3 `P2C-SIGN-09/10` and `P2C-KEY-10`. The candidate scenarios include invalid-first/valid-second, two valid rows, equal timestamps and ID tie-break, restart midway through a batch, transient early verification failure, crash after rejection, an on-time receipt finalized after deadline, and restart with PENDING rows and no persisted cursor. These are test specifications; runtime remains `NOT_RUN`.
+
+### V-OUT transaction boundary and locked evidence
+
+TV3 verifies outside the database lock window and supplies a provisional immutable verdict. TV2 alone owns the one-UoW finalizer/rejection ports. Under the approved lock order `Listing → Job → Allocation/Attempt → Inbox → Contribution → Aggregate`, the transaction rechecks: Inbox identity and `state=PENDING`; non-null `result_id`; `envelope_sha256` against the retained original raw bytes; bound Job/Attempt/Worker/Listing/key identities against current locked rows and trusted registered key; database `received_at < hard_deadline_at`; and current Job/Attempt eligibility. For a verified result, the locked original raw bytes are passed through `extract_signed_parts_v1`; `payload_jcs_raw` and the 64-byte `signature_raw` must equal the extracted signed parts. A stale/mismatched verdict is a no-op with zero business effects. No DB write is delegated to TV3 or TV5 outside this UoW.
+
+The accepted outcome is one atomic commit of Signed Result evidence, terminal Job transition, Allocation release, Listing counter decrement, Inbox settlement, eligible contribution and aggregate update. SYSTEM_FAULT has no signed Worker result or contribution. Unknown COMMIT is reconciled from durable state/unique keys; never blindly retry mutation. No HTTP, key-store call, or other network I/O occurs while these locks are held. TV5 does not define an alternative Finalizer UoW. Normative DB pseudocode, grant shape, exact-SHA owner ACKs and all PostgreSQL/crypto/concurrency/runtime verification remain pending/`NOT_RUN`.
+
 ### 2026-11-18 decision and evidence clarification
 
 - **Lead authority:** [TV1 decision #46 @ `531805b`](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46#issuecomment-6849327771) selected D-01 **Option C**, D-05/D-13 **P1**, D-18/E-C3, **G1** proof of possession, E-C4 **V-OUT**, D-17 stored `INSERT ... RETURNING received_at`, and D-12 first-contributing Reputation UPSERT, all `APPROVED_DESIGN_DIRECTION_CONDITIONAL`; D-06 CAS is approved **conditionally** with missing-receipt repair port still pending.

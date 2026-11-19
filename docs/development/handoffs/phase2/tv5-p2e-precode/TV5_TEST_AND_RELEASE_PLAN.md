@@ -125,3 +125,24 @@ Keep P2E-DRT-01..20 and original release gates. Every Phase 2 native-role PG, cr
 | TV5 `P2E-API-01` | D-01 Option C: retained raw bytes + DB CHECK/hash and bound context; deliberate same-ID different body/context collision and unknown-COMMIT probe. No arbitrary raw SELECT for API role. |
 
 All are **NOT_RUN**. Lead source: [#46 conditional decision @531805b](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46#issuecomment-6849327771); current TV2 #46 @a27526e, TV3 #49 @62bded7. Existing repository CI cannot serve as the acceptance evidence for any of these checks.
+
+---
+
+## E-IF-09 bounded candidate scan/restart test additions — 2026-11-19
+
+These rows extend, and do not replace, P2E-DRT-12/-13/-14/-16 or TV2 P2B-DRT-06/-20/-21/-23/-37. The producer port is `iter_eligible_inbox(job_id, cursor, bound) -> Batch(candidates, has_more, scanned_through)`; rows use `(received_at, inbox_id)` ordering, PENDING state and the strict on-time predicate. Cursor is volatile; PostgreSQL Inbox state is durable. Every row below is a **planned test, NOT_RUN**.
+
+| ID | Scenario / acceptance oracle | Status |
+|---|---|---|
+| 21 | Two valid on-time candidates, including equal `received_at`; lower `inbox_id` wins deterministically independent of lock/order race; exactly one terminal result/release/contribution | NOT_RUN |
+| 22 | Stop Manager after a bounded batch with more candidates; restart with `cursor=None`; rescan unsettled PENDING rows in order and do not duplicate settled effects | NOT_RUN |
+| 23 | Earlier candidate hits transient verifier/key-store failure; it remains PENDING, later candidate cannot win via `PrecedingPending`, and fallback is blocked | NOT_RUN |
+| 24 | Reject an invalid earlier candidate, crash before scanning later candidate, restart with `cursor=None`; settled rejection is not repeated and later valid candidate is processed | NOT_RUN |
+| 25 | Inbox receipt committed with trusted `received_at < hard_deadline_at`, Manager finalizes after deadline/restart; candidate is accepted before fallback and Worker `finished_at` is ignored | NOT_RUN |
+| 26 | Manager restarts while on-time PENDING Inbox rows exist and there is no durable cursor/cache; DB scan rediscovers all unsettled rows, while settled rows are absent | NOT_RUN |
+| 27 | Batch returns `has_more=True`, or an earlier on-time PENDING row exists; deadline fallback remains blocked until all preceding candidates settle | NOT_RUN |
+| 28 | Winner commits with remaining candidates; TV2 housekeeping marks nonwinners separately (`NOT_SELECTED`/`ALREADY_TERMINAL`), and replay/settled rows produce no second finalization or reputation effect | NOT_RUN |
+
+**Scenario mapping:** invalid-first/valid-second is P2E-DRT-13 and P2B-DRT-20; two valid candidates is P2E-DRT-12 with the tie-break extension in 21; restart halfway is P2B-DRT-37 and P2E-DRT-22; transient failure is P2B-DRT-21/-23 and P2E-DRT-23; crash after rejection is P2E-DRT-24; on-time receipt finalized late is P2E-DRT-14/-25; restart without cursor is P2B-DRT-37 and P2E-DRT-26. P2B-DRT-37 is TV2's producer-level test design, not a claim that the TV5 service/adapter integration has run.
+
+For the current TV3 #49 producer tip `e73fb107d15296a6f317d9bed25ce76fe0657ac2`, G1 proof/error coverage also maps to `P2C-SIGN-09/10`; K1 evidence during two-key quiescence maps to `P2C-KEY-10`; callback/finalizer recovery interfaces map to `P2C-DRT-20/21/24`. These identifiers extend the earlier TV3 test list and remain **NOT_RUN**. The Simulator proof endpoint is stateless; do not add a Simulator nonce replay-cache test or implementation. The Manager must use a fresh single-use nonce and no allocation call may proceed without a valid fresh proof.
