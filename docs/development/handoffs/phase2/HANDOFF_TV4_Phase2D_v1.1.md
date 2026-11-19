@@ -1,11 +1,11 @@
 # HANDOFF TV4 — Phase 2D: Strict FIFO Scheduling, Capacity Allocation & Concurrency
 
 **Owner:** TV4 `@VietNguyen865` — Listing/FIFO **policy owner**, phối hợp tích hợp Manager Scheduler.  
-**Version:** `v1.2-docs-review`, updated 2026-11-19; giữ tên file để không phá đường dẫn tham chiếu.
+**Version:** `v1.2-docs-review-r2`, updated 2026-11-19; giữ tên file để không phá đường dẫn tham chiếu.
 
-**Trạng thái:** TV1 đã review #48 @ `b399118` với `ACK_WITH_ACTIONS / HOLD DOCS GATE`; revision này ghi nhận các action nhưng vẫn `EXACT_HEAD_CROSS_REVIEW_PENDING / NO_CODE_AUTHORIZATION`. Tự review/Codex không phải ACK độc lập; chưa code kể cả policy thuần trước khi docs được merge và có coding gate riêng.
+**Trạng thái:** TV1 đã review #48 @ `b399118` với `ACK_WITH_ACTIONS / HOLD DOCS GATE`; TV3 review scope `D-IF-07` trên #48 @ `813aa3e` với `ACK_WITH_ACTIONS`, các action signer được cập nhật tại revision này. Vẫn `EXACT_HEAD_CROSS_REVIEW_PENDING / NO_CODE_AUTHORIZATION`; tự review/Codex không phải approval độc lập. Chưa code trước khi docs được merge và có coding gate riêng.
 
-**Thiết kế chuẩn:** [Phase 2D](../../../architecture/phases/phase2/Phase_2D_v0.9.md), bản rà soát `0.9-docs-review-20261119`; giữ `P2D-GATE-01=APPROVED_DESIGN_CONDITIONAL`, đối chiếu #47 `001619d`, #46 `0ca059c`, #49 `62bded7`, #50 `edb247f8`. D-18/E-C3, G1 và Worker-first lock là `APPROVED_DESIGN_DIRECTION_CONDITIONAL`; D-19, TTL/replay/restart, provisioning/compromise và numeric budgets còn OPEN.
+**Thiết kế chuẩn:** [Phase 2D](../../../architecture/phases/phase2/Phase_2D_v0.9.md), bản rà soát `0.9-docs-review-20261119-r2`; giữ `P2D-GATE-01=APPROVED_DESIGN_CONDITIONAL`, đối chiếu #47 `001619d`, #46 `0ca059c`, #49 `f3edb94` (Phase 2C blob `a869dd7d4006981ac0d2478a2fb3b684f1f1a157`), #50 `edb247f8`. D-18/E-C3, G1 và Worker-first lock là `APPROVED_DESIGN_DIRECTION_CONDITIONAL`; D-19, TTL/replay/restart, provisioning/compromise và numeric budgets còn OPEN.
 
 **Baseline hiện tại:** `main@bee832eaf5463df20f6c6815174322871eb6685a` sau docs intake [#44](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/44). [#39](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/39) đã merge bởi TV1, merge SHA `aff538f79997c6e2bfcf359b176a82f2cd9ecc53`, source head `3482bce3cc9726543b9345a5224d8db1b9fc6454`; #42 đã nằm trong baseline qua #39. #17/#31 đã merged. Read-only Alembic graph có một head `0005_listing_d7`; chưa kết nối DB để xác nhận installed revision/native role trong lần review này.
 
@@ -52,7 +52,7 @@ TV4 phải định nghĩa và (chỉ sau khi được cho phép) triển khai/ki
 | 4 | `Phase_2E_v1.8.md` | one Attempt/Outbox, Simulator dispatch identity, PAUSED RUNNING retry, single terminal/release | `90af557a46a0f7bcb663eb9d17de3a2db866c4c0b2f1e5006a9160eed2d6609f` |
 | 5 | `Phase_2C_v0.9.md` | signing-key readiness, planned K1→K2 rotation, key compromise incident chưa chốt | `d92901a412aaaaa3a2e601781b3991019de9eeee1f45b891564a64d3fbd33902` |
 
-**Lưu ý:** Các hash trên là dấu mốc `main@bee832e`, không phải SHA của các revision đang cross-review. Nguồn producer hiện hành để ACK là #47 `001619d`, #46 `0ca059c`, #49 `62bded7`, #50 `edb247f8`; review trên SHA cũ không tự chuyển sang SHA mới. Mốc `44579ed` và trạng thái #39/#42 cũ trong tài liệu các Phase khác không thay baseline hiện tại. Revision này chỉ sửa hai file TV4; thay đổi ảnh hưởng Phase khác cần owner nguồn và consumer xác nhận. Conditional approval hoặc merge #44 không hoàn tất review chéo.
+**Lưu ý:** Các hash trên là dấu mốc `main@bee832e`, không phải SHA của các revision đang cross-review. Nguồn producer hiện hành để ACK là #47 `001619d`, #46 `0ca059c`, #49 `f3edb94` (Phase 2C blob `a869dd7d4006981ac0d2478a2fb3b684f1f1a157`), #50 `edb247f8`; review trên SHA cũ không tự chuyển sang SHA mới. Mốc `44579ed` và trạng thái #39/#42 cũ trong tài liệu các Phase khác không thay baseline hiện tại. Revision này chỉ sửa hai file TV4; thay đổi ảnh hưởng Phase khác cần owner nguồn và consumer xác nhận. Conditional approval hoặc merge #44 không hoàn tất review chéo.
 
 ### 3.2. Files GitHub phải đọc trên baseline thực tế
 
@@ -103,7 +103,7 @@ Một Scheduler tick có thể xét nhiều Listing nhưng **mỗi `TX-ALLOCATE`
 
 ### 4.5. Khóa ký Worker và biến cố chưa chốt
 
-Theo quyết định có điều kiện D-18/E-C3 của TV1, allocation lấy Worker advisory shared trước Listing→Job; đăng ký/kích hoạt key lấy exclusive. Hai key active là hàng rào chặn allocation khi drain RUNNING; kích hoạt kiểm tra đúng {K1,K2}, K2 sẵn sàng và không còn RUNNING; nếu lỗi phải khôi phục signer K1 trước khi bỏ hàng rào. Manager lấy G1 proof ngoài UoW và truyền `SignerReadiness`; TV2 recheck worker/key/fingerprint/expiry dưới khóa, sai trả `Blocked(SIGNER_NOT_READY)` không thay đổi hàng đợi/capacity. Đây là hướng thiết kế có điều kiện, còn source L2, exact-SHA ACK, TTL/replay/restart và incident policy; tests `NOT_RUN`, chưa được code.
+Theo quyết định có điều kiện D-18/E-C3 của TV1, allocation lấy Worker advisory shared trước Listing→Job; đăng ký/kích hoạt key lấy exclusive. Hai key active là hàng rào chặn allocation khi drain RUNNING; kích hoạt kiểm tra đúng {K1,K2}, K2 sẵn sàng và không còn RUNNING; nếu lỗi phải khôi phục signer K1 trước khi bỏ hàng rào. Manager lấy G1 proof ngoài UoW và truyền `SignerReadiness`; TV2 recheck worker/key/fingerprint/expiry dưới khóa. Nếu trả `Blocked(SIGNER_NOT_READY)`, Manager invalidation proof cache cho Worker đó; không thay đổi hàng đợi/capacity. Simulator restart trong TTL proof còn hiệu lực có thể không được Manager nhận biết, nên allocation vẫn có thể xảy ra rồi deadline fallback `SYSTEM_FAULT` không phạt Worker; đây là residual risk `P2C-SIGN-07` (#49 @ `f3edb94`), không phải oracle “no allocation”. Hướng này còn source L2, exact-SHA ACK, TTL/replay/restart và incident policy; tests `NOT_RUN`, chưa code.
 
 ## 5. Sáu nhiệm vụ chuẩn bị trước khi nhóm trưởng cho phép code
 
@@ -294,7 +294,7 @@ Test IDs and statuses (PASS/FAIL/BLOCKED/NOT_RUN), CI URLs:
 Independent reviewer and remaining findings / merge recommendation:
 ```
 
-**Kết luận tự review:** đồng bộ hướng D-18/G1 đã duyệt có điều kiện với #46 @ `0ca059c`, #47 @ `001619d`, #49 @ `62bded7`, #50 @ `edb247f`; đây không thay source L2 hay human approval. Còn exact-SHA cross-owner ACK, D-19 repair, numeric proof/scan/resource budgets, TTL/replay/restart, provisioning, incident policy và audit disposition. Toàn bộ runtime Phase2 `NOT_RUN`; docs gate và coding authorization là các quyết định riêng.
+**Kết luận tự review:** đồng bộ hướng D-18/G1 đã duyệt có điều kiện với #46 @ `0ca059c`, #47 @ `001619d`, #49 @ `f3edb94` (Phase 2C blob `a869dd7d4006981ac0d2478a2fb3b684f1f1a157`), #50 @ `edb247f`; đây không thay source L2 hay human approval. Còn exact-SHA cross-owner ACK, D-19 repair, numeric proof/scan/resource budgets, TTL/replay/restart, provisioning, incident policy và audit disposition. Toàn bộ runtime Phase2 `NOT_RUN`; docs gate và coding authorization là các quyết định riêng.
 
 ## 13. Bàn giao revision theo review TV1 ngày 2026-11-19
 
@@ -307,5 +307,6 @@ Independent reviewer and remaining findings / merge recommendation:
 | `P2-05` D-19 boundary | Handoff §9; Phase 2D §7.4 | TV4 `ACK_COMPATIBLE` only; D-19 vẫn OPEN/không code |
 | `P2-06` docs/source state | Header, §3, §9, §11–§12; Phase 2D header/§2.1/§7.1/§7.6–§7.9 | SHAs/conditional labels/open decisions cập nhật |
 | `P2-07` tests/handoff | §10 và bảng này; Phase 2D §7.5/§7.9 | giữ toàn bộ test families; Phase2 runtime/PG/concurrency/performance `NOT_RUN` |
+| TV3 `D-IF-07` follow-up | Handoff §4.5/§13; Phase 2D §7.4/§7.6/§7.9 | Bốn action signer được cập nhật; TV3 focused re-check còn chờ; whole-PR L2 vẫn pending |
 
 **Exact-head ACK cần lấy sau commit:** TV1 cho Scheduler/resource/integration và toàn bộ `D-IF-01..09`; TV2 cho pure-policy mapping, UoW/cleanup/reconcile, races và baseline; TV3 cho `D-IF-07`; TV5 cho `D-IF-01/05/06/07/08`; lead cho independent L2/docs-gate closure. Các mục còn OPEN: numeric budgets, G1 TTL/nonce/replay/restart/unavailable recovery, provisioning identity, compromise response, D-19, D-09 index và audit disposition. Không sửa application/test code, migration/config hoặc PR #45 trong revision này.
