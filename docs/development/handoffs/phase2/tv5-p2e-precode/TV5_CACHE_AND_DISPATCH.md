@@ -1,6 +1,6 @@
 # TV5-P2E-03 — Attempt Cache, Dispatch and Cold-Restart Gap
 
-**Status:** `P2E-OPEN-01` Option A is approved design; cache numeric parameters and `P2E-CACHE-GAP-01` remain unresolved. No Simulator DB access is proposed.
+**Status:** `P2E-OPEN-01` Option A is approved design. Cache numeric parameters remain `PENDING_PARAMS`; `P2E-CACHE-GAP-01` / D-16 remains `NEEDS_OWNER_DECISION`. The lead prefers Option B for the MVP, but this is a proposal only: it does not amend the approved API Contract or authorize implementation. No Simulator DB access, new service, or persistent Simulator store is proposed.
 
 ## Retained-process state machine
 
@@ -14,16 +14,18 @@ retained entry + altered fingerprint -> 409 EXECUTION_CONFLICT
 eviction/process stop -> ABSENT (durable Attempt/Outbox remains in DB)
 ```
 
-Atomic admission must prevent two concurrent identical requests from starting competing retained executions. One produced receipt retried after timeout reuses the exact original `result_id`, raw envelope bytes, timestamp and signature. After a cold restart the logical attempt and Outbox IDs/deadlines remain stable; deterministic work may execute again and create a new receipt ID/candidate. The DB finalizer is responsible for once-only business effects.
+Atomic admission must prevent two concurrent identical requests from starting competing retained executions. This is **volatile Attempt deduplication**, not durable once-only computation. PostgreSQL Outbox/Inbox/finalization state is responsible for once-only committed business effects (accepted result, release and reputation), not for proving which dispatch bytes a DB-less Simulator saw before a cold restart. One produced receipt retried after timeout reuses the exact original `result_id`, raw envelope bytes, timestamp and signature. After a cold restart the logical Attempt and Outbox IDs/deadlines remain stable; deterministic work may execute again and create a new receipt ID/candidate.
+
+When the cache entry is retained, Simulator can compare the incoming immutable dispatch fingerprint with the retained fingerprint and reject a conflicting same-Attempt request with `409 EXECUTION_CONFLICT`. After eviction/restart, it has no prior fingerprint and cannot distinguish an original resend from a contradictory authenticated request using RAM alone. The immutable Outbox ensures an honest Manager retries the stored payload, but does not prove the request history to the restarted Simulator. G1 signer proof proves possession of a signing key; it is not dispatch-content history. The immutable Outbox and PostgreSQL once-only effects do not close this detection gap.
 
 ## `P2E-CACHE-GAP-01`: alternatives, not a decision
 
 | Option | Behavior / restart | Contract and security impact | Trade-off / oracle | Owners |
 |---|---|---|---|---|
-| A. Add a trusted dispatch binding/proof checked by Simulator, derived from persisted immutable Outbox state by an authorized component | Restarted Simulator validates the same binding; altered payload fails closed | Requires new/clarified authenticated wire field or transport proof; preserve no-DB Simulator and no oracle; threat model must cover compromised Manager/token | Stronger enforceable cross-restart comparison; additional key/verification lifecycle. Test: same attempt + different canonical request after cold restart returns 409, no execution | Lead, TV1, TV2, TV3, TV5 |
-| B. Qualify API Contract guarantee to retained-state scope, while Manager is sole trusted source and sends immutable Outbox bytes | Restart may re-execute only the persisted original; contradictory authenticated input after restart cannot be distinguished by cache alone | Explicit change-control to global `409` guarantee; strict conflict remains while state retained; token/Manager trust is relied upon | No added secret/state, but weaker adversarial guarantee. Test: live-cache contradiction 409; restart original stable; document and test the qualified boundary | Lead, TV1, TV3, TV5; TV2 confirms Outbox immutability |
+| A. Trusted durable-dispatch verification | An authorized component supplies a verifiable binding derived from persisted immutable Outbox state; Simulator checks it after restart | Requires a reviewed transport/authentication contract and threat model; Simulator still has no DB access, oracle or persistent store | Stronger enforceable cross-restart conflict check, with new protocol/key lifecycle and integration cost. Test must prove altered payload fails before execution after restart | Lead, TV1, TV2, TV3, TV5 |
+| B. Qualify `409 EXECUTION_CONFLICT` to retained-cache scope (**lead-preferred MVP proposal**) | Retained entry: identical fingerprint deduplicates, altered fingerprint gets 409. After cache loss, Simulator may re-execute an authenticated dispatch; Manager is trusted to resend its immutable Outbox payload | Requires formal change-control to the global API Contract conflict guarantee. No extra wire field, Simulator DB access, service or persistent state | Smaller MVP and preserves no-DB Simulator boundary, but weakens cross-restart adversarial detection. DRT-04 must be revised only after that contract decision; test retained-cache conflict and cold restart of the original immutable dispatch | Lead, TV1, TV2, TV3, TV5 |
 
-Do not claim either option approved. No DB reads/writes or persistent store may be added to Simulator as a shortcut.
+**Decision status:** Option B is the lead's stated preference, **not an approved API change**. D-16 remains `NEEDS_OWNER_DECISION`; request a recorded L2 decision from the lead and exact-SHA ACKs from TV1/TV2/TV3/TV5. Until then, retain the currently approved contract as unresolved and keep cold-restart altered-dispatch DRT-04 `BLOCKED`, not PASS. Do not implement either option based on this proposal. No DB reads/writes, persistent store or new service may be added to Simulator as a shortcut.
 
 ## Parameters awaiting measurement/ACK
 

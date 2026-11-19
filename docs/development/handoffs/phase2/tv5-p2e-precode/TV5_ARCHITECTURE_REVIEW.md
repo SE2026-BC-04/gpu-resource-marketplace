@@ -66,7 +66,7 @@ These are **documentation-level** mitigations, not demonstrated runtime correcti
 
 | Finding | Decision/mitigation state | Still required |
 |---|---|---|
-| `P2E-F-02` algorithm version | **NOT RESOLVED** by chosen P1 or G1 | Lead version pin/rollout fence and no V1 wire mutation |
+| `P2E-F-02` algorithm version | **MVP DESIGN RESOLVED** by `P2E-GPU005B-DEC-06`: immutable `demo-v1` → `demo-v1-public1`; no dispatch/Signed V1 field added | Exact-HEAD owner ACK and release preflight for V1–V4, queued/running retries, rollback and historical evidence; future V2 needs separate L2 change control |
 | `P2E-F-03` cold cache | **D-16/P2E-CACHE-GAP-01 STILL OPEN**, Outbox persistence does not prove original dispatch to DB-less restarted Simulator | Lead contract qualification or approved authenticated persisted proof |
 | `P2E-F-04` verifier DTO/V-OUT | **E-C4 V-OUT CONDITIONALLY SELECTED**; four-code definitive rejection and locked original-bytes/JCS extractor | Exact producer/consumer ACK, normative TX-FINALIZE pseudocode, P2B-DRT-23 |
 | `P2E-F-05` first winner/late fallback | TV2 first `PrecedingPending`, stored timestamp and one UoW design | B-IF-05/07 exact owner ACK and real PostgreSQL race tests |
@@ -76,4 +76,18 @@ These are **documentation-level** mitigations, not demonstrated runtime correcti
 | `P2E-F-17` signer loss within proof TTL | **Residual under G1**, not eliminated by a short TTL | `P2C-SIGN-07` and `P2E-ROTATE-01`: SYSTEM_FAULT without Worker penalty; owner TTL policy |
 | `P2E-F-13` physical DB integration | **D-01 Option C, D-12 UPSERT, D-17 stored RETURNING conditionally selected** | Native role CHECK/grant/clock and two-Job aggregate tests |
 
-**Remaining decisions:** D-02/E-C2, D-03/S-10, D-06 repair, D-16, private key compromise, cache bounds/TTL, algorithm version and L2 API/proof contract. All Phase 2 runtime/SQL/crypto/concurrency/E2E tests **NOT_RUN**. Distinguish `APPROVED_DESIGN_DIRECTION_CONDITIONAL` from an owner ACK, human L2 approval, merge or implementation authorization.
+**Remaining decisions:** D-02/E-C2, D-03/S-10, D-16, D-19 repair, DEC-07 vs TV2 D-14/TV3 oracle-access supersession, private-key compromise, cache bounds/TTL and L2 API/proof contract. Algorithm MVP mapping is decided; release evidence and exact-SHA ACKs are outstanding. All Phase 2 runtime/SQL/crypto/concurrency/E2E tests **NOT_RUN**. Distinguish `APPROVED_DESIGN_DIRECTION_CONDITIONAL` from an owner ACK, human L2 approval, merge or implementation authorization.
+
+## Cross-interface re-review actions — 2026-11-19
+
+The original findings table above is a historical snapshot. Current disposition for the five requested PR #50 actions:
+
+| Finding | Current disposition | Required closure |
+|---|---|---|
+| P1-01 / D-16 cold restart | `NEEDS_OWNER_DECISION`; lead prefers retained-cache-scope Option B for MVP, not an approved API change. In-memory dedup and PostgreSQL once-only effects are distinct; G1/Outbox do not prove dispatch history. | Lead L2 decision, TV1/TV2/TV3/TV5 exact-SHA ACK and API change control; DRT-04 stays BLOCKED |
+| P1-02 algorithm version | MVP mapping approved by DEC-06; queued/running compatibility and rollback are release preflight conditions, not an unresolved MVP mapping. | Execute V1–V4/retry/rollback/historical-evidence preflight after authorization; all NOT_RUN |
+| P1-03 oracle access | DEC-07's Manager-read allowance conflicts with current TV2 D-14 and TV3 Phase 2C no-SELECT boundary. Proposed Phase 2-only supersession is not approved. | Lead + TV2/TV3/TV5 L2/source reconciliation; Phase 3 owner separately reviews Dispute access; no grants/migration here |
+| P1-04 missing-receipt repair | D-19 / B-IF-06R remains `PROPOSED_FOR_ACK`; only the existing committed ACKED Outbox / still-RUNNING Job boundary is described. | TV1/TV2/TV5 + lead decide authorization/fence and race matrix before implementation |
+| P2-05 E-IF-11 collision | E-IF-11 denotes PAUSED replay / RUNNING repair; signer readiness cross-references E-IF-04 / D-IF-07. | Renew exact-SHA owner review; no ACK inferred from identifier correction |
+
+Current producer tips at review start: TV2 #46 `c4956777512efc260fbf180898af2c041d0a16d6`; TV3 #49 `f3edb94d7f11a5759d8308e64c17927ce947af19`; TV4 #48 `813aa3ed67f5da7f3343f2c553ffbf24025eacaf`; TV5 consumer #50 `edb247f8ffb657ad784673d25481b64bd450f659`. These are traceability references, not ACKs. Phase 2 runtime tests remain `NOT_RUN`.

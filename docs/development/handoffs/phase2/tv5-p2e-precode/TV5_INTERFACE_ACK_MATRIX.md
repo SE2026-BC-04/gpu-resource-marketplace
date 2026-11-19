@@ -88,7 +88,29 @@ TV3 [scoped comment on PR #50](https://github.com/SE2026-BC-04/gpu-resource-mark
 | E-IF-06/07 | D-01 **Option C** and D-17 stored INSERT RETURNING **selected** | D-02/E-C2 source/probe contract, TV1 16,384-byte/depth-4 resource ACK, native-role SQL |
 | E-IF-08/09 | E-C4 **V-OUT selected**, four-code verifier, locked evidence and earliest valid candidate | Normative DB TX-FINALIZE pseudocode, exact-SHA owner ACK and race tests |
 | E-IF-10 | D-12 **first contributing UPSERT selected** | TV1/TV2/TV5 UoW/grant ACK, real 2-Job/Worker PG concurrency tests |
-| E-IF-11 | D-18 readiness check under Worker+Listing locks | TV4 FIFO/Blocked integration ACK, D-06 missing-receipt repair port still open |
+| E-IF-11 | PAUSED same-key Submit replay / already-RUNNING dispatch repair | TV4 FIFO/Blocked compatibility ACK; D-19 missing-receipt repair port remains proposed |
 | E-IF-12 | Phase1 main baseline accepted; PRs #46/#49/#50 still open docs | **Two independent human L2 reviews** at final SHA, G1 docs gate, separate merge/coding authorization |
 
 **TV2 and TV3 reviews on PR #50 @ `c8c241c` were `ACK_WITH_ACTIONS`**, not independent human approval of the final head. ACKs must cite new SHA, field/byte contracts, failure/retry/transaction semantics and test oracle. All Phase 2 native-role PG, signing, concurrent locks and E2E tests remain `NOT_RUN` despite foundation CI.
+
+## Current Exact-HEAD Producer/Consumer Compatibility Matrix — 2026-11-19
+
+This matrix supersedes older producer-HEAD snapshots above **for re-review targeting only**. It records fetched PR tips and inspected source documents; it is not an owner ACK, design approval, or claim that unmerged producer proposals have become accepted contracts. The three producer PRs and this consumer PR are still open at these tips.
+
+| Phase / owner | Producer PR and exact current HEAD | Consumer / reviewed TV5 HEAD | Inspected source documents at producer HEAD | Compatibility / outstanding action | ACK status |
+|---|---|---|---|---|---|
+| Phase 2B / TV2 | [#46](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46) `c4956777512efc260fbf180898af2c041d0a16d6` | TV5 Phase 2E / #50 `edb247f8ffb657ad784673d25481b64bd450f659` | `Phase_2B_v1.3.md`; `OPEN_DECISION_REGISTER.md`; `P2B_UOW_INTERFACES.md`; `EVIDENCE_TRACEABILITY_MATRIX.md` | D-14 says no Manager SELECT on `simulation_references` for Phase 2; D-19 / B-IF-06R remains proposed for ACK, not approved. Reconcile DEC-07 wording and request TV2 exact-SHA review. | `NOT PROVIDED` for this producer/consumer SHA pair |
+| Phase 2C / TV3 | [#49](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/49) `f3edb94d7f11a5759d8308e64c17927ce947af19` | TV5 Phase 2E / #50 `edb247f8ffb657ad784673d25481b64bd450f659` | `Phase_2C_v0.9.md`; `HANDOFF_TV3_Phase2C_v1.1.md`; `P2C_TEST_MATRIX.md` | G1 proves signer key possession, not dispatch history. Phase 2 Manager/Finalizer oracle access remains excluded; Phase 3 Dispute Mock needs separate authorization. Request TV3 exact-SHA review. | `NOT PROVIDED` for this producer/consumer SHA pair |
+| Phase 2D / TV4 | [#48](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/48) `813aa3ed67f5da7f3343f2c553ffbf24025eacaf` | TV5 Phase 2E / #50 `edb247f8ffb657ad784673d25481b64bd450f659` | `Phase_2D_v0.9.md`; `HANDOFF_TV4_Phase2D_v1.1.md`; `D-IF-05/07` source rows | PAUSED blocks new allocation but permits same already-RUNNING Attempt dispatch repair; separate D-19 repair port remains proposed. Signer readiness belongs to E-IF-04 / D-IF-07, not E-IF-11. Request TV4 exact-SHA review. | `NOT PROVIDED` for this producer/consumer SHA pair |
+| Phase 2E / TV5 consumer | [#50](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/50) `edb247f8ffb657ad784673d25481b64bd450f659` | Same PR / consumer SHA | Phase 2E spec and `TV5_*` pre-code documents | This is the reviewed consumer snapshot only; required corrections are proposed in this docs-only revision. | Existing reviews are tied to prior exact SHA; renewed review required |
+
+The previously observed #46 head `f58acd45993aec8ca2fbc8e48ba9e1d46c955ec0` has advanced to `c4956777512efc260fbf180898af2c041d0a16d6`. #49 remains at `f3edb94d7f11a5759d8308e64c17927ce947af19`; #48 remains at `813aa3ed67f5da7f3343f2c553ffbf24025eacaf`; #50 was at `edb247f8ffb657ad784673d25481b64bd450f659` before this revision. Refresh all heads again when requesting approvals so they cite the actual reviewed producer/consumer pair.
+
+### E-IF-11 identifier reconciliation
+
+`E-IF-11` means only **PAUSED same-key Submit replay / already-RUNNING dispatch repair**, as defined by Phase 2E and handoff §7. Signer readiness is cross-referenced under **E-IF-04** and Phase 2D **D-IF-07**. No signer-readiness ACK closes E-IF-11, and no E-IF-11 ACK closes D-19. D-19 / B-IF-06R remains `PROPOSED_FOR_ACK`; the `E-IF-11` producer/consumer ACK and PostgreSQL tests remain pending.
+
+| E-IF | Corrected consumer meaning | Producer → consumer | Current status |
+|---|---|---|---|
+| E-IF-04 | Worker key lifecycle, signer G1 readiness and the D-18/D-IF-07 dependency | TV2 + TV3 + TV4 → TV1/TV5 | Conditional design direction exists; exact-HEAD ACK and runtime tests pending |
+| E-IF-11 | PAUSED same-key Submit replay; already-RUNNING Attempt/event/payload retry; proposed separate ACKED missing-receipt repair | TV2 + TV4 → TV1/TV5 | `PENDING_ACK / TEST`; D-19 remains `PROPOSED_FOR_ACK`, no repair authorization |

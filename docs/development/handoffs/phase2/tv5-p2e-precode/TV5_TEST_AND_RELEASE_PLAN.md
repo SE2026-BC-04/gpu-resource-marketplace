@@ -1,6 +1,6 @@
 # TV5-P2E-06 — Test and Release Plan
 
-**Status:** test designs only; all Phase 2 runtime tests `NOT_RUN`. DRT-04 is blocked by `P2E-CACHE-GAP-01`; DRT-20 belongs to Phase 3 and is `BLOCKED_BY_PHASE_3`.
+**Status:** test designs only; all Phase 2 runtime tests `NOT_RUN`. DRT-04 is blocked by unresolved D-16 / `P2E-CACHE-GAP-01`; DRT-20 belongs to Phase 3 and is `BLOCKED_BY_PHASE_3`. The MVP algorithm-version mapping is already approved by `P2E-GPU005B-DEC-06`; release compatibility evidence below remains unrun.
 
 ## Reputation and durable-state oracle
 
@@ -49,6 +49,20 @@ For accepted finalization, one transaction commits result, terminal state, relea
 - **COMPOSE E2E:** existing five services only, actual internal Bearers and callback, no direct Simulator DB, role-safe read, accepted signed result and exact durable effects.
 
 ## Evidence and release gates
+
+### Algorithm-version release preflight — `P2E-VERSION-01..06` (design oracle)
+
+`demo-v1` remains immutably mapped to `demo-v1-public1` for the current MVP, with the exact version persisted by TX-SUBMIT. Dispatch remains the approved ten-key shape and Signed Result remains V1; neither gains `algorithm_version`. A future algorithm or workload-profile version is a separate proposal and cannot silently reinterpret existing Jobs or protected references.
+
+Before enabling a Simulator release, the release record must show:
+
+1. V1–V4 normative vectors produce the existing exact canonical output and digest.
+2. QUEUED Jobs submitted before deployment and RUNNING retries after deployment use the same `demo-v1-public1` behavior.
+3. The candidate release and rollback artifact both pass the same compatibility suite before either receives old Jobs.
+4. Historical Signed Result V1 evidence remains verifiable using retained public keys and its original bytes; no historical reference or signature is rewritten.
+5. Any mismatch fails deployment preflight/blocks rollout. It is not resolved by guessing a version from output, adding a wire field, or altering Signed Result V1.
+
+These checks refine, but do not renumber or replace, the existing `P2E-VERSION-01..06` oracles above: exercise the current V1–V4 corpus; process a pre-deploy QUEUED Job and retry a RUNNING Attempt after deployment; validate both candidate and rollback builds; verify retained historical Signed Result V1 evidence; reject an incompatible same-profile candidate before traffic. All are **NOT_RUN**. Runtime owners TV1/TV5 and persistence/contract owners TV2/TV3 must ACK the release procedure on exact SHA. Changing the mapping requires a separate L2 contract decision.
 
 Each test report records commit SHA, command, collected/passed/failed/skipped counts, migration head, DB isolation/safety proof, native role, clock/barrier, before/after persisted rows, logs redacted and owner ACKs. `PASS` requires execution on exact reviewed SHA; skipped does not count as pass.
 
