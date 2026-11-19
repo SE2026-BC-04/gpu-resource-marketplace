@@ -95,7 +95,7 @@ TV3 [scoped comment on PR #50](https://github.com/SE2026-BC-04/gpu-resource-mark
 
 ## Current exact-HEAD producer/consumer traceability — 2026-11-19
 
-**Reviewed consumer baseline (before this edit):** PR #50 `52c23eabd6948ad7db13d3d39d65ed920d996c9a`. This is the consumer SHA reviewed for this reconciliation; the final documentation commit is reported separately and is not implied to have been reviewed. PR #50 is OPEN/Draft, base `main`, not merged. Current fetched producer tips: TV2 PR #46 `c4956777512efc260fbf180898af2c041d0a16d6`; TV3 PR #49 `e73fb107d15296a6f317d9bed25ce76fe0657ac2`; TV4 PR #48 `a9888ee0b4b70940497c0a6047a5cf414fbcd7bc`. All three are unmerged proposals. Earlier matrices and SHA references above remain historical snapshots; in particular #48 advanced from `813aa3ed67f5da7f3343f2c553ffbf24025eacaf` and must not be used as its current source.
+**Reviewed consumer baseline (before this edit):** PR #50 `52c23eabd6948ad7db13d3d39d65ed920d996c9a`. This is the consumer SHA reviewed for this reconciliation; the final documentation commit is reported separately and is not implied to have been reviewed. PR #50 is OPEN/Draft, base `main`, not merged. Current fetched producer tips: TV2 PR #46 `c4956777512efc260fbf180898af2c041d0a16d6`; TV3 PR #49 `e73fb107d15296a6f317d9bed25ce76fe0657ac2`; TV4 PR #48 `a9888ee0b4b70940497c0a6047a5cf414fbcd7bc`. **Historical status as of the 2026-11-19 review (superseded below):** all three were then unmerged proposals. **All three have since merged into `main` (2026-11-19)**; use the post-merge reconciliation below for their current status. Earlier matrices and SHA references above remain historical snapshots; in particular #48 advanced from `813aa3ed67f5da7f3343f2c553ffbf24025eacaf` and must not be used as its current source.
 
 The exact producer documents are identified by path **at the full PR HEAD listed above**. Compatibility describes this documentation review only; it is not owner ACK, merge approval, or implementation evidence. No exact-SHA ACK for the pairs below is provided.
 
@@ -124,3 +124,20 @@ For every row above, `ACK status = NOT PROVIDED` for the reviewed consumer basel
 |---|---|---|---|
 | E-IF-04 | Worker key lifecycle, signer G1 readiness and the D-18/D-IF-07 dependency | TV2 + TV3 + TV4 → TV1/TV5 | Conditional design direction exists; exact-HEAD ACK and runtime tests pending |
 | E-IF-11 | PAUSED same-key Submit replay; already-RUNNING Attempt/event/payload retry; proposed separate ACKED missing-receipt repair | TV2 + TV4 → TV1/TV5 | `PENDING_ACK / TEST`; D-19 remains `PROPOSED_FOR_ACK`, no repair authorization |
+
+## TV1 post-merge source reconciliation — 2026-11-20 (current baseline for PR #50)
+
+**Authority and scope:** TV1 integrated design-source status only; this update does not imply producer/consumer ACK or runtime implementation. Previous source snapshots remain historical evidence, not current PR states.
+
+| Phase owner | PR / reviewed producer head | Merged `main` commit | Status |
+|---|---|---|---|
+| TV1 2A | #47 `001619d14f7e9ac3613803f897be5b83d34e4fd6` | `d85d1e35e9194e557668fbcbb940a53d947badc1` | MERGED |
+| TV2 2B | #46 `c4956777512efc260fbf180898af2c041d0a16d6` | `810d9b4420e815c619ff14154ee43ceb83bc8e5d` | MERGED |
+| TV3 2C | #49 `e73fb107d15296a6f317d9bed25ce76fe0657ac2` | `e98234fb05e8d89d11a6a0a3c5c0e0b666cb7070` | MERGED |
+| TV4 2D | #48 `a9888ee0b4b70940497c0a6047a5cf414fbcd7bc` | `22fff1d2b0c05542b372cb74725c9b63be2ca88b` | MERGED |
+
+**Accepted-main baseline:** `main@22fff1d2b0c05542b372cb74725c9b63be2ca88b`. **TV5 reviewed design HEAD:** PR #50 `d1570e3906acd818ddf76921bb02c6b5c652a6ca` (TV1 exact-HEAD `TV5_DESIGN_SCOPE_DONE`; separate cross-owner final-HEAD ACK and two independent human L2 approvals still absent). PR #50 originated from `main@bee832e` and its 11-doc diff has been inspected against current merged producer documents; no code or migration is in #50.
+
+**Separate normative source-sync:** TV1 L2 coordination Draft PR #53 (branch `docs/phase2-crossphase-l2-source-sync`) proposes to reconcile `api-contract.md` §13, `database-design.md` §9/§11 and G1 endpoint with D-16 Option B, DEC-07/D-14 Phase 2 no-oracle-read, D-01 Option C and D-18 Worker-first/two-active-key. PR #53 needs owner ACK/human reviews and separate merge. D-19/B-IF-06R is **docs-described only / `PROPOSED_FOR_ACK`**; no implementation/coding/repair grant is authorized by either PR.
+
+**ACK status stays open:** `E-IF-01..12` retain their individual `PENDING_ACK`/`PENDING_PARAMS`/`NEEDS_OWNER_DECISION` or conditional status until affected source and consumer owners record exact reviewed SHA and interface compatibility; historical scoped `ACK_WITH_ACTIONS` does not become `ACK_COMPATIBLE` by merging the source PR. All Phase 2 PostgreSQL/native-role/crypto/concurrency/E2E tests are `NOT_RUN`. PR #50 remains Draft; no docs-merge or coding authorization is inferred.
