@@ -170,7 +170,7 @@ Theo thông báo quy trình 2026-11-08, kết quả của 6 việc dưới đây
 | `P2C-03` (HTTP callback + parser) | Spec §6.2, §6.3 item 1-2, DR-C2, §7.5; `P2C-DRT-02/19` | Bound 16,384 byte/depth 4 `PROPOSED_FOR_ACK`, chờ TV1 ACK; bound là `PENDING_PARAMS` cho tới khi ACK |
 | `P2C-04` (Verifier → Finalizer) | Spec §6.6.1-6.6.6, §7.4; handoff §4.3; `C-IF-06/10` | V-OUT được duyệt có điều kiện; ACK exact-SHA TV1/TV2/TV5 chờ |
 | `P2C-05` (key lifecycle + incident gating) | Spec §6.4, §6.6.5, §7.2, §7.3; `C-IF-07/08/09` | G1 và quiesce được duyệt có điều kiện; endpoint cần L2 change request; incident `C-IF-09` còn mở |
-| `P2C-06` (test matrix + coding gate) | Spec DR-C8, §7.6; handoff §7-§8 | 24 case `P2C-DRT`, `P2C-KEY-01..11`, `P2C-SIGN-01..10`: tất cả `NOT_RUN`; coding gate do TV1 |
+| `P2C-06` (test matrix + coding gate) | Spec DR-C8, §7.6; handoff §7-§8 | 25 case `P2C-DRT` (`01..24` và `06b`), `P2C-KEY-01..11`, `P2C-SIGN-01..10`: tất cả `NOT_RUN`; coding gate do TV1 |
 
 **Đầu ra PRE_CODE bắt buộc:** 6 artefact hoặc nhóm artefact bên trên; không cần tạo nhánh/PR code để gọi là hoàn tất. Review của TV1 và từng owner consumer phải ghi **cụ thể phiên bản/SHA**, không dùng 'đã xem' chung chung.
 
