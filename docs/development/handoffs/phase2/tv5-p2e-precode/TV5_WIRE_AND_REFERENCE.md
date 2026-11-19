@@ -1,0 +1,83 @@
+# TV5-P2E-02 — Wire and Deterministic Reference Compatibility
+
+**Baseline:** `main@bee832eaf5463df20f6c6815174322871eb6685a`
+**Status:** approved invariants preserved; clarifying interface details are `PROPOSED — PENDING_ACK`.
+
+## Dispatch: Manager → existing Simulator
+
+`POST /internal/v1/executions` uses the API Contract §13.1 exact ten-key object:
+
+`outbox_event_id`, `job_id`, `attempt_id`, `worker_id`, `listing_id`, `gpu_count`, `duration_seconds`, `simulation_input`, `finish_due_at`, `hard_deadline_at`.
+
+IDs are UUIDv4. The only allowed simulation input is exactly `{"workload_profile":"demo-v1"}`. The trusted persisted Job determines `gpu_count` and duration. Deadlines in the envelope are delivery hints, while persisted DB time is authoritative. The JSON must not contain `simulation_references`, `seed_value`, expected output/digest, SQL credentials, service tokens, or private signing keys. Client code/commands are never executable input. Simulator remains a process in the existing five-service topology and has no PostgreSQL connection.
+
+The internal dispatch Bearer is `MANAGER_DISPATCH_TOKEN`, distinct from the callback token and end-user JWT. ADR-005's 2-second connect / 5-second total timeouts, 2/4/8/16/30… second persisted retry schedule, 30-second fenced claim, and bounded auth recovery remain binding. No DB domain lock is held over HTTP.
+
+## Deterministic output: nine fields
+
+The mock result is exactly these nine JSON properties (no additional fields):
+
+| Field | Contract |
+|---|---|
+| `schema_version` | `demo-v1` |
+| `job_id` | canonical Job UUIDv4 |
+| `listing_id` | canonical Listing UUIDv4 |
+| `requested_gpu_count` | dispatch `gpu_count` |
+| `duration_seconds` | persisted requested duration |
+| `workload_profile` | `demo-v1` |
+| `work_units` | integer `0..999999` |
+| `outcome` | `SUCCESS` or `FAILED` |
+| `failure_reason` | `null`, `WORKER_FAULT`, or `JOB_FAULT` per approved mapping |
+
+Digest is `sha256:` plus lowercase SHA-256 of UTF-8 RFC 8785 JCS bytes for that object. The protected reference algorithm is `demo-v1-public1`; its exact SHA-256 domain, canonical input, counters, rejection sampling and V1–V4 are frozen by the approved GPU-005-B design. Do not reimplement or alter them in this document. The 100-bucket mapping is 0–79 SUCCESS, 80–89 WORKER_FAULT, 90–99 JOB_FAULT (synthetic 80/10/10). The output is intentionally publicly predictable. It is not GPU execution proof, anti-cheat, or evidence of Worker reliability beyond a synthetic classification.
+
+## Signed Result V1: separate eleven-field object
+
+ADR-004 is authoritative: exact eleven payload properties, `schema_version="1"`, strict RFC 8785 JCS, bytes `GPU-MARKETPLACE:SIGNED-RESULT:V1\n` + UTF-8(JCS(payload)), Ed25519, and 64-byte signature encoded as exactly 86 unpadded base64url characters. The registered public key is selected by trusted `(worker_id,key_id)` context; callback-supplied keys are never trusted. The signed claim is not ground truth and is not the nine-field mock result object.
+
+`finish_due_at`/`finished_at` supplied by Worker never override the DB admission clock. `simulation_input` stays unchanged; adding `algorithm_version` to dispatch or Signed Result V1 would require an explicit versioned contract change and is not proposed here.
+
+## Version compatibility — DEC-06 approved MVP mapping; historical V2 hazard analysis
+
+**Current approved MVP contract (`P2E-GPU005B-DEC-06`):** `workload_profile="demo-v1"` maps immutably to `demo-v1-public1`. The existing ten-key dispatch carries only the approved `simulation_input={"workload_profile":"demo-v1"}`; the eleven-field Signed Result V1 payload also stays unchanged. The deterministic algorithm and frozen V1–V4 fixtures must not silently change across deployment, queued/running Job processing, retry, restart or rollback. Release compatibility preflight must cover V1–V4, pre-deploy QUEUED Jobs, RUNNING Attempt retries, rollback and retained historical signed evidence; these are planned checks, **NOT_RUN**.
+
+**Historical/future change-control analysis only (not an unresolved MVP choice):** If a future incompatible V2 implementation replaces the V1 behavior while an older QUEUED Job or RUNNING Attempt remains, the signed claim may conflict with the stored `demo-v1-public1` reference. The alternatives formerly discussed were:
+
+1. Pin a new algorithm identity in trusted persisted Job/Attempt/Outbox state, subject to an explicitly approved version source and retention/migration contract.
+2. Introduce a separately approved immutable workload-profile identifier for a future version, requiring API/DB/Simulator change control.
+3. Enforce a reviewed drain/fence/rollback protocol before deploying incompatible behavior.
+
+None of these V2 alternatives is selected or authorized by this documentation; **the MVP choice itself is already approved under DEC-06**. Any future V2/profile change requires a separate L2 change request and producer/consumer ACKs. Do not add a field to the ten-key dispatch or eleven-field Signed Result V1 payload without approved change control.
+
+## Oracle and responsibility boundary
+
+TV5 owns simulator/signer and finalization policy design; TV3 owns strict V1 verification and internal service-auth contract; TV2 owns DB registry and transaction/persistence; TV1 owns Manager orchestration and secret injection; TV4 owns Listing/FIFO/allocation policy. API ingress stores original raw callback bytes; `202 STORED`/`DUPLICATE` is not a successful verification. Only Manager finalization can produce terminal Job/release/reputation effects.
+
+## Fixed normative vectors V1–V4
+
+These exact values are transcribed from the merged Phase 1 reference specification at [baseline permalink, lines 172–266](https://github.com/SE2026-BC-04/gpu-resource-marketplace/blob/bee832eaf5463df20f6c6815174322871eb6685a/docs/architecture/phases/phase1e_gpu005_reference_technical_specification.md#L172-L266). The shared inputs are listing `22222222-2222-4222-8222-222222222222`, worker `11111111-1111-4111-8111-111111111111`, requested GPU count 2, `demo-v1-public1`, profile `demo-v1`; V1–V3 share Job `33333333-3333-4333-8333-333333333333`, and V4 uses the Job shown below. The complete canonical input and exact nine-key output JSON are at the linked source lines; the table preserves all outcome/digest values without editing or recalculating them.
+
+| Vector | Input delta | `seed_value` | Outcome / failure | `work_units` | `expected_digest` |
+|---|---|---:|---|---:|---|
+| V1 | duration 60s; shared Job UUID | 3035342533442321017 | SUCCESS / `null`; bucket 47 | 522303 | `sha256:a643e286d2b4b89606cd8559078a8765cd73c7d602eec4f1ca4bba2ca732ef0c` |
+| V2 | duration 2s; shared Job UUID | 8887054454783268118 | FAILED / WORKER_FAULT; bucket 86 | 634290 | `sha256:9baaaaa338423c75753ecbd00da615a1f88a006eeb0a512d432635664754b7bf` |
+| V3 | duration 1s; shared Job UUID | 2063102514678027846 | FAILED / JOB_FAULT; bucket 97 | 490818 | `sha256:f1c9d8e371bd4e6876a73b2414c285c6362fe01bca4d8d432169f4d484b3d749` |
+| V4 | duration 60s; Job `33333333-3333-4333-8333-000000000c02` | 2240287873181493078 | SUCCESS / `null`; bucket 16 | 562456 | `sha256:ad2212d44fef948b303afb1e5d5d8e9435eeab64f6701c54cafc3c6f3fd77aa7` |
+
+V4's normative rejection trace is `work_units_raw(0)=4294735637` (reject), `work_units_raw(1)=316562456` (accept), modulo result 562456. V1–V3 do not exercise rejection. Source labels V4 `VERIFIED CALCULATION`; its runtime tests are `NOT_RUN` and Phase 2 execution is not approved by the Phase 1 vector decision.
+
+Required planned tests: positive exact canonical object/output/digest; RFC 8785 cross-implementation byte equality; malformed/extra/missing fields; altered UUID casing/time/schema; wrong worker/key binding; signature tampering; V4 exact rejection counter trace; `gpu_count`→`requested_gpu_count`; no oracle/secret in dispatch, logs, or public DTO. Phase 2 runtime tests: `NOT_RUN`; TV3/TV5 ACK: `PENDING_ACK`.
+
+---
+
+## Dispatch and allocation contracts — 2026-11-13
+
+TV2 #46's current fetched tip is `c4956777512efc260fbf180898af2c041d0a16d6` (older producer SHAs in this file are historical). It records the lead's **conditional approval of P1**: persist the **full exact ten-key** dispatch in immutable Outbox JSONB on first INSERT, caller-generated stable UUIDv4 event/attempt IDs, narrowly scoped INSERT grants, and null-safe CHECK. P2 eight-key fallback was **not selected**. P1 requires the narrow Manager column INSERT grants, null-safe CHECK, stable IDs and deterministic serialization; no extra wire field is authorized. `simulation_input={"workload_profile":"demo-v1"}` and the oracle boundary are unchanged. One deterministic `canonical_dispatch_body` must generate identical *raw HTTP bytes* across retries/takeover/restart (TV2 P2B-DRT-18, `NOT_RUN`). TV2's `SignerReadiness(worker_id,key_id,public_key_fingerprint,proof_expires_at)` is **internal allocation context**, never an eleventh dispatch key or Signed Result V1 addition. The MVP algorithm mapping is already approved by `P2E-GPU005B-DEC-06`; release compatibility checks remain `NOT_RUN`. No algorithm version is added to dispatch or Signed Result V1.
+
+---
+
+## Lead design selection and G1 proof boundary — 2026-11-18
+
+At [TV1's PR #46 L2 decision @ 531805b](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/46#issuecomment-6849327771), **D-05/D-13 P1 was conditionally approved**: exactly ten fixed dispatch fields, fixed `simulation_input={"workload_profile":"demo-v1"}`, caller-created stable UUIDv4 `attempt_id`/`event_id`, narrow INSERT grants and byte-identical canonical HTTP serialization. P2 was not selected. This is not an approved migration, SQL test or coding gate.
+
+The approved **G1** Manager→Simulator proof request is a **separate internal endpoint requiring L2 normative API Contract change**. It must not add fields to the dispatch or Signed Result V1 envelope. Source producer tips are TV3 #49 `f3edb94d7f11a5759d8308e64c17927ce947af19` and TV2 #46 `c4956777512efc260fbf180898af2c041d0a16d6`; older cited SHAs are historical. Nonce is **32 CSPRNG bytes**, unpadded base64url (43 ASCII characters) on the wire, but the *raw 32 bytes* in the Ed25519 message. Worker/key IDs are **canonical lowercase UUID text** encoded as UTF-8. Domain separation is `GPU-MARKETPLACE:SIGNER-PROOF:V1\n`; only `MANAGER_DISPATCH_TOKEN` authenticates the request. Precise endpoint shape, expiry/timeout, replay cache and restart within TTL remain `PENDING_PARAMS/ACK`. Proof is read-only/authenticated; Simulator has no DB credentials. The MVP algorithm mapping is already approved; release evidence is still required.
