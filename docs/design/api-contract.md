@@ -1,13 +1,15 @@
 # GPU Resource Marketplace - API Contract Design
 
-**Document version:** v0.10 — owner-approved Listings request-body bounds (`CR-GPU-004-BODY-01`, §14.6), added on top of v0.9 Auth bounds; Markdown design record<br>
+**Document version:** v0.11 — VT-089 optional Jobs Listing filter (`DEC-VT089-L2-01`); includes v0.10 owner-approved Listings request-body bounds<br>
 **Date:** 2026-10-25<br>
-**Status:** **APPROVED_DESIGN** for the described API routes/DTOs, the 100 API contract-test IDs, and the owner-approved scope of `API-OPEN-01`, `API-OPEN-02`, and `API-OPEN-06` (2026-10-18). The additional JWT claim/header profile, fractional NumericDate representation and login-normalization repertoire were **owner-approved as `DEC-P1-03` on 2026-10-21** (recorded in [Phase 1 §6](../architecture/phases/phase1_project_foundation.md)) and are synchronized in §§4.5 and 14.3. The L2 change `CR-GPU-003-UNICODE-01` (rejection of U+0000 and surrogate code points in `login_name`, safe Unicode password handling) was **owner-approved on 2026-10-24** ([#16](https://github.com/SE2026-BC-04/gpu-resource-marketplace/issues/16)) and is recorded in §§4.2, 4.5, 6 and 14.4. The Auth request-body bounds and the `D-C1`/`D-C2` error decisions directed by the team lead in the PR #23 review (2026-10-24) are recorded in §§3.3, 4.2–4.4, 6 and 14.5; they become approved with the L2 review of PR #23. ADR-008 Option B is **ACCEPTED** (2026-10-18). All implementation/API/database tests remain `NOT_RUN`; this document makes no claim that application code or migrations exist.
+**Status:** Existing described routes/DTOs and prior owner decisions retain their documented approval status. The VT-089 §8.2 query extension is **APPROVED_FOR_IMPLEMENTATION** by TV1 under `DEC-VT089-L2-01` (2026-11-13), with atomic normative documentation + tests/implementation authorized in PR #52. This does not approve implementation, merge, deployment, or test outcomes; feature tests are recorded separately as run. The additional JWT claim/header profile, fractional NumericDate representation and login-normalization repertoire were **owner-approved as `DEC-P1-03` on 2026-10-21** (recorded in [Phase 1 §6](../architecture/phases/phase1_project_foundation.md)) and are synchronized in §§4.5 and 14.3. The L2 change `CR-GPU-003-UNICODE-01` was owner-approved on 2026-10-24 ([#16](https://github.com/SE2026-BC-04/gpu-resource-marketplace/issues/16)) and is recorded in §§4.2, 4.5, 6 and 14.4. The Auth request-body bounds and `D-C1`/`D-C2` decisions directed in PR #23 review are recorded in §§3.3, 4.2–4.4, 6 and 14.5. ADR-008 Option B is **ACCEPTED** (2026-10-18). No application, database or test result is implied solely by this design text.
 **Target repository path:** `docs/design/api-contract.md`  
 **Output scope:** Markdown documentation only; no source code, SQL migration, OpenAPI generator, Docker file, or CI workflow.  
 **Product scope:** Real GPU Marketplace simulation-only MVP. NOT the separate AD-090 assignment variant.
 
 **v0.10 scoped approval:** [OWNER DECISION — CR-GPU-004-BODY-01, 2026-10-25](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/17#issuecomment-6395344255) marks the Listings body-bound design **APPROVED_FOR_IMPLEMENTATION**, allowing atomic L2 design + implementation in PR #17. This is not approval to merge/deploy or full Listing/database acceptance; two independent human reviews and the other PR gates remain required. Actual scoped test evidence belongs in PR #17/Phase 1D, not an inferred PASS for this design catalogue. Auth/Jobs policy is unchanged.
+
+**v0.11 scoped decision:** [DEC-VT089-L2-01, TV1/team-lead, 2026-11-13](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/52#issuecomment-6857910079), for proposal HEAD `ee2fe6fe664552240f70cfb2802277640f2831d1`, approves the backward-compatible optional Jobs `listing_id` filter design and atomic normative documentation + implementation in PR #52. TV2 recorded `ACK_WITH_ACTIONS` for the reader/query direction ([review](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/52#pullrequestreview-5894585707)); this is not review of the implementation diff. PR #52 remains Draft; new commits still require exact-HEAD human review and final L2 merge gates.
 
 ## 1. Goal, workflow, and source of truth
 
@@ -558,7 +560,11 @@ A temporarily insufficient **free** GPU count does **not** reject a valid Job: i
 
 ### 8.2. Job reads and role-safe views
 
-`GET /api/v1/jobs?scope=<mine|assigned|all>&status=<status>&limit=20&cursor=...` uses the shared keyset pagination (`submitted_at DESC, id DESC`; `limit` 1..100; opaque tamper-evident cursor bound to role/identity and filters). Default scope is inferred from the caller: `mine` for Client, `assigned` for Worker, `all` for Admin. Other scope values or cross-role scope attempts -> `403 FORBIDDEN`; unsupported status -> `400 INVALID_FILTER`.
+`GET /api/v1/jobs?scope=<mine|assigned|all>&status=<status>&listing_id=<uuid-v4>&limit=20&cursor=...` uses the shared keyset pagination (`submitted_at DESC, id DESC`; `limit` 1..100; opaque tamper-evident cursor bound to role/identity and filters). `listing_id` is optional and applies only to this collection route. When omitted, legacy callers and cursor context are unchanged. When supplied, it must be a canonical lowercase, hyphenated UUIDv4. Empty, malformed, uppercase, noncanonical, non-v4, or repeated `listing_id` query keys (even identical values) return `400 INVALID_FILTER`; the server rejects duplicate keys explicitly rather than relying on framework parsing. Default scope is inferred from the caller: `mine` for Client, `assigned` for Worker, `all` for Admin. Other scope values or cross-role scope attempts -> `403 FORBIDDEN`; unsupported status -> `400 INVALID_FILTER`.
+
+The `listing_id` predicate is combined with role/identity visibility, optional status, and keyset cursor conditions in the same SQL `WHERE` **before `LIMIT`**, using a bound native UUID parameter. It does not look up `gpu_listings`; an unknown Listing and a Listing with no Jobs visible to the caller are indistinguishable and both return `200 OK` with `{ "items": [], "next_cursor": null }`. Do not filter a fetched page in application memory.
+
+Cursor compatibility is strict: when `listing_id` is absent, preserve the existing canonical cursor context bytes/HMAC tag and accept a baseline-signed cursor; do not add `"listing_id": null` to the old context. When supplied, include its canonical lowercase UUID in the signed context. A filtered cursor cannot be reused with a different Listing filter or with no filter; return `400 INVALID_CURSOR`. Keep the existing cursor envelope/version and signing-key policy. This pagination does not promise a cross-request snapshot.
 
 - `CLIENT`: only its `jobs.client_id`; sees its own Job fields and Worker ID, but no seed/oracle, Manager internals or another Client's Job.
 - `WORKER`: only Jobs assigned to Listings belonging to its Worker profile; see job ID, Listing, requested GPU count, duration, public state/times. **Do not expose another Client's private account identifiers, dispute text, tokens or oracle** through the Worker projection.
@@ -602,6 +608,21 @@ A Client guessing another Client's Job UUID, or a Worker guessing an unassigned 
 | `API-JOB-14` | Job reaches expiry and is purged; reuse former submit key | Old GET `404`; no claim of cross-expiry dedup; new submit follows current rules |
 | `API-JOB-15` | 150 Jobs tie on `submitted_at`, paginate and alter cursor | No repeated item within stable snapshot; invalid cursor `400`; strict role isolation |
 | `API-JOB-16` | Worker reads Job and Client reads own Job | Worker sees no Client private identity or oracle; Client sees own safe fields |
+
+**VT-089 additive query-filter test oracles (design approved by `DEC-VT089-L2-01`; implementation evidence is tracked in PR #52):**
+
+| Test ID | Action | Binary oracle |
+|---|---|---|
+| `VT089-API-01` | GET Jobs with canonical listing_id alone and with status | 200; only rows satisfying listing AND status and caller visibility; response DTO unchanged |
+| `VT089-API-02` | Valid UUID with no visible Jobs; compare unknown and non-visible Listing IDs | Both return the same 200 empty collection; no Listing lookup/existence disclosure |
+| `VT089-API-03` | Empty, malformed, uppercase, noncanonical, non-v4 and repeated listing_id query keys | 400 INVALID_FILTER; reader not called; safe error envelope |
+| `VT089-API-04` | Reuse baseline cursor without filter; reuse L1 cursor with L2 or no filter | Baseline token accepted unfiltered; mismatched filtered cursor returns 400 INVALID_CURSOR |
+| `VT089-API-05` | Missing/invalid auth, CLIENT scope=all, and read dependency outage | 401, 403, and sanitized 503 respectively; no unauthorized Job data |
+| `VT089-PG-01` | Per-role filtered reads, status AND, cursor pages with tied timestamps | SQL enforces visibility/filter/cursor before LIMIT; order is submitted_at DESC, id DESC; no repeated/missing IDs on fixed fixture |
+| `VT089-PG-02` | Newest N Jobs fail listing filter; older matching Jobs follow | First filtered page contains matches, proving filter occurs before LIMIT |
+| `VT089-PG-03` | 19/20/21 rows and unknown/non-visible Listing cases | Correct page boundaries; unknown and non-visible IDs produce identical empty result |
+
+All listed tests start as `NOT_RUN` until executed against a stated code SHA. PostgreSQL cases require the disposable cluster and restricted-role safety fixture; a skipped case is not PASS.
 
 ## 9. Accepted Signed Result read API (APPROVED_DESIGN)
 

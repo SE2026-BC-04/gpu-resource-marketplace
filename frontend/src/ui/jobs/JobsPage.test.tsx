@@ -113,6 +113,7 @@ describe("GPU-005 Jobs frontend foundation", () => {
     const listJobs = vi.fn()
       .mockResolvedValueOnce({ items: [job()], next_cursor: "opaque-cursor-2" })
       .mockResolvedValueOnce({ items: [], next_cursor: null })
+      .mockResolvedValueOnce({ items: [], next_cursor: "status-cursor" })
       .mockResolvedValueOnce({ items: [], next_cursor: null });
     const api = setup("CLIENT", { listJobs });
     await screen.findByText(JOB_ID);
@@ -122,6 +123,35 @@ describe("GPU-005 Jobs frontend foundation", () => {
     fireEvent.change(screen.getByLabelText("Lọc trạng thái"), { target: { value: "COMPLETED" } });
     await waitFor(() => expect(api.listJobs).toHaveBeenNthCalledWith(3,
       { scope: "mine", limit: 20, cursor: undefined, status: "COMPLETED" }, expect.any(AbortSignal)));
+    fireEvent.change(screen.getByLabelText("Lọc theo Listing ID"), { target: { value: LISTING_ID } });
+    fireEvent.click(screen.getByRole("button", { name: "Áp dụng Listing" }));
+    await waitFor(() => expect(api.listJobs).toHaveBeenNthCalledWith(4,
+      { scope: "mine", limit: 20, cursor: undefined, status: "COMPLETED", listing_id: LISTING_ID }, expect.any(AbortSignal)));
+  });
+
+  it("ignores an old list response after applying a new Listing filter", async () => {
+    const older = deferred<JobCollectionResponse>();
+    const filtered = deferred<JobCollectionResponse>();
+    const listJobs = vi.fn()
+      .mockImplementationOnce(() => older.promise)
+      .mockImplementationOnce(() => filtered.promise);
+    setup("CLIENT", { listJobs });
+    await waitFor(() => expect(listJobs).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("Lọc theo Listing ID"), { target: { value: LISTING_ID } });
+    fireEvent.click(screen.getByRole("button", { name: "Áp dụng Listing" }));
+    await waitFor(() => expect(listJobs).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      filtered.resolve({ items: [job("QUEUED", JOB_B)], next_cursor: null });
+    });
+    expect(await screen.findByText(JOB_B)).toBeInTheDocument();
+    await act(async () => {
+      older.resolve({ items: [job("QUEUED", JOB_A)], next_cursor: null });
+    });
+
+    expect(screen.getByText(JOB_B)).toBeInTheDocument();
+    expect(screen.queryByText(JOB_A)).not.toBeInTheDocument();
   });
 
   it("recovers an invalid server cursor by restarting pagination from page one", async () => {

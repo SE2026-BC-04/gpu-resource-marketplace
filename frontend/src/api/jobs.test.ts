@@ -48,7 +48,7 @@ describe("Jobs API client", () => {
   it("uses the shared authorized fetch and encodes approved list filters/cursor", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response({ items: [job()], next_cursor: "opaque+cursor" }));
     const api = createJobsApi(session(), fetcher);
-    const result = await api.listJobs({ scope: "mine", status: "QUEUED", limit: 20, cursor: "opaque+cursor" });
+    const result = await api.listJobs({ scope: "mine", status: "QUEUED", listing_id: LISTING_ID, limit: 20, cursor: "opaque+cursor" });
 
     expect(result.items[0].id).toBe(JOB_ID);
     expect(result.next_cursor).toBe("opaque+cursor");
@@ -56,7 +56,7 @@ describe("Jobs API client", () => {
     expect(url).toContain("/api/v1/jobs?");
     const params = new URL(String(url)).searchParams;
     expect([...params.entries()]).toEqual([
-      ["scope", "mine"], ["status", "QUEUED"], ["limit", "20"], ["cursor", "opaque+cursor"],
+      ["scope", "mine"], ["status", "QUEUED"], ["listing_id", LISTING_ID], ["limit", "20"], ["cursor", "opaque+cursor"],
     ]);
     expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer test-only-token");
     expect(init?.credentials).toBe("omit");
@@ -72,6 +72,13 @@ describe("Jobs API client", () => {
     await expect(api.listJobs({ limit: 0 })).rejects.toThrow(TypeError);
     await expect(api.listJobs({ limit: 101 })).rejects.toThrow(TypeError);
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a noncanonical Listing filter before sending a request", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response({ items: [], next_cursor: null }));
+    const api = createJobsApi(session(), fetcher);
+    await expect(api.listJobs({ listing_id: "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF" })).rejects.toThrow(TypeError);
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("loads a validated detail and posts cancel without a body", async () => {

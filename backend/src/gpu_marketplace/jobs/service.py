@@ -41,6 +41,7 @@ class JobsReadService:
         status: str | None = None,
         limit: int = 20,
         cursor: str | None = None,
+        listing_id: UUID | None = None,
     ) -> JobCollectionResponse:
         role = self._role(principal)
         resolved_scope = self._scope(role, scope)
@@ -53,6 +54,7 @@ class JobsReadService:
             role=role,
             scope=resolved_scope.value,
             status=resolved_status,
+            listing_id=listing_id,
         )
         position = None
         if cursor is not None:
@@ -68,6 +70,7 @@ class JobsReadService:
             status=resolved_status,
             after=position,
             limit=limit,
+            listing_id=listing_id,
         )
         next_cursor = None
         if page.next_position is not None:

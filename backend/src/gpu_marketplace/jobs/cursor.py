@@ -111,13 +111,16 @@ class HmacCursorCodec:
             raise ValueError("invalid cursor claims") from exc
 
     def _context_tag(self, context: CursorContext) -> str:
+        context_payload = {
+            "user_id": str(context.user_id),
+            "role": context.role.value,
+            "scope": context.scope,
+            "status": context.status.value if context.status is not None else None,
+        }
+        if context.listing_id is not None:
+            context_payload["listing_id"] = str(context.listing_id)
         context_bytes = json.dumps(
-            {
-                "user_id": str(context.user_id),
-                "role": context.role.value,
-                "scope": context.scope,
-                "status": context.status.value if context.status is not None else None,
-            },
+            context_payload,
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=True,

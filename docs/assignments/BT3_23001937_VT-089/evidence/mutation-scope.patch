@@ -1,0 +1,13 @@
+diff --git a/backend/src/gpu_marketplace/jobs/service.py b/backend/src/gpu_marketplace/jobs/service.py
+index bb1ce0b..57a7703 100644
+--- a/backend/src/gpu_marketplace/jobs/service.py
++++ b/backend/src/gpu_marketplace/jobs/service.py
+@@ -111,8 +111,6 @@ class JobsReadService:
+         except ValueError as exc:
+             # API Contract §8.2 defines unsupported/cross-role scopes as 403.
+             raise Forbidden() from exc
+-        if requested is not expected:
+-            raise Forbidden()
+         return requested
+
+     @staticmethod

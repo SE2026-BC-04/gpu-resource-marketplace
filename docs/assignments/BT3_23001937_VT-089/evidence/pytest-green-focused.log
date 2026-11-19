@@ -1,0 +1,9 @@
+........................................................................ [ 63%]
+.....................................sssss                               [100%]
+=========================== short test summary info ============================
+SKIPPED [1] backend/tests/test_jobs_read_adapter_postgres.py:160: NOT_RUN: PostgreSQL tests need GPU_MARKETPLACE_TEST_DATABASE_URL, GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS=1 and GPU_MARKETPLACE_TEST_CLUSTER_TOKEN for a disposable cluster (schema matrix 9.2/9.3)
+SKIPPED [1] backend/tests/test_jobs_read_adapter_postgres.py:213: NOT_RUN: PostgreSQL tests need GPU_MARKETPLACE_TEST_DATABASE_URL, GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS=1 and GPU_MARKETPLACE_TEST_CLUSTER_TOKEN for a disposable cluster (schema matrix 9.2/9.3)
+SKIPPED [1] backend/tests/test_jobs_read_adapter_postgres.py:278: NOT_RUN: PostgreSQL tests need GPU_MARKETPLACE_TEST_DATABASE_URL, GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS=1 and GPU_MARKETPLACE_TEST_CLUSTER_TOKEN for a disposable cluster (schema matrix 9.2/9.3)
+SKIPPED [1] backend/tests/test_jobs_read_adapter_postgres.py:303: NOT_RUN: PostgreSQL tests need GPU_MARKETPLACE_TEST_DATABASE_URL, GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS=1 and GPU_MARKETPLACE_TEST_CLUSTER_TOKEN for a disposable cluster (schema matrix 9.2/9.3)
+SKIPPED [1] backend/tests/test_jobs_read_adapter_postgres.py:445: NOT_RUN: PostgreSQL tests need GPU_MARKETPLACE_TEST_DATABASE_URL, GPU_MARKETPLACE_ALLOW_DESTRUCTIVE_DB_TESTS=1 and GPU_MARKETPLACE_TEST_CLUSTER_TOKEN for a disposable cluster (schema matrix 9.2/9.3)
+109 passed, 5 skipped in 0.76s

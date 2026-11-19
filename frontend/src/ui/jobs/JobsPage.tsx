@@ -303,6 +303,8 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
     error: unknown | null;
   } | null>(null);
   const [statusFilter, setStatusFilter] = useState<JobStatus | "">("");
+  const [listingIdInput, setListingIdInput] = useState("");
+  const [listingIdFilter, setListingIdFilter] = useState("");
   const [cursor, setCursor] = useState<string | undefined>();
   const [previousCursors, setPreviousCursors] = useState<Array<string | undefined>>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -314,7 +316,7 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
   const [reloadVersion, setReloadVersion] = useState(0);
   const [detailReloadVersion, setDetailReloadVersion] = useState(0);
   const [detailGeneration, setDetailGeneration] = useState(0);
-  const listRequestKey = JSON.stringify([user.id, user.role, statusFilter, cursor ?? null, reloadVersion]);
+  const listRequestKey = JSON.stringify([user.id, user.role, statusFilter, listingIdFilter, cursor ?? null, reloadVersion]);
   const detailRequestKey = JSON.stringify([user.id, user.role, selectedId, detailReloadVersion]);
   const detailRequestKeyRef = useRef(detailRequestKey);
   const selectedIdRef = useRef(selectedId);
@@ -332,11 +334,17 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
 
   useEffect(() => {
     const controller = new AbortController();
-    api.listJobs({ scope: jobsScopeForRole(user.role), limit: 20, cursor, ...(statusFilter ? { status: statusFilter } : {}) }, controller.signal)
+    api.listJobs({
+      scope: jobsScopeForRole(user.role),
+      limit: 20,
+      cursor,
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(listingIdFilter ? { listing_id: listingIdFilter } : {}),
+    }, controller.signal)
       .then((collection) => { if (!controller.signal.aborted) setListResult({ key: listRequestKey, collection, error: null }); })
       .catch((error: unknown) => { if (!controller.signal.aborted) setListResult({ key: listRequestKey, collection: emptyCollection, error }); });
     return () => controller.abort();
-  }, [api, user.id, user.role, cursor, statusFilter, reloadVersion]);
+  }, [api, user.id, user.role, cursor, statusFilter, listingIdFilter, reloadVersion]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -367,6 +375,20 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
 
   function changeFilter(value: JobStatus | "") {
     setStatusFilter(value);
+    setCursor(undefined);
+    setPreviousCursors([]);
+  }
+
+  function applyListingFilter(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setListingIdFilter(listingIdInput);
+    setCursor(undefined);
+    setPreviousCursors([]);
+  }
+
+  function clearListingFilter() {
+    setListingIdInput("");
+    setListingIdFilter("");
     setCursor(undefined);
     setPreviousCursors([]);
   }
@@ -466,6 +488,18 @@ export function JobsPage({ api, user, allowSubmit = true }: { api: JobsApi; user
             </select>
           </label>
         </div>
+        <form className="jobs-listing-filter" aria-label="Lọc theo Listing" onSubmit={applyListingFilter}>
+          <label>Lọc theo Listing
+            <input
+              value={listingIdInput}
+              onChange={(event) => setListingIdInput(event.target.value)}
+              aria-label="Lọc theo Listing ID"
+              autoComplete="off"
+            />
+          </label>
+          <button type="submit">Áp dụng Listing</button>
+          <button type="button" onClick={clearListingFilter} disabled={!listingIdInput && !listingIdFilter}>Xóa Listing</button>
+        </form>
         {listError !== null && <ErrorNotice
           error={listError}
           retry={() => {

@@ -108,12 +108,16 @@ class PostgresJobReader:
         status: JobStatus | None,
         after: CursorPosition | None,
         limit: int,
+        listing_id: UUID | None = None,
     ) -> JobPage:
         _role, visibility_sql, params = self._visibility(principal)
         clauses = [visibility_sql] if visibility_sql else []
         if status is not None:
             clauses.append("j.status = :status")
             params["status"] = status.value
+        if listing_id is not None:
+            clauses.append("j.listing_id = :listing_id")
+            params["listing_id"] = listing_id
         if after is not None:
             clauses.append(
                 "(j.submitted_at < :cursor_submitted_at OR "

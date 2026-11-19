@@ -50,6 +50,7 @@ class CursorContext:
     role: JobRole
     scope: str
     status: JobStatus | None
+    listing_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -59,12 +60,13 @@ class JobPage:
 
 
 class JobReader(Protocol):
-    """TV2 adapter owns visibility and keyset ordering in the query itself.
+    """TV2 adapter owns visibility, Listing filtering and keyset ordering in SQL.
 
     Client reads filter on client_id; Worker reads join Listing ownership to the
     authenticated account; Admin reads are read-only. All lists sort by
-    submitted_at DESC, id DESC and apply the supplied cursor before LIMIT.
-    Adapters should translate expected storage outages to DependencyUnavailable.
+    submitted_at DESC, id DESC and apply optional status, Listing and supplied
+    cursor predicates before LIMIT. Adapters should translate expected storage
+    outages to DependencyUnavailable.
     """
 
     def list_visible(
@@ -74,6 +76,7 @@ class JobReader(Protocol):
         status: JobStatus | None,
         after: CursorPosition | None,
         limit: int,
+        listing_id: UUID | None = None,
     ) -> JobPage: ...
 
     def get_visible(self, *, principal: JobPrincipal, job_id: UUID) -> JobRecord | None:

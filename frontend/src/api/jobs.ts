@@ -37,6 +37,7 @@ export interface JobCollectionResponse {
 export interface JobListQuery {
   scope?: JobScope;
   status?: JobStatus;
+  listing_id?: string;
   limit?: number;
   cursor?: string;
 }
@@ -219,6 +220,10 @@ export function createJobsApiFromAuthorizedFetch(send: AuthorizedFetch): JobsApi
       if (query.status !== undefined) {
         if (!JOB_STATUSES.includes(query.status)) throw new TypeError("status is invalid");
         params.set("status", query.status);
+      }
+      if (query.listing_id !== undefined) {
+        if (!UUID_V4.test(query.listing_id)) throw new TypeError("listing_id must be a canonical lowercase UUIDv4");
+        params.set("listing_id", query.listing_id);
       }
       if (query.limit !== undefined && (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 100)) {
         throw new TypeError("limit must be an integer from 1 to 100");

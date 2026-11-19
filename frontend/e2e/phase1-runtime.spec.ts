@@ -5,10 +5,12 @@ import { expect, test } from "@playwright/test";
 const workerLogin = process.env.PHASE1_E2E_WORKER_LOGIN;
 const clientLogin = process.env.PHASE1_E2E_CLIENT_LOGIN;
 const password = process.env.PHASE1_E2E_PASSWORD;
+const otherListingId = process.env.PHASE1_E2E_OTHER_LISTING_ID;
+const otherJobId = process.env.PHASE1_E2E_OTHER_JOB_ID;
 const resultPath = process.env.PHASE1_E2E_RESULT_PATH;
 
 test("Worker creates a Listing and Client submits, views, and cancels a Job", async ({ page }) => {
-  if (!workerLogin || !clientLogin || !password || !resultPath) {
+  if (!workerLogin || !clientLogin || !password || !otherListingId || !otherJobId || !resultPath) {
     throw new Error("The PostgreSQL E2E harness must provide the seeded accounts and result path.");
   }
 
@@ -67,6 +69,20 @@ test("Worker creates a Listing and Client submits, views, and cancels a Job", as
   await expect(jobListItem).toBeVisible();
   await expect(jobListItem.getByRole("status")).toHaveText("Đang chờ");
   await expect(page.locator(".job-detail").getByRole("status")).toHaveText("Đang chờ");
+
+  await expect(page.getByRole("button", { name: new RegExp(otherJobId) })).toBeVisible();
+  await page.getByLabel("Lọc theo Listing ID").fill(listing.id);
+  const filteredListResponsePromise = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "GET" &&
+      url.pathname === "/api/v1/jobs" &&
+      url.searchParams.get("listing_id") === listing.id;
+  });
+  await page.getByRole("button", { name: "Áp dụng Listing" }).click();
+  const filteredListResponse = await filteredListResponsePromise;
+  expect(filteredListResponse.status()).toBe(200);
+  await expect(page.getByRole("button", { name: new RegExp(otherJobId) })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: new RegExp(job.id) })).toBeVisible();
 
   const cancelResponsePromise = page.waitForResponse((response) =>
     response.request().method() === "POST" &&
