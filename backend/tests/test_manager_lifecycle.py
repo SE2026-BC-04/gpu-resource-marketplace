@@ -16,7 +16,6 @@ def test_manager_runs_and_stops_cleanly() -> None:
                 stop_event=stop_event,
             )
         )
-        await asyncio.sleep(0)
         stop_event.set()
         await asyncio.wait_for(task, timeout=2)
 
