@@ -6,11 +6,12 @@ its immutable fingerprint is retained in this particular cache instance.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 import hashlib
 import json
+import math
 import re
 from threading import Condition, RLock
 import time
@@ -72,6 +73,7 @@ class Admission:
     state: AttemptState
     newly_admitted: bool
     receipt: Receipt | None
+    _producer_token: object | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(slots=True)
@@ -80,6 +82,7 @@ class _Entry:
     state: AttemptState
     receipt: Receipt | None
     finished_at: float | None
+    producer_token: object | None
 
 
 def _canonical_uuid(value: object, name: str) -> str:
@@ -104,32 +107,61 @@ def _utc_timestamp(value: object, name: str) -> str:
     return value
 
 
-def dispatch_fingerprint(dispatch: Mapping[str, object]) -> bytes:
+def _dispatch_identity(dispatch: Mapping[str, object]) -> tuple[bytes, UUID]:
     """SHA-256 of a validated, sorted, compact ten-key dispatch representation.
 
     This is a *cache identity*, not a wire-format/signing change; JSON key order
     does not affect identity. No extra fields, oracle references or commands.
     """
-    if not isinstance(dispatch, Mapping) or set(dispatch) != _DISPATCH_KEYS:
+    # Accept only the JSON-decoder's plain dict representation. Arbitrary
+    # Mapping implementations can change their keys/values between validation
+    # and serialization, or implement surprising equality/iteration behavior.
+    if type(dispatch) is not dict:
+        raise InvalidDispatch("dispatch must be a plain JSON object")
+    snapshot = dispatch.copy()
+    if (any(type(key) is not str for key in snapshot)
+            or set(snapshot) != _DISPATCH_KEYS):
         raise InvalidDispatch("dispatch must contain exactly ten approved fields")
     for name in _UUID_KEYS:
-        _canonical_uuid(dispatch[name], name)
+        _canonical_uuid(snapshot[name], name)
     for name in ("gpu_count", "duration_seconds"):
-        n = dispatch[name]
+        n = snapshot[name]
         if type(n) is not int or not 1 <= n <= _MAX_INT32:
             raise InvalidDispatch(f"{name} must be positive int32")
-    _utc_timestamp(dispatch["finish_due_at"], "finish_due_at")
-    _utc_timestamp(dispatch["hard_deadline_at"], "hard_deadline_at")
-    simulation = dispatch["simulation_input"]
-    if (not isinstance(simulation, Mapping)
+    _utc_timestamp(snapshot["finish_due_at"], "finish_due_at")
+    _utc_timestamp(snapshot["hard_deadline_at"], "hard_deadline_at")
+    simulation = snapshot["simulation_input"]
+    if type(simulation) is not dict:
+        raise InvalidDispatch("simulation_input must be a plain JSON object")
+    simulation = simulation.copy()
+    if (any(type(key) is not str for key in simulation)
             or set(simulation) != {"workload_profile"}
+            or type(simulation["workload_profile"]) is not str
             or simulation["workload_profile"] != "demo-v1"):
         raise InvalidDispatch("simulation_input must contain only demo-v1 workload_profile")
-    normalized = {key: dict(simulation) if key == "simulation_input" else value
-                  for key, value in dispatch.items()}
+
+    # Serialize only the validated snapshot. Never revisit caller-owned objects
+    # after validation, so concurrent mutation cannot alter the fingerprint.
+    normalized = {
+        "outbox_event_id": snapshot["outbox_event_id"],
+        "job_id": snapshot["job_id"],
+        "attempt_id": snapshot["attempt_id"],
+        "worker_id": snapshot["worker_id"],
+        "listing_id": snapshot["listing_id"],
+        "gpu_count": snapshot["gpu_count"],
+        "duration_seconds": snapshot["duration_seconds"],
+        "simulation_input": {"workload_profile": "demo-v1"},
+        "finish_due_at": snapshot["finish_due_at"],
+        "hard_deadline_at": snapshot["hard_deadline_at"],
+    }
     encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":"),
                          ensure_ascii=False, allow_nan=False).encode("utf-8")
-    return hashlib.sha256(encoded).digest()
+    return hashlib.sha256(encoded).digest(), UUID(snapshot["attempt_id"])
+
+
+def dispatch_fingerprint(dispatch: Mapping[str, object]) -> bytes:
+    """Return the deterministic fingerprint for one validated dispatch."""
+    return _dispatch_identity(dispatch)[0]
 
 
 class AttemptCache:
@@ -144,14 +176,26 @@ class AttemptCache:
                  clock: Callable[[], float] = time.monotonic) -> None:
         if type(max_entries) is not int or max_entries < 1:
             raise ValueError("max_entries must be positive")
-        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, (int, float)) or not 0 < ttl_seconds < float("inf"):
+        if (type(ttl_seconds) not in (int, float)
+                or not math.isfinite(ttl_seconds) or ttl_seconds <= 0):
             raise ValueError("ttl_seconds must be positive and finite")
         self._max_entries = max_entries
         self._ttl = ttl_seconds
         self._clock = clock
         self._entries: dict[UUID, _Entry] = {}
         self._closed = False
+        self._last_cache_time: float | None = None
         self._condition = Condition(RLock())
+
+    def _now(self) -> float:
+        value = self._clock()
+        if type(value) not in (int, float) or not math.isfinite(value):
+            raise ValueError("cache clock must return a finite monotonic number")
+        now = float(value)
+        if self._last_cache_time is not None and now < self._last_cache_time:
+            raise ValueError("cache clock moved backwards")
+        self._last_cache_time = now
+        return now
 
     def _prune(self, now: float) -> None:
         for attempt_id, entry in list(self._entries.items()):
@@ -162,12 +206,11 @@ class AttemptCache:
 
     def admit(self, dispatch: Mapping[str, object]) -> Admission:
         """Return newly_admitted=True exactly once for each retained attempt."""
-        fingerprint = dispatch_fingerprint(dispatch)
-        attempt_id = UUID(dispatch["attempt_id"])
+        fingerprint, attempt_id = _dispatch_identity(dispatch)
         with self._condition:
             if self._closed:
                 raise CacheClosed("attempt cache is shutting down")
-            now = self._clock()
+            now = self._now()
             self._prune(now)
             existing = self._entries.get(attempt_id)
             if existing is not None:
@@ -185,28 +228,39 @@ class AttemptCache:
                     raise CacheFull("all cache slots are IN_FLIGHT")
                 oldest_id = min(completed, key=lambda item: item[1])[0]
                 del self._entries[oldest_id]
-            self._entries[attempt_id] = _Entry(fingerprint, AttemptState.IN_FLIGHT, None, None)
-            return Admission(attempt_id, fingerprint, AttemptState.IN_FLIGHT, True, None)
+            producer_token = object()
+            self._entries[attempt_id] = _Entry(
+                fingerprint, AttemptState.IN_FLIGHT, None, None, producer_token
+            )
+            return Admission(
+                attempt_id, fingerprint, AttemptState.IN_FLIGHT, True, None,
+                _producer_token=producer_token,
+            )
 
     def finish(self, admission: Admission, receipt: Receipt) -> Admission:
         """Bind exact original receipt bytes and ID once; never re-sign on replay."""
-        if not admission.newly_admitted:
+        if (type(admission) is not Admission or not admission.newly_admitted
+                or admission._producer_token is None):
             raise InvalidTransition("only the original producer can finish")
+        if type(receipt) is not Receipt:
+            raise InvalidTransition("completion requires an immutable Receipt")
         with self._condition:
             entry = self._entries.get(admission.attempt_id)
             if (entry is None or entry.fingerprint != admission.fingerprint
-                    or entry.state is not AttemptState.IN_FLIGHT):
+                    or entry.state is not AttemptState.IN_FLIGHT
+                    or entry.producer_token is not admission._producer_token):
                 raise InvalidTransition("attempt is absent, changed or already finished")
+            finished_at = self._now()
             entry.state = AttemptState.FINISHED
             entry.receipt = receipt
-            entry.finished_at = self._clock()
+            entry.finished_at = finished_at
             self._condition.notify_all()
             return Admission(admission.attempt_id, admission.fingerprint,
                              AttemptState.FINISHED, False, receipt)
 
     def snapshot(self, attempt_id: UUID) -> Admission | None:
         with self._condition:
-            self._prune(self._clock())
+            self._prune(self._now())
             entry = self._entries.get(attempt_id)
             if entry is None:
                 return None
@@ -221,7 +275,8 @@ class AttemptCache:
 
     def drain(self, timeout_seconds: float) -> bool:
         """Wait for producers to finish; never discard an in-flight entry."""
-        if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)) or not 0 <= timeout_seconds < float("inf"):
+        if (type(timeout_seconds) not in (int, float)
+                or not math.isfinite(timeout_seconds) or timeout_seconds < 0):
             raise ValueError("timeout_seconds must be nonnegative and finite")
         with self._condition:
             deadline = time.monotonic() + timeout_seconds
