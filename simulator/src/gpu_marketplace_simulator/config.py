@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     attempt_cache_max_entries: int | None = Field(default=None, gt=0)
     attempt_cache_ttl_seconds: float | None = Field(default=None, gt=0)
     producer_concurrency_limit: int | None = Field(default=None, gt=0)
+    admission_executor_workers: int | None = Field(default=None, gt=0)
+    admission_max_outstanding: int | None = Field(default=None, gt=0)
     shutdown_drain_timeout_seconds: float | None = Field(default=None, ge=0)
 
     @field_validator("manager_dispatch_token")
@@ -32,11 +34,14 @@ class Settings(BaseSettings):
             raise ValueError("dispatch body limit must be an integer")
         return value
 
-    @field_validator("attempt_cache_max_entries", "producer_concurrency_limit", mode="before")
+    @field_validator(
+        "attempt_cache_max_entries", "producer_concurrency_limit",
+        "admission_executor_workers", "admission_max_outstanding", mode="before"
+    )
     @classmethod
     def reject_non_integer_cache_limits(cls, value: object) -> object:
         if type(value) in (bool, float):
-            raise ValueError("cache limits must be integers")
+            raise ValueError("count limits must be integers")
         return value
 
     @field_validator("attempt_cache_ttl_seconds", "shutdown_drain_timeout_seconds", mode="before")

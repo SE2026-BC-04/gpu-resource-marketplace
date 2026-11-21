@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Annotated, Literal, Protocol
 from uuid import UUID, uuid4
@@ -138,6 +139,11 @@ class AttemptAdmissionPort(Protocol):
         """Register one bounded producer or return a valid retained duplicate."""
 
 
+class AdmissionExecutionPort(Protocol):
+    async def run(self, operation: Callable[..., object], *args: object) -> object:
+        """Execute one synchronous operation without blocking the event loop."""
+
+
 def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
@@ -194,6 +200,7 @@ def create_dispatch_router(
     manager_token: SecretStr | None,
     admission: AttemptAdmissionPort | None,
     max_request_body_bytes: int | None,
+    admission_executor: AdmissionExecutionPort | None = None,
 ) -> APIRouter:
     if (max_request_body_bytes is not None
             and (type(max_request_body_bytes) is not int or max_request_body_bytes <= 0)):
@@ -262,14 +269,14 @@ def create_dispatch_router(
         ):
             return _error(request_id, 422, "VALIDATION_ERROR", "Invalid dispatch payload.")
 
-        if admission is None:
+        if admission is None or admission_executor is None:
             return _error(
                 request_id, 503, "DEPENDENCY_UNAVAILABLE",
                 "Service temporarily unavailable.",
             )
 
         try:
-            outcome = admission.admit(dispatch)
+            outcome = await admission_executor.run(admission.admit, dispatch)
         except AttemptAdmissionConflict:
             return _error(
                 request_id, 409, "EXECUTION_CONFLICT",

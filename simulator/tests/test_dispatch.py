@@ -100,6 +100,8 @@ def app_for(port: InMemoryAdmission | None = None, token: str | None = MANAGER_T
     settings = Settings(
         manager_dispatch_token=SecretStr(token) if token else None,
         dispatch_max_body_bytes=4096,
+        admission_executor_workers=4,
+        admission_max_outstanding=16,
     )
     return create_app(settings, admission_port=port)
 

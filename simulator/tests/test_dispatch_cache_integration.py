@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier, Lock, Thread
+from threading import Barrier, Event, Lock, Thread
 import time
 from uuid import UUID
 
@@ -20,6 +20,7 @@ from gpu_marketplace_simulator.attempt_cache import (
     Receipt,
 )
 from gpu_marketplace_simulator.attempt_cache_adapter import AttemptCacheAdmissionAdapter
+from gpu_marketplace_simulator.admission_executor import BoundedAdmissionExecutor
 from gpu_marketplace_simulator.config import Settings
 from gpu_marketplace_simulator.dispatch import (
     AttemptAdmissionConflict,
@@ -97,7 +98,8 @@ class FakeProducerRegistrar:
 
 
 def make_app(*, max_entries: int = 32, concurrency: int = 32,
-             ttl: float = 60.0, registrar: FakeProducerRegistrar | None = None):
+             ttl: float = 60.0, registrar: FakeProducerRegistrar | None = None,
+             executor_workers: int = 4, max_outstanding: int = 16):
     producer = registrar or FakeProducerRegistrar()
     settings = Settings(
         manager_dispatch_token=SecretStr(MANAGER_TOKEN),
@@ -105,6 +107,8 @@ def make_app(*, max_entries: int = 32, concurrency: int = 32,
         attempt_cache_max_entries=max_entries,
         attempt_cache_ttl_seconds=ttl,
         producer_concurrency_limit=concurrency,
+        admission_executor_workers=executor_workers,
+        admission_max_outstanding=max_outstanding,
         shutdown_drain_timeout_seconds=0.05,
     )
     app = create_app(settings, producer_registrar=producer)
@@ -146,7 +150,9 @@ def test_route_never_returns_202_for_an_unregistered_producer_outcome() -> None:
             )
 
     settings = Settings(manager_dispatch_token=SecretStr(MANAGER_TOKEN),
-                        dispatch_max_body_bytes=4096)
+                        dispatch_max_body_bytes=4096,
+                        admission_executor_workers=2,
+                        admission_max_outstanding=4)
     app = create_app(settings, admission_port=UnregisteredPort())
     response = LocalASGIClient(app).post("/internal/v1/executions")
     assert response.status_code == 503
@@ -228,6 +234,183 @@ def test_sixteen_concurrent_identical_requests_register_exactly_one_producer() -
     with ThreadPoolExecutor(max_workers=16) as pool:
         statuses = list(pool.map(send, range(16)))
     assert statuses == [202] * 16
+    assert producer.calls == 1
+
+
+def test_slow_sync_registrar_does_not_block_unrelated_asgi_health_request() -> None:
+    class BlockingRegistrar(FakeProducerRegistrar):
+        def __init__(self) -> None:
+            super().__init__()
+            self.entered = Event()
+            self.release = Event()
+
+        def register(self, request: DispatchRequest, admission: Admission) -> bool:
+            self.entered.set()
+            if not self.release.wait(timeout=3):
+                return False
+            return super().register(request, admission)
+
+    producer = BlockingRegistrar()
+    app, _, _ = make_app(registrar=producer)
+    async def event_loop_probe() -> dict[str, str]:
+        return {"status": "ok"}
+
+    app.add_api_route("/test/event-loop-probe", event_loop_probe, methods=["GET"])
+    health_finished = Event()
+    observations: dict[str, bool] = {}
+
+    def watchdog() -> None:
+        if not producer.entered.wait(timeout=2):
+            producer.release.set()
+            return
+        observations["health_completed_before_release"] = health_finished.wait(timeout=0.5)
+        producer.release.set()
+
+    release_controller = Thread(target=watchdog, daemon=True)
+    release_controller.start()
+
+    async def requests() -> tuple[httpx.Response, httpx.Response]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://simulator.test") as client:
+            dispatch_task = asyncio.create_task(client.post(
+                "/internal/v1/executions",
+                headers={"Authorization": f"Bearer {MANAGER_TOKEN}"},
+                json=dispatch(),
+            ))
+            health_task = asyncio.create_task(client.get("/test/event-loop-probe"))
+            health_response = await asyncio.wait_for(health_task, timeout=2)
+            health_finished.set()
+            dispatch_response = await asyncio.wait_for(dispatch_task, timeout=2)
+            return dispatch_response, health_response
+
+    dispatch_response, health_response = asyncio.run(requests())
+    release_controller.join(timeout=2)
+    assert not release_controller.is_alive()
+    assert dispatch_response.status_code == 202
+    assert health_response.status_code == 200
+    assert observations.get("health_completed_before_release") is True
+
+
+def test_dispatch_waits_for_registered_handoff_before_returning_202() -> None:
+    class HeldRegistrar(FakeProducerRegistrar):
+        def __init__(self) -> None:
+            super().__init__()
+            self.entered = Event()
+            self.release = Event()
+
+        def register(self, request: DispatchRequest, admission: Admission) -> bool:
+            self.entered.set()
+            if not self.release.wait(timeout=3):
+                return False
+            return super().register(request, admission)
+
+    producer = HeldRegistrar()
+    app, _, _ = make_app(registrar=producer)
+
+    async def request() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://simulator.test") as client:
+            return await client.post(
+                "/internal/v1/executions",
+                headers={"Authorization": f"Bearer {MANAGER_TOKEN}"},
+                json=dispatch(),
+            )
+
+    async def exercise() -> httpx.Response:
+        task = asyncio.create_task(request())
+        assert await asyncio.to_thread(producer.entered.wait, 1)
+        assert not task.done()
+        producer.release.set()
+        return await asyncio.wait_for(task, timeout=2)
+
+    response = asyncio.run(exercise())
+    assert response.status_code == 202
+    assert producer.calls == 1
+
+
+def test_cancelled_http_wait_does_not_cancel_or_rollback_registered_admission() -> None:
+    class HeldRegistrar(FakeProducerRegistrar):
+        def __init__(self) -> None:
+            super().__init__()
+            self.entered = Event()
+            self.release = Event()
+            self.registered = Event()
+
+        def register(self, request: DispatchRequest, admission: Admission) -> bool:
+            self.entered.set()
+            if not self.release.wait(timeout=3):
+                return False
+            result = super().register(request, admission)
+            self.registered.set()
+            return result
+
+    producer = HeldRegistrar()
+    app, _, _ = make_app(registrar=producer)
+
+    async def exercise() -> tuple[httpx.Response, int]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://simulator.test") as client:
+            request = asyncio.create_task(client.post(
+                "/internal/v1/executions",
+                headers={"Authorization": f"Bearer {MANAGER_TOKEN}"},
+                json=dispatch(),
+            ))
+            assert await asyncio.to_thread(producer.entered.wait, 1)
+            request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await request
+            producer.release.set()
+            assert await asyncio.to_thread(producer.registered.wait, 1)
+            retry = await client.post(
+                "/internal/v1/executions",
+                headers={"Authorization": f"Bearer {MANAGER_TOKEN}"},
+                json=dispatch(),
+            )
+            return retry, producer.calls
+
+    response, calls = asyncio.run(exercise())
+    assert response.status_code == 202
+    assert calls == 1
+
+
+def test_bounded_admission_executor_returns_503_when_outstanding_limit_is_full() -> None:
+    class HeldRegistrar(FakeProducerRegistrar):
+        def __init__(self) -> None:
+            super().__init__()
+            self.entered = Event()
+            self.release = Event()
+
+        def register(self, request: DispatchRequest, admission: Admission) -> bool:
+            self.entered.set()
+            if not self.release.wait(timeout=3):
+                return False
+            return super().register(request, admission)
+
+    producer = HeldRegistrar()
+    app, _, _ = make_app(registrar=producer, executor_workers=1, max_outstanding=1)
+
+    async def exercise() -> tuple[httpx.Response, httpx.Response]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://simulator.test") as client:
+            first = asyncio.create_task(client.post(
+                "/internal/v1/executions",
+                headers={"Authorization": f"Bearer {MANAGER_TOKEN}"},
+                json=dispatch(),
+            ))
+            assert await asyncio.to_thread(producer.entered.wait, 1)
+            overloaded = await client.post(
+                "/internal/v1/executions",
+                headers={"Authorization": f"Bearer {MANAGER_TOKEN}"},
+                json=dispatch("55555555-5555-4555-8555-555555555555"),
+            )
+            producer.release.set()
+            accepted = await asyncio.wait_for(first, timeout=2)
+            return accepted, overloaded
+
+    accepted, overloaded = asyncio.run(exercise())
+    assert accepted.status_code == 202
+    assert overloaded.status_code == 503
+    assert overloaded.json()["error"]["code"] == "DEPENDENCY_UNAVAILABLE"
     assert producer.calls == 1
 
 
@@ -368,6 +551,10 @@ def test_invalid_cache_runtime_configuration_is_rejected() -> None:
         Settings(attempt_cache_ttl_seconds=float("inf"))
     with pytest.raises(ValidationError):
         Settings(attempt_cache_ttl_seconds=True)
+    with pytest.raises(ValidationError):
+        Settings(admission_executor_workers=True)
+    with pytest.raises(ValueError, match="max_outstanding"):
+        BoundedAdmissionExecutor(workers=2, max_outstanding=1)
     with pytest.raises(ValueError, match="explicit finite limits"):
         create_app(Settings(manager_dispatch_token=SecretStr(MANAGER_TOKEN)),
                    producer_registrar=FakeProducerRegistrar())
