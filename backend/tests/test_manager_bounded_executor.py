@@ -1,6 +1,7 @@
 """Contract tests for TV1-P2A-11's isolated blocking-I/O executor core."""
 
 import asyncio
+import gc
 import logging
 import threading
 from contextlib import asynccontextmanager
@@ -499,9 +500,262 @@ def test_ex16_shutdown_waits_for_cleanup_and_accounts_cancelled_worker_failure(
             assert snapshot.failed == 1
             assert [name for name, _ in calls] == ["enter", "rollback", "close"]
             assert len({thread_id for _, thread_id in calls}) == 1
-            assert "worker failed after caller cancellation" in caplog.text
+            failure_records = [
+                record
+                for record in caplog.records
+                if getattr(record, "event_id", None)
+                == "manager.blocking_io.operation_failed"
+            ]
+            assert len(failure_records) == 1
+            assert failure_records[0].exception_type == "RuntimeError"
         finally:
             allow_failure.set()
+            await executor.shutdown()
+
+    with caplog.at_level(logging.ERROR, logger="gpu_marketplace.manager.bounded_executor"):
+        asyncio.run(scenario())
+
+
+def _failure_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [
+        record
+        for record in caplog.records
+        if getattr(record, "event_id", None) == "manager.blocking_io.operation_failed"
+    ]
+
+
+def test_ex_p2_01_abandoned_failing_handle_emits_redacted_diagnostic(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        unhandled: list[dict[str, object]] = []
+        previous_handler = loop.get_exception_handler()
+        loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+        executor = BoundedExecutor(max_workers=1, max_pending=0)
+
+        def fail() -> None:
+            raise ValueError("password=private-value")
+
+        try:
+            handle = executor.submit(fail)
+            await executor.shutdown()
+            flush = asyncio.Event()
+            loop.call_soon(flush.set)
+            await flush.wait()
+            del handle
+            gc.collect()
+            records = _failure_records(caplog)
+            assert len(records) == 1
+            assert records[0].msg == "bounded_executor_operation_failed"
+            assert records[0].exception_type == "ValueError"
+            assert records[0].operation_id == 1
+            assert "password=private-value" not in caplog.text
+            assert unhandled == []
+            assert executor.snapshot().failed == 1
+        finally:
+            loop.set_exception_handler(previous_handler)
+            await executor.shutdown()
+
+    with caplog.at_level(logging.ERROR, logger="gpu_marketplace.manager.bounded_executor"):
+        asyncio.run(scenario())
+
+
+def test_ex_p2_02_awaited_failure_propagates_original_exception_and_logs_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        executor = BoundedExecutor(max_workers=1, max_pending=0)
+        handle = executor.submit(lambda: (_ for _ in ()).throw(LookupError("original failure")))
+        with pytest.raises(LookupError, match="original failure"):
+            await handle
+        await executor.shutdown()
+        assert executor.snapshot().completed == 1
+        assert executor.snapshot().failed == 1
+        records = _failure_records(caplog)
+        assert len(records) == 1
+        assert records[0].exception_type == "LookupError"
+
+    with caplog.at_level(logging.ERROR, logger="gpu_marketplace.manager.bounded_executor"):
+        asyncio.run(scenario())
+
+
+def test_ex_p2_03_cancelled_caller_retains_worker_and_failure_is_diagnosed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        started = threading.Event()
+        release = threading.Event()
+        executor = BoundedExecutor(max_workers=1, max_pending=0)
+
+        def fail_after_release() -> None:
+            started.set()
+            assert release.wait(3)
+            raise RuntimeError("cancelled worker failed")
+
+        try:
+            handle = executor.submit(fail_after_release)
+            waiter = asyncio.create_task(handle.wait())
+            await wait_for_thread_event(started)
+            waiter.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiter
+            assert executor.snapshot().in_flight == 1
+            with pytest.raises(ExecutorCapacityError):
+                executor.submit(lambda: None)
+            release.set()
+            await executor.shutdown()
+            assert executor.snapshot().failed == 1
+            records = _failure_records(caplog)
+            assert len(records) == 1
+            assert records[0].exception_type == "RuntimeError"
+            assert records[0].operation_id == 1
+        finally:
+            release.set()
+            await executor.shutdown()
+
+    with caplog.at_level(logging.ERROR, logger="gpu_marketplace.manager.bounded_executor"):
+        asyncio.run(scenario())
+
+
+def test_ex_p2_04_sensitive_exception_message_is_absent_from_structured_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        sensitive = "dsn=UNIT_TEST_ONLY token=UNIT_TEST_ONLY"
+        executor = BoundedExecutor(max_workers=1, max_pending=0)
+        handle = executor.submit(lambda: (_ for _ in ()).throw(ValueError(sensitive)))
+        with pytest.raises(ValueError, match="dsn="):
+            await handle
+        await executor.shutdown()
+        records = _failure_records(caplog)
+        assert len(records) == 1
+        assert records[0].exception_type == "ValueError"
+        assert records[0].msg == "bounded_executor_operation_failed"
+        assert sensitive not in caplog.text
+        assert "dsn=UNIT_TEST_ONLY" not in caplog.text
+        assert "token=UNIT_TEST_ONLY" not in caplog.text
+
+    with caplog.at_level(logging.ERROR, logger="gpu_marketplace.manager.bounded_executor"):
+        asyncio.run(scenario())
+
+
+def test_ex_p2_05_success_does_not_emit_failure_diagnostic(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        executor = BoundedExecutor(max_workers=1, max_pending=0)
+        assert await executor.submit(lambda: "success") == "success"
+        await executor.shutdown()
+        assert executor.snapshot().completed == 1
+        assert executor.snapshot().failed == 0
+        assert _failure_records(caplog) == []
+
+    with caplog.at_level(logging.ERROR, logger="gpu_marketplace.manager.bounded_executor"):
+        asyncio.run(scenario())
+
+
+def test_ex_p2_06_multiple_failures_have_distinct_accounting_and_diagnostics(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        executor = BoundedExecutor(max_workers=2, max_pending=1)
+
+        def fail(index: int) -> None:
+            raise ValueError(f"failure-{index}")
+
+        handles = [executor.submit(fail, index) for index in range(3)]
+        results = await asyncio.gather(*(handle.wait() for handle in handles), return_exceptions=True)
+        await executor.shutdown()
+        assert all(isinstance(result, ValueError) for result in results)
+        snapshot = executor.snapshot()
+        assert snapshot.accepted == 3
+        assert snapshot.completed == 3
+        assert snapshot.failed == 3
+        records = _failure_records(caplog)
+        assert len(records) == 3
+        assert {record.operation_id for record in records} == {1, 2, 3}
+        assert all(record.exception_type == "ValueError" for record in records)
+
+    with caplog.at_level(logging.ERROR, logger="gpu_marketplace.manager.bounded_executor"):
+        asyncio.run(scenario())
+
+
+def test_ex_p2_07_shutdown_drains_abandoned_failed_worker_and_joins_thread(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        executor = BoundedExecutor(max_workers=1, max_pending=0)
+
+        def fail_after_release() -> None:
+            try:
+                started.set()
+                assert release.wait(3)
+                raise RuntimeError("shutdown worker failure")
+            finally:
+                finished.set()
+
+        try:
+            _abandoned = executor.submit(fail_after_release)
+            await wait_for_thread_event(started)
+            shutdown = asyncio.create_task(executor.shutdown())
+            marker = asyncio.Event()
+            asyncio.get_running_loop().call_soon(marker.set)
+            await marker.wait()
+            assert not shutdown.done()
+            assert executor.snapshot().lifecycle is ExecutorLifecycle.DRAINING
+            release.set()
+            await shutdown
+            await wait_for_thread_event(finished)
+            assert executor.snapshot().failed == 1
+            assert not any(
+                thread.name.startswith("manager-blocking-io_")
+                for thread in threading.enumerate()
+            )
+            records = _failure_records(caplog)
+            assert len(records) == 1
+            assert records[0].exception_type == "RuntimeError"
+        finally:
+            release.set()
+            await executor.shutdown()
+
+    with caplog.at_level(logging.ERROR, logger="gpu_marketplace.manager.bounded_executor"):
+        asyncio.run(scenario())
+
+
+def test_ex_p2_08_handle_can_be_reawaited_after_caller_cancellation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        started = threading.Event()
+        release = threading.Event()
+        executor = BoundedExecutor(max_workers=1, max_pending=0)
+
+        def fail_after_release() -> str:
+            started.set()
+            assert release.wait(3)
+            raise KeyError("eventual worker exception")
+
+        try:
+            handle = executor.submit(fail_after_release)
+            waiter = asyncio.create_task(handle.wait())
+            await wait_for_thread_event(started)
+            waiter.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiter
+            release.set()
+            await executor.shutdown()
+            with pytest.raises(KeyError, match="eventual worker exception"):
+                await handle
+            records = _failure_records(caplog)
+            assert len(records) == 1
+            assert records[0].exception_type == "KeyError"
+            assert executor.snapshot().failed == 1
+        finally:
+            release.set()
             await executor.shutdown()
 
     with caplog.at_level(logging.ERROR, logger="gpu_marketplace.manager.bounded_executor"):

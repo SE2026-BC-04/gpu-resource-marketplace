@@ -21,7 +21,6 @@ import asyncio
 import concurrent.futures
 import inspect
 import logging
-import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -69,7 +68,6 @@ class ExecutorSnapshot:
 @dataclass(slots=True)
 class _OwnedOperation:
     future: concurrent.futures.Future[Any]
-    caller_cancelled: threading.Event
 
 
 class OperationHandle(Generic[T]):
@@ -80,16 +78,14 @@ class OperationHandle(Generic[T]):
     The same handle may be awaited again to observe its eventual outcome.
     """
 
-    __slots__ = ("_future", "_caller_cancelled", "_on_caller_cancelled")
+    __slots__ = ("_future", "_on_caller_cancelled")
 
     def __init__(
         self,
         future: asyncio.Future[T],
-        caller_cancelled: threading.Event,
         on_caller_cancelled: Callable[[], None],
     ) -> None:
         self._future = future
-        self._caller_cancelled = caller_cancelled
         self._on_caller_cancelled = on_caller_cancelled
 
     async def wait(self) -> T:
@@ -100,7 +96,6 @@ class OperationHandle(Generic[T]):
         except asyncio.CancelledError:
             current = asyncio.current_task()
             if current is not None and current.cancelling():
-                self._caller_cancelled.set()
                 self._on_caller_cancelled()
             raise
 
@@ -185,8 +180,6 @@ class BoundedExecutor:
 
         self._next_operation_id += 1
         operation_id = self._next_operation_id
-        caller_cancelled = threading.Event()
-
         def invoke() -> T:
             result = operation(*args, **kwargs)
             if inspect.isawaitable(result):
@@ -205,7 +198,6 @@ class BoundedExecutor:
 
         self._records[operation_id] = _OwnedOperation(
             future=worker_future,
-            caller_cancelled=caller_cancelled,
         )
         self._accepted += 1
         self._drained.clear()
@@ -216,14 +208,9 @@ class BoundedExecutor:
         )
 
         wrapped_future: asyncio.Future[T] = asyncio.wrap_future(worker_future, loop=loop)
-        wrapped_future.add_done_callback(
-            lambda future, cancellation=caller_cancelled: self._observe_wrapped_outcome(
-                future, cancellation
-            )
-        )
+        wrapped_future.add_done_callback(self._consume_wrapped_outcome)
         return OperationHandle(
             future=wrapped_future,
-            caller_cancelled=caller_cancelled,
             on_caller_cancelled=self._record_caller_cancellation,
         )
 
@@ -321,8 +308,21 @@ class BoundedExecutor:
         if self._records.pop(operation_id, None) is None:
             return
         self._completed += 1
-        if _future_failed(future):
+        error = _future_exception(future)
+        if error is not None:
             self._failed += 1
+            # Emit a fixed, redacted event for every worker failure. Keeping
+            # reporting here avoids the race between completion and whether a
+            # caller has observed its wrapped future. This is an at-least-once
+            # diagnostic contract; wrapped-future observation never logs.
+            logger.error(
+                "bounded_executor_operation_failed",
+                extra={
+                    "event_id": "manager.blocking_io.operation_failed",
+                    "operation_id": operation_id,
+                    "exception_type": type(error).__name__,
+                },
+            )
         if not self._records:
             self._drained.set()
 
@@ -330,21 +330,15 @@ class BoundedExecutor:
         self._cancelled_callers += 1
 
     @staticmethod
-    def _observe_wrapped_outcome(
-        future: asyncio.Future[Any],
-        caller_cancelled: threading.Event,
-    ) -> None:
+    def _consume_wrapped_outcome(future: asyncio.Future[Any]) -> None:
+        """Retrieve an abandoned wrapper exception without duplicate logging."""
+
         if future.cancelled():
             return
         try:
-            error = future.exception()
+            future.exception()
         except asyncio.CancelledError:
-            return
-        if error is not None and caller_cancelled.is_set():
-            logger.error(
-                "bounded executor worker failed after caller cancellation",
-                extra={"error_type": type(error).__name__},
-            )
+            pass
 
     async def _finish_shutdown(self) -> None:
         await self._drained.wait()
@@ -357,9 +351,13 @@ class BoundedExecutor:
 
 
 def _future_failed(future: concurrent.futures.Future[Any]) -> bool:
+    return future.done() and _future_exception(future) is not None
+
+
+def _future_exception(future: concurrent.futures.Future[Any]) -> BaseException | None:
     if not future.done():
-        return False
+        return None
     try:
-        return future.exception() is not None
+        return future.exception()
     except concurrent.futures.CancelledError:
-        return True
+        return concurrent.futures.CancelledError()
