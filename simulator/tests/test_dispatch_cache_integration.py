@@ -21,7 +21,11 @@ from gpu_marketplace_simulator.attempt_cache import (
 )
 from gpu_marketplace_simulator.attempt_cache_adapter import AttemptCacheAdmissionAdapter
 from gpu_marketplace_simulator.config import Settings
-from gpu_marketplace_simulator.dispatch import AttemptAdmissionOutcome, DispatchRequest
+from gpu_marketplace_simulator.dispatch import (
+    AttemptAdmissionConflict,
+    AttemptAdmissionOutcome,
+    DispatchRequest,
+)
 
 
 MANAGER_TOKEN = "manager-test-token-0123456789abcdef"
@@ -85,6 +89,11 @@ class FakeProducerRegistrar:
                 return False
             self.tickets[request.attempt_id] = (request, admission)
             return True
+
+    def simulate_failure_after_acceptance(self, attempt_id: str) -> None:
+        if attempt_id not in self.tickets:
+            raise AssertionError("producer was not registered")
+        raise RuntimeError("post-accept producer failure")
 
 
 def make_app(*, max_entries: int = 32, concurrency: int = 32,
@@ -300,11 +309,9 @@ def test_post_202_failure_remains_inflight_and_shutdown_drain_is_bounded() -> No
     app, producer, client = make_app()
     assert client.post("/internal/v1/executions").status_code == 202
     adapter: AttemptCacheAdmissionAdapter = app.state.admission_port
-    # Simulate producer failure after the accepted response. No cleanup or
-    # second producer is inferred; this remains an explicit recovery limitation.
-    _, registered_admission = producer.tickets[ATTEMPT]
-    with pytest.raises(RuntimeError, match="post-accept failure"):
-        raise RuntimeError(f"post-accept failure for {registered_admission.attempt_id}")
+    # No failure callback or cleanup policy is invented after HTTP 202.
+    with pytest.raises(RuntimeError, match="post-accept producer failure"):
+        producer.simulate_failure_after_acceptance(ATTEMPT)
     adapter.close()
     started = time.monotonic()
     assert adapter.drain(0.01) is False
@@ -379,7 +386,6 @@ def test_d16_conflict_detection_is_retained_process_only() -> None:
     changed_payload = dispatch()
     changed_payload["gpu_count"] = 3
     changed = DispatchRequest.model_validate(changed_payload)
-    from gpu_marketplace_simulator.dispatch import AttemptAdmissionConflict
     with pytest.raises(AttemptAdmissionConflict):
         adapter.admit(changed)
 
