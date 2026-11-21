@@ -258,6 +258,27 @@ class AttemptCache:
             return Admission(admission.attempt_id, admission.fingerprint,
                              AttemptState.FINISHED, False, receipt)
 
+    def abort_before_start(self, admission: Admission) -> bool:
+        """Remove only the original IN_FLIGHT slot after a proven pre-start rejection.
+
+        The opaque producer token fences rollback from a stale registration
+        attempt after eviction, re-admission, completion, or replacement.
+        Callers must use this only when the producer boundary guarantees that
+        no work was accepted or launched.
+        """
+        if (type(admission) is not Admission or not admission.newly_admitted
+                or admission._producer_token is None):
+            return False
+        with self._condition:
+            entry = self._entries.get(admission.attempt_id)
+            if (entry is None or entry.state is not AttemptState.IN_FLIGHT
+                    or entry.fingerprint != admission.fingerprint
+                    or entry.producer_token is not admission._producer_token):
+                return False
+            del self._entries[admission.attempt_id]
+            self._condition.notify_all()
+            return True
+
     def snapshot(self, attempt_id: UUID) -> Admission | None:
         with self._condition:
             self._prune(self._now())
