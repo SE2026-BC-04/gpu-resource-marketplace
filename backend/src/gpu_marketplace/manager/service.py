@@ -8,6 +8,7 @@ from gpu_marketplace.manager.supervisor import (
     ManagerGroup,
     ManagerSupervisor,
     ManagerSupervisorError,
+    RequiredGroupsMissingError,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,16 @@ async def run_manager(
         await supervisor.run()
     except asyncio.CancelledError:
         raise
+    except RequiredGroupsMissingError as error:
+        logger.error(
+            "manager_dependency_gate_closed",
+            extra={
+                "missing_manager_groups": sorted(
+                    group.value for group in error.missing_groups
+                )
+            },
+        )
+        raise
     except ManagerSupervisorError as error:
         logger.error(
             "manager_supervisor_failed",
@@ -73,6 +84,10 @@ async def _wait_for_probe_after_cancellation(probe_task: asyncio.Task[bool]) -> 
             await asyncio.shield(probe_task)
         except asyncio.CancelledError:
             continue
+        except BaseException:
+            # A completed synchronous probe may fail; cancellation still
+            # remains the result of the caller after this worker has ended.
+            break
     try:
         await probe_task
     except BaseException:

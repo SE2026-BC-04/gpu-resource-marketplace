@@ -27,6 +27,14 @@ class ManagerGroup(str, Enum):
     )
 
 
+REQUIRED_MANAGER_GROUPS = frozenset(ManagerGroup)
+
+
+class ManagerRuntimeMode(str, Enum):
+    FOUNDATION = "FOUNDATION"
+    PHASE2_RUNTIME = "PHASE2_RUNTIME"
+
+
 class GroupLifecycle(str, Enum):
     STARTING = "STARTING"
     RUNNING = "RUNNING"
@@ -84,6 +92,13 @@ class ManagerSupervisorError(RuntimeError):
         )
 
 
+class RequiredGroupsMissingError(RuntimeError):
+    def __init__(self, missing_groups: frozenset[ManagerGroup]) -> None:
+        self.missing_groups = missing_groups
+        missing = ", ".join(sorted(group.value for group in missing_groups))
+        super().__init__(f"Manager startup blocked; missing required groups: {missing}")
+
+
 class ManagerGroupContext:
     """Safe lifecycle signals exposed to an injected loop runner."""
 
@@ -98,7 +113,11 @@ class ManagerGroupContext:
     @property
     def claims_allowed(self) -> bool:
         """Runners must check this immediately before starting new claims."""
-        return not self.stop_event.is_set() and self._supervisor.failure is None
+        return (
+            self._supervisor.dependency_gate_open
+            and not self.stop_event.is_set()
+            and self._supervisor.failure is None
+        )
 
     def heartbeat(self) -> None:
         """Record useful loop progress, including a completed empty scan."""
@@ -137,11 +156,18 @@ class ManagerSupervisor:
     ) -> None:
         self.stop_event = stop_event or asyncio.Event()
         self._runners = dict(runners or {})
+        self.runtime_mode = (
+            ManagerRuntimeMode.PHASE2_RUNTIME
+            if self._runners
+            else ManagerRuntimeMode.FOUNDATION
+        )
         self._states = {group: _GroupState() for group in ManagerGroup}
-        for group in ManagerGroup:
-            if group not in self._runners:
-                self._states[group].lifecycle = GroupLifecycle.DEGRADED
-                self._states[group].dependency_status = "BLOCKED_BY_DEPENDENCY"
+        self._missing_groups = REQUIRED_MANAGER_GROUPS - self._runners.keys()
+        self._dependency_gate_open = not self._missing_groups
+        if not self._dependency_gate_open:
+            for state in self._states.values():
+                state.lifecycle = GroupLifecycle.DEGRADED
+                state.dependency_status = "BLOCKED_BY_DEPENDENCY"
         self._tasks: dict[ManagerGroup, asyncio.Task[None]] = {}
         self._failure: tuple[ManagerGroup, BaseException] | None = None
         self._failure_event = asyncio.Event()
@@ -149,6 +175,10 @@ class ManagerSupervisor:
     @property
     def failure(self) -> tuple[ManagerGroup, BaseException] | None:
         return self._failure
+
+    @property
+    def dependency_gate_open(self) -> bool:
+        return self._dependency_gate_open
 
     @property
     def active_task_count(self) -> int:
@@ -172,6 +202,11 @@ class ManagerSupervisor:
     async def run(self) -> None:
         """Start available runners, then stop and await all owned tasks."""
         try:
+            if (
+                self.runtime_mode is ManagerRuntimeMode.PHASE2_RUNTIME
+                and not self._dependency_gate_open
+            ):
+                raise RequiredGroupsMissingError(self._missing_groups)
             if self.stop_event.is_set():
                 await self._stop_and_drain()
                 return
