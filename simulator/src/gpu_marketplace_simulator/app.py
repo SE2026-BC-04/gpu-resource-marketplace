@@ -4,10 +4,12 @@ import logging
 from fastapi import FastAPI
 
 from gpu_marketplace_simulator.config import Settings
+from gpu_marketplace_simulator.dispatch import AttemptAdmissionPort, create_dispatch_router
 from gpu_marketplace_simulator.logging import configure_logging
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *,
+               admission_port: AttemptAdmissionPort | None = None) -> FastAPI:
     resolved_settings = settings or Settings()
     configure_logging(resolved_settings.log_level)
     logger = logging.getLogger(__name__)
@@ -28,6 +30,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url=None,
         lifespan=lifespan,
     )
+    app.include_router(create_dispatch_router(
+        manager_token=resolved_settings.manager_dispatch_token,
+        admission=admission_port,
+        max_request_body_bytes=resolved_settings.dispatch_max_body_bytes,
+    ))
 
     @app.get("/health/live", include_in_schema=False)
     def live() -> dict[str, str]:
