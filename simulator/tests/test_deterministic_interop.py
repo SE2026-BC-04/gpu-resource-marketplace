@@ -50,7 +50,7 @@ def test_independent_node_byte_oracle(
 ) -> None:
     node = shutil.which("node")
     if node is None:
-        pytest.skip("Node.js unavailable; G2-A-INTEROP-01 must remain NOT_RUN")
+        pytest.fail("Node.js is required for mandatory G2-A-INTEROP-01; interop cannot be skipped")
 
     data = SimulationInput(
         job_id=job, listing_id=listing, worker_id=worker,
