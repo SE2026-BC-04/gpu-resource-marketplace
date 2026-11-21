@@ -106,6 +106,10 @@ class AttemptAdmissionUnavailable(Exception):
     """Admission is temporarily unavailable; HTTP mapping awaits owner ACK."""
 
 
+class DispatchBodyTooLarge(ValueError):
+    """The request exceeds the configured bounded dispatch body size."""
+
+
 class AttemptAdmissionPort(Protocol):
     def admit(self, dispatch: DispatchRequest) -> None:
         """Admit or coalesce this immutable request; raise typed port errors."""
@@ -122,6 +126,26 @@ def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, ob
 
 def _reject_non_json_constant(value: str) -> None:
     raise ValueError(f"invalid JSON constant: {value}")
+
+
+async def _read_bounded_body(request: Request, max_bytes: int) -> bytes:
+    """Read chunks only while the accumulated body remains within the bound."""
+    content_lengths = request.headers.getlist("content-length")
+    if len(content_lengths) > 1:
+        raise ValueError("multiple Content-Length headers")
+    if content_lengths:
+        declared = content_lengths[0]
+        if not declared.isascii() or not declared.isdecimal():
+            raise ValueError("invalid Content-Length")
+        if int(declared) > max_bytes:
+            raise DispatchBodyTooLarge
+
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > max_bytes:
+            raise DispatchBodyTooLarge
+        body.extend(chunk)
+    return bytes(body)
 
 
 def _error(
@@ -146,7 +170,11 @@ def create_dispatch_router(
     *,
     manager_token: SecretStr | None,
     admission: AttemptAdmissionPort | None,
+    max_request_body_bytes: int | None,
 ) -> APIRouter:
+    if (max_request_body_bytes is not None
+            and (type(max_request_body_bytes) is not int or max_request_body_bytes <= 0)):
+        raise ValueError("max_request_body_bytes must be a positive integer")
     router = APIRouter()
 
     @router.post("/internal/v1/executions", include_in_schema=False)
@@ -156,6 +184,12 @@ def create_dispatch_router(
         if manager_token is None or not manager_token.get_secret_value():
             # Fail closed when the required environment-injected secret is absent.
             # The exact outage mapping remains subject to owner review.
+            return _error(
+                request_id, 503, "DEPENDENCY_UNAVAILABLE",
+                "Service temporarily unavailable.",
+            )
+
+        if max_request_body_bytes is None:
             return _error(
                 request_id, 503, "DEPENDENCY_UNAVAILABLE",
                 "Service temporarily unavailable.",
@@ -188,7 +222,7 @@ def create_dispatch_router(
             return _error(request_id, 422, "VALIDATION_ERROR", "Invalid dispatch payload.")
 
         try:
-            raw_body = await request.body()
+            raw_body = await _read_bounded_body(request, max_request_body_bytes)
             payload = json.loads(
                 raw_body.decode("utf-8", errors="strict"),
                 object_pairs_hook=_reject_duplicate_json_keys,
@@ -198,6 +232,7 @@ def create_dispatch_router(
         except (
             UnicodeDecodeError,
             json.JSONDecodeError,
+            DispatchBodyTooLarge,
             ValueError,
             ValidationError,
             RecursionError,

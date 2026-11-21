@@ -33,6 +33,7 @@ def create_app(settings: Settings | None = None, *,
     app.include_router(create_dispatch_router(
         manager_token=resolved_settings.manager_dispatch_token,
         admission=admission_port,
+        max_request_body_bytes=resolved_settings.dispatch_max_body_bytes,
     ))
 
     @app.get("/health/live", include_in_schema=False)

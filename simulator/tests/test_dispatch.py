@@ -88,7 +88,10 @@ class InMemoryAdmission:
 
 
 def app_for(port: InMemoryAdmission | None = None, token: str | None = MANAGER_TOKEN):
-    settings = Settings(manager_dispatch_token=SecretStr(token) if token else None)
+    settings = Settings(
+        manager_dispatch_token=SecretStr(token) if token else None,
+        dispatch_max_body_bytes=4096,
+    )
     return create_app(settings, admission_port=port)
 
 
@@ -148,6 +151,12 @@ def test_missing_server_token_fails_closed_without_admission() -> None:
 def test_config_rejects_dispatch_tokens_shorter_than_256_bit_length_floor() -> None:
     with pytest.raises(ValidationError):
         Settings(manager_dispatch_token=SecretStr("too-short"))
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, 1.5])
+def test_config_rejects_invalid_dispatch_body_limit(limit: object) -> None:
+    with pytest.raises(ValidationError):
+        Settings(dispatch_max_body_bytes=limit)
 
 
 @pytest.mark.parametrize("field", list(payload()))
@@ -267,6 +276,64 @@ def test_unsupported_content_type_is_rejected_safely() -> None:
         content=json.dumps(payload()),
     )
     assert response.status_code == 422
+    assert admission.calls == 0
+
+
+def test_oversized_content_length_is_rejected_before_stream_read() -> None:
+    admission = InMemoryAdmission()
+    response = LocalASGIClient(app_for(admission)).post(
+        "/internal/v1/executions",
+        headers={
+            "Authorization": f"Bearer {MANAGER_TOKEN}",
+            "Content-Type": "application/json",
+            "Content-Length": "4097",
+        },
+        content=b"{}",
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert response.headers["cache-control"] == "no-store"
+    assert admission.calls == 0
+
+
+def test_streaming_reader_stops_before_buffering_oversized_body() -> None:
+    from starlette.requests import Request
+    from gpu_marketplace_simulator.dispatch import _read_bounded_body, DispatchBodyTooLarge
+
+    received = 0
+    chunks = [b"1234", b"56", b"unread"]
+
+    async def receive():
+        nonlocal received
+        chunk = chunks[received]
+        received += 1
+        return {"type": "http.request", "body": chunk, "more_body": received < len(chunks)}
+
+    request = Request(
+        {"type": "http", "asgi": {"version": "3.0"}, "method": "POST", "path": "/",
+         "headers": [], "query_string": b"", "server": ("test", 80), "client": ("test", 1),
+         "scheme": "http", "http_version": "1.1"},
+        receive,
+    )
+
+    async def read():
+        return await _read_bounded_body(request, 5)
+
+    with pytest.raises(DispatchBodyTooLarge):
+        asyncio.run(read())
+    assert received == 2
+
+
+def test_missing_body_limit_fails_closed_after_auth_without_reading_body() -> None:
+    admission = InMemoryAdmission()
+    settings = Settings(manager_dispatch_token=SecretStr(MANAGER_TOKEN))
+    response = LocalASGIClient(create_app(settings, admission_port=admission)).post(
+        "/internal/v1/executions",
+        headers={"Authorization": f"Bearer {MANAGER_TOKEN}"},
+        json=payload(),
+    )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "DEPENDENCY_UNAVAILABLE"
     assert admission.calls == 0
 
 
