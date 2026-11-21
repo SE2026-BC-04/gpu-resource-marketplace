@@ -46,6 +46,10 @@ class SchedulerOrchestrator:
     ``initial_scan_immediately`` is required because exact startup timing remains
     pending owner agreement. A normal return from ``cycle`` records local progress
     for both empty and successful scans. This is not a health/readiness assertion.
+    The optional synchronous completion callback reports progress only, not
+    Manager readiness, and runs after that timestamp is recorded. If it raises,
+    the runner fails and propagates the error; the completed business cycle
+    remains recorded and is not retried.
     Transient classification is injected; transient failures are logged without
     exception details and propagate because no retry budget is approved here.
     Other exceptions also propagate and stop this runner.
@@ -60,6 +64,7 @@ class SchedulerOrchestrator:
         initial_scan_immediately: bool,
         scan_interval_seconds: float = DEFAULT_SCAN_INTERVAL_SECONDS,
         is_transient_failure: Callable[[Exception], bool] | None,
+        on_cycle_completed: Callable[[], None] | None = None,
         monotonic_clock: Callable[[], float] = time.monotonic,
         wait_for_interval: WaitForInterval = _wait_for_stop_or_interval,
     ) -> None:
@@ -87,6 +92,7 @@ class SchedulerOrchestrator:
         self._initial_scan_immediately = initial_scan_immediately
         self._scan_interval_seconds = float(scan_interval_seconds)
         self._is_transient_failure = is_transient_failure
+        self._on_cycle_completed = on_cycle_completed
         self._monotonic_clock = monotonic_clock
         self._wait_for_interval = wait_for_interval
         self._running = False
@@ -130,6 +136,8 @@ class SchedulerOrchestrator:
                     raise
                 else:
                     self._last_completed_monotonic = self._monotonic_clock()
+                    if self._on_cycle_completed is not None:
+                        self._on_cycle_completed()
 
                 if self._stop_event.is_set():
                     return

@@ -378,3 +378,282 @@ def test_claim_permission_gate_prevents_cycles_until_allowed() -> None:
         assert calls == 1
 
     asyncio.run(scenario())
+
+
+def test_hb01_notifies_once_after_successful_scan() -> None:
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        callbacks: list[str] = []
+
+        async def cycle() -> None:
+            stop_event.set()
+
+        runner = SchedulerOrchestrator(
+            cycle=cycle,
+            stop_event=stop_event,
+            claim_allowed=lambda: True,
+            initial_scan_immediately=True,
+            is_transient_failure=lambda _: False,
+            on_cycle_completed=lambda: callbacks.append("completed"),
+        )
+        await runner.run()
+        assert callbacks == ["completed"]
+
+    asyncio.run(scenario())
+
+
+def test_hb02_notifies_after_empty_scan() -> None:
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        callbacks: list[None] = []
+
+        async def empty_cycle() -> None:
+            stop_event.set()
+
+        runner = SchedulerOrchestrator(
+            cycle=empty_cycle,
+            stop_event=stop_event,
+            claim_allowed=lambda: True,
+            initial_scan_immediately=True,
+            is_transient_failure=lambda _: False,
+            on_cycle_completed=lambda: callbacks.append(None),
+        )
+        await runner.run()
+        assert callbacks == [None]
+
+    asyncio.run(scenario())
+
+
+def test_hb03_failed_cycle_does_not_notify_or_record_progress() -> None:
+    async def scenario() -> None:
+        callbacks: list[None] = []
+
+        async def failed_cycle() -> None:
+            raise RuntimeError("cycle failed")
+
+        runner = SchedulerOrchestrator(
+            cycle=failed_cycle,
+            stop_event=asyncio.Event(),
+            claim_allowed=lambda: True,
+            initial_scan_immediately=True,
+            is_transient_failure=lambda _: False,
+            on_cycle_completed=lambda: callbacks.append(None),
+        )
+        with pytest.raises(RuntimeError, match="cycle failed"):
+            await runner.run()
+        assert callbacks == []
+        assert runner.last_completed_monotonic is None
+
+    asyncio.run(scenario())
+
+
+def test_hb04_cancelled_cycle_does_not_notify_or_record_progress() -> None:
+    async def scenario() -> None:
+        started = asyncio.Event()
+        callbacks: list[None] = []
+
+        async def cycle() -> None:
+            started.set()
+            await asyncio.Event().wait()
+
+        runner = SchedulerOrchestrator(
+            cycle=cycle,
+            stop_event=asyncio.Event(),
+            claim_allowed=lambda: True,
+            initial_scan_immediately=True,
+            is_transient_failure=lambda _: False,
+            on_cycle_completed=lambda: callbacks.append(None),
+        )
+        task = asyncio.create_task(runner.run())
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert callbacks == []
+        assert runner.last_completed_monotonic is None
+
+    asyncio.run(scenario())
+
+
+def test_hb05_stop_before_first_cycle_does_not_notify() -> None:
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        stop_event.set()
+        callbacks: list[None] = []
+
+        async def cycle() -> None:
+            pytest.fail("cycle must not start")
+
+        runner = SchedulerOrchestrator(
+            cycle=cycle,
+            stop_event=stop_event,
+            claim_allowed=lambda: True,
+            initial_scan_immediately=True,
+            is_transient_failure=lambda _: False,
+            on_cycle_completed=lambda: callbacks.append(None),
+        )
+        await runner.run()
+        assert callbacks == []
+
+    asyncio.run(scenario())
+
+
+def test_hb06_notifies_once_for_each_completed_scan() -> None:
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        cycle_count = 0
+        callbacks: list[int] = []
+
+        async def cycle() -> None:
+            nonlocal cycle_count
+            cycle_count += 1
+
+        def on_completed() -> None:
+            callbacks.append(cycle_count)
+
+        async def stop_after_three(event: asyncio.Event, _: float) -> bool:
+            if len(callbacks) == 3:
+                event.set()
+                return True
+            return False
+
+        runner = SchedulerOrchestrator(
+            cycle=cycle,
+            stop_event=stop_event,
+            claim_allowed=lambda: True,
+            initial_scan_immediately=True,
+            is_transient_failure=lambda _: False,
+            on_cycle_completed=on_completed,
+            wait_for_interval=stop_after_three,
+        )
+        await runner.run()
+        assert cycle_count == 3
+        assert callbacks == [1, 2, 3]
+
+    asyncio.run(scenario())
+
+
+def test_hb07_callback_failure_propagates_without_retrying_cycle() -> None:
+    async def scenario() -> None:
+        cycle_calls = 0
+
+        async def cycle() -> None:
+            nonlocal cycle_calls
+            cycle_calls += 1
+
+        def fail_callback() -> None:
+            raise RuntimeError("heartbeat failed")
+
+        runner = SchedulerOrchestrator(
+            cycle=cycle,
+            stop_event=asyncio.Event(),
+            claim_allowed=lambda: True,
+            initial_scan_immediately=True,
+            is_transient_failure=lambda _: False,
+            monotonic_clock=lambda: 44.0,
+            on_cycle_completed=fail_callback,
+        )
+        with pytest.raises(RuntimeError, match="heartbeat failed"):
+            await runner.run()
+        assert cycle_calls == 1
+        assert runner.last_completed_monotonic == 44.0
+
+    asyncio.run(scenario())
+
+
+def test_hb08_callback_is_optional_and_existing_runner_still_completes() -> None:
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        cycle_calls = 0
+
+        async def cycle() -> None:
+            nonlocal cycle_calls
+            cycle_calls += 1
+            stop_event.set()
+
+        runner = SchedulerOrchestrator(
+            cycle=cycle,
+            stop_event=stop_event,
+            claim_allowed=lambda: True,
+            initial_scan_immediately=True,
+            is_transient_failure=lambda _: False,
+        )
+        await runner.run()
+        assert cycle_calls == 1
+
+    asyncio.run(scenario())
+
+
+def test_hb09_progress_timestamp_is_recorded_before_callback() -> None:
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        cycle_started = asyncio.Event()
+        finish_cycle = asyncio.Event()
+        observed_progress: list[float | None] = []
+
+        async def cycle() -> None:
+            cycle_started.set()
+            await finish_cycle.wait()
+            stop_event.set()
+
+        runner: SchedulerOrchestrator
+
+        def on_completed() -> None:
+            observed_progress.append(runner.last_completed_monotonic)
+
+        runner = SchedulerOrchestrator(
+            cycle=cycle,
+            stop_event=stop_event,
+            claim_allowed=lambda: True,
+            initial_scan_immediately=True,
+            is_transient_failure=lambda _: False,
+            monotonic_clock=lambda: 91.25,
+            on_cycle_completed=on_completed,
+        )
+        assert runner.last_completed_monotonic is None
+        task = asyncio.create_task(runner.run())
+        await cycle_started.wait()
+        assert runner.last_completed_monotonic is None
+        assert observed_progress == []
+        finish_cycle.set()
+        await asyncio.wait_for(task, timeout=1)
+        assert runner.last_completed_monotonic == 91.25
+        assert observed_progress == [91.25]
+
+    asyncio.run(scenario())
+
+
+def test_hb10_closed_claim_gate_does_not_notify() -> None:
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        gate_open = False
+        callbacks: list[None] = []
+        wait_count = 0
+
+        async def cycle() -> None:
+            stop_event.set()
+
+        async def open_gate(event: asyncio.Event, _: float) -> bool:
+            nonlocal gate_open, wait_count
+            wait_count += 1
+            if wait_count == 1:
+                assert callbacks == []
+                gate_open = True
+                return False
+            event.set()
+            return True
+
+        runner = SchedulerOrchestrator(
+            cycle=cycle,
+            stop_event=stop_event,
+            claim_allowed=lambda: gate_open,
+            initial_scan_immediately=True,
+            is_transient_failure=lambda _: False,
+            on_cycle_completed=lambda: callbacks.append(None),
+            wait_for_interval=open_gate,
+        )
+        await runner.run()
+        assert wait_count == 1
+        assert callbacks == [None]
+
+    asyncio.run(scenario())
