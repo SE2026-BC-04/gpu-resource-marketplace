@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass
 
 import pytest
 
@@ -8,6 +9,42 @@ from gpu_marketplace.manager.outbox import (
     OutboxPoller,
     _wait_for_stop_or_interval,
 )
+
+
+@dataclass(frozen=True)
+class _FakeTransportObservation:
+    """Test-local stand-in; not a proposed shared TV2/TV5 transport DTO."""
+
+    category: str
+    accepted: bool = False
+    http_status: int | None = None
+
+
+async def _deliver_fake_transport_observation(observation):
+    claim = object()
+    calls: list[str] = []
+    settled: list[tuple[object, object]] = []
+
+    async def claim_one_committed():
+        calls.append("claim")
+        return claim
+
+    async def dispatch(received_claim):
+        assert received_claim is claim
+        calls.append("dispatch")
+        return observation
+
+    async def settle(received_claim, received_observation) -> None:
+        calls.append("settle")
+        settled.append((received_claim, received_observation))
+
+    coordinator = OutboxDispatchCoordinator(
+        claim_one_committed=claim_one_committed,
+        dispatch=dispatch,
+        settle=settle,
+    )
+    await coordinator.run_once()
+    return claim, calls, settled
 
 
 def test_out_01_poller_starts_with_injected_cycle_port() -> None:
@@ -666,3 +703,273 @@ def test_claim_gate_closed_waits_without_busy_spin_or_heartbeat() -> None:
         assert heartbeats == []
 
     asyncio.run(scenario())
+
+
+def test_out_p2_01_typed_timeout_observation_reaches_settlement_unchanged() -> None:
+    observation = _FakeTransportObservation("timeout")
+    claim, calls, settled = asyncio.run(_deliver_fake_transport_observation(observation))
+
+    assert calls == ["claim", "dispatch", "settle"]
+    assert len(settled) == 1
+    assert settled[0][0] is claim
+    assert settled[0][1] is observation
+
+
+def test_out_p2_02_typed_connection_failure_settles_once() -> None:
+    observation = _FakeTransportObservation("connection_failure")
+    claim, calls, settled = asyncio.run(_deliver_fake_transport_observation(observation))
+
+    assert calls == ["claim", "dispatch", "settle"]
+    assert len(settled) == 1
+    assert settled[0][0] is claim
+    assert settled[0][1] is observation
+
+
+@pytest.mark.parametrize("status", [408, 429, 500, 502, 503])
+def test_out_p2_03_retryable_http_observation_reaches_settlement(status: int) -> None:
+    observation = _FakeTransportObservation("http_response", http_status=status)
+    claim, calls, settled = asyncio.run(_deliver_fake_transport_observation(observation))
+
+    assert calls == ["claim", "dispatch", "settle"]
+    assert len(settled) == 1
+    assert settled[0][0] is claim
+    assert settled[0][1] is observation
+    assert settled[0][1].http_status == status
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_out_p2_04_auth_failure_observation_is_not_reclassified_as_success(
+    status: int,
+) -> None:
+    observation = _FakeTransportObservation("http_response", http_status=status)
+    claim, calls, settled = asyncio.run(_deliver_fake_transport_observation(observation))
+
+    assert calls == ["claim", "dispatch", "settle"]
+    assert len(settled) == 1
+    assert settled[0][0] is claim
+    assert settled[0][1] is observation
+    assert settled[0][1].accepted is False
+
+
+def test_out_p2_05_http_202_is_settled_without_job_finalization() -> None:
+    observation = _FakeTransportObservation(
+        "http_response", accepted=True, http_status=202
+    )
+    claim, calls, settled = asyncio.run(_deliver_fake_transport_observation(observation))
+
+    assert calls == ["claim", "dispatch", "settle"]
+    assert len(settled) == 1
+    assert settled[0][0] is claim
+    assert settled[0][1] is observation
+    # The coordinator exposes no Job-finalization port.
+
+
+def test_out_p2_06_escaped_expected_timeout_propagates_without_settlement() -> None:
+    async def scenario() -> None:
+        calls: list[str] = []
+        claim = object()
+        timeout = TimeoutError("read timeout")
+
+        async def claim_one_committed():
+            calls.append("claim")
+            return claim
+
+        async def dispatch(_claim):
+            calls.append("dispatch")
+            raise timeout
+
+        async def settle(_claim, _observation) -> None:
+            calls.append("settle")
+
+        coordinator = OutboxDispatchCoordinator(
+            claim_one_committed=claim_one_committed,
+            dispatch=dispatch,
+            settle=settle,
+        )
+        with pytest.raises(TimeoutError) as raised:
+            await coordinator.run_once()
+        assert raised.value is timeout
+        assert calls == ["claim", "dispatch"]
+
+    asyncio.run(scenario())
+
+
+def test_out_p2_07_cancelled_dispatch_propagates_without_completion_callback() -> None:
+    async def scenario() -> None:
+        dispatch_started = asyncio.Event()
+        settled: list[object] = []
+        completions: list[None] = []
+
+        async def claim_one_committed():
+            return object()
+
+        async def dispatch(_claim):
+            dispatch_started.set()
+            await asyncio.Event().wait()
+
+        async def settle(_claim, observation) -> None:
+            settled.append(observation)
+
+        coordinator = OutboxDispatchCoordinator(
+            claim_one_committed=claim_one_committed,
+            dispatch=dispatch,
+            settle=settle,
+        )
+        poller = OutboxPoller(
+            cycle=coordinator.run_once,
+            stop_event=asyncio.Event(),
+            claim_allowed=lambda: True,
+            on_cycle_completed=lambda: completions.append(None),
+        )
+        task = asyncio.create_task(poller.run())
+        await dispatch_started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert settled == []
+        assert completions == []
+
+    asyncio.run(scenario())
+
+
+def test_out_p2_08_unknown_claim_commit_outcome_never_dispatches() -> None:
+    class CommitOutcomeUnknown(Exception):
+        pass
+
+    async def scenario() -> None:
+        calls: list[str] = []
+
+        async def claim_one_committed():
+            calls.append("claim")
+            raise CommitOutcomeUnknown("claim commit unknown")
+
+        async def dispatch(_claim):
+            calls.append("dispatch")
+            return _FakeTransportObservation("http_response", accepted=True, http_status=202)
+
+        async def settle(_claim, _observation) -> None:
+            calls.append("settle")
+
+        coordinator = OutboxDispatchCoordinator(
+            claim_one_committed=claim_one_committed,
+            dispatch=dispatch,
+            settle=settle,
+        )
+        with pytest.raises(CommitOutcomeUnknown):
+            await coordinator.run_once()
+        assert calls == ["claim"]
+
+    asyncio.run(scenario())
+
+
+def test_out_p2_09_unknown_settlement_commit_propagates_without_local_retry() -> None:
+    class SettlementCommitUnknown(Exception):
+        pass
+
+    async def scenario() -> None:
+        claim_calls = 0
+        dispatch_calls = 0
+        settlement_calls = 0
+        claim = object()
+        observation = _FakeTransportObservation("http_response", accepted=True, http_status=202)
+        unknown = SettlementCommitUnknown("settlement commit unknown")
+
+        async def claim_one_committed():
+            nonlocal claim_calls
+            claim_calls += 1
+            return claim
+
+        async def dispatch(_claim):
+            nonlocal dispatch_calls
+            dispatch_calls += 1
+            return observation
+
+        async def settle(_claim, _observation) -> None:
+            nonlocal settlement_calls
+            settlement_calls += 1
+            raise unknown
+
+        coordinator = OutboxDispatchCoordinator(
+            claim_one_committed=claim_one_committed,
+            dispatch=dispatch,
+            settle=settle,
+        )
+        with pytest.raises(SettlementCommitUnknown) as raised:
+            await coordinator.run_once()
+        assert raised.value is unknown
+        assert (claim_calls, dispatch_calls, settlement_calls) == (1, 1, 1)
+
+    asyncio.run(scenario())
+
+
+def test_out_p2_10_claim_and_observation_identity_are_preserved() -> None:
+    observation = _FakeTransportObservation("connection_failure")
+    claim, calls, settled = asyncio.run(_deliver_fake_transport_observation(observation))
+
+    assert calls == ["claim", "dispatch", "settle"]
+    assert settled[0][0] is claim
+    assert settled[0][1] is observation
+
+
+def test_out_p2_11_repeated_invocations_settle_once_each() -> None:
+    async def scenario() -> None:
+        claim = object()
+        observation = _FakeTransportObservation("http_response", accepted=True, http_status=202)
+        claim_calls = 0
+        dispatch_calls = 0
+        settled: list[tuple[object, object]] = []
+
+        async def claim_one_committed():
+            nonlocal claim_calls
+            claim_calls += 1
+            return claim
+
+        async def dispatch(received_claim):
+            nonlocal dispatch_calls
+            dispatch_calls += 1
+            assert received_claim is claim
+            return observation
+
+        async def settle(received_claim, received_observation) -> None:
+            settled.append((received_claim, received_observation))
+
+        coordinator = OutboxDispatchCoordinator(
+            claim_one_committed=claim_one_committed,
+            dispatch=dispatch,
+            settle=settle,
+        )
+        await coordinator.run_once()
+        await coordinator.run_once()
+        assert (claim_calls, dispatch_calls) == (2, 2)
+        assert len(settled) == 2
+        assert all(received_claim is claim for received_claim, _ in settled)
+        assert all(received_observation is observation for _, received_observation in settled)
+
+    asyncio.run(scenario())
+
+
+def test_out_p2_12_port_exception_details_are_not_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        sensitive_text = "SYNTHETIC-TOKEN-AND-PAYLOAD-SENTINEL"
+
+        async def claim_one_committed():
+            return object()
+
+        async def dispatch(_claim):
+            raise RuntimeError(sensitive_text)
+
+        async def settle(_claim, _observation) -> None:
+            pytest.fail("settlement must not receive a fabricated outcome")
+
+        coordinator = OutboxDispatchCoordinator(
+            claim_one_committed=claim_one_committed,
+            dispatch=dispatch,
+            settle=settle,
+        )
+        with pytest.raises(RuntimeError, match=sensitive_text):
+            await coordinator.run_once()
+
+    asyncio.run(scenario())
+    assert "SYNTHETIC-TOKEN-AND-PAYLOAD-SENTINEL" not in caplog.text

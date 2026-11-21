@@ -46,20 +46,33 @@ async def _wait_for_stop_or_interval(
 class OutboxDispatchCoordinator(Generic[ClaimT, TransportOutcomeT]):
     """Coordinate one committed claim, one transport call, and one settlement.
 
-    The claim handle and transport outcome are opaque here. A claim port must
-    commit and close its DB transaction before returning. If COMMIT is unknown,
-    the port must raise without returning a handle; this coordinator then
-    cannot send HTTP blindly. The dispatch port is first invoked only after the
-    claim port returns, and settlement receives the exact original claim
-    context and transport outcome. A returned 202 remains only transport
-    acceptance; this class has no Job-finalization port.
+    The claim handle and transport observation are opaque here. A claim port
+    must commit and close its DB transaction before returning. If COMMIT is
+    unknown, the port must raise without returning a handle; this coordinator
+    then cannot send HTTP blindly. The dispatch port is first invoked only
+    after the claim port returns, and settlement receives the exact original
+    claim context and transport observation.
+
+    The TV5 dispatch adapter must return a typed observation for every expected
+    transport result, including accepted HTTP 202, timeouts, connection errors,
+    HTTP 408/429/5xx, HTTP 401/403, and any covered permanent protocol
+    rejection. It must preserve unknown acceptance as distinct from accepted
+    delivery and must not log credentials or raw dispatch payloads. The opaque
+    observation is passed unchanged to TV2 settlement; this coordinator does
+    not classify statuses or compute retries. A returned 202 remains only
+    transport acceptance; this class has no Job-finalization port.
 
     The ports are provisional TV1-local injection boundaries, not the final
-    TV2/TV5 DTO or transaction interfaces. A transport exception propagates and
-    is not converted into an ACK or retry outcome here. TV2/TV5 adapters own
-    durable reconciliation, CAS fencing, HTTP policy, and retry classification.
-    Cancellation does not prove an underlying synchronous UoW has stopped; its
-    executor adapter must preserve worker ownership until the operation ends.
+    TV2/TV5 DTO or transaction interfaces. If an expected transport exception
+    escapes dispatch, settlement is skipped and the exception propagates; no
+    ACK or retry observation is fabricated. That leaves recovery dependent on
+    durable lease handling and means the real adapter contract is incomplete.
+    Unexpected/fatal exceptions and ``asyncio.CancelledError`` also propagate;
+    this coordinator does not catch broadly or convert them to outcomes.
+    TV2/TV5 adapters own durable reconciliation, CAS fencing, HTTP policy, and
+    retry classification. Cancellation does not prove an underlying
+    synchronous UoW has stopped; its executor adapter must preserve worker
+    ownership until the operation ends.
     """
 
     def __init__(
