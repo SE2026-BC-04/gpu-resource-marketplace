@@ -6,6 +6,7 @@ its immutable fingerprint is retained in this particular cache instance.
 """
 from __future__ import annotations
 
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -52,6 +53,7 @@ class InvalidTransition(ValueError):
 class AttemptState(str, Enum):
     IN_FLIGHT = "IN_FLIGHT"
     FINISHED = "FINISHED"
+    FAILED_NO_RECEIPT = "FAILED_NO_RECEIPT"
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +66,41 @@ class Receipt:
             raise ValueError("result_id must be UUIDv4")
         if type(self.raw_envelope) is not bytes or not self.raw_envelope:
             raise ValueError("receipt must contain nonempty immutable raw bytes")
+
+
+@dataclass(frozen=True, slots=True)
+class ProducerFailureEvidence:
+    """Proof that the original execution Future terminated without a receipt.
+
+    This is an internal producer-lifecycle capability, not an HTTP/API DTO.
+    Construct it only after observing the actual execution Future terminate
+    with an exception or completed cancellation. A timeout or request
+    cancellation is not sufficient evidence.
+    """
+
+    _execution_future: Future[object] = field(repr=False, compare=False)
+
+    @classmethod
+    def from_terminated_execution(
+        cls, execution_future: Future[object]
+    ) -> ProducerFailureEvidence:
+        if not isinstance(execution_future, Future) or not execution_future.done():
+            raise ValueError("producer execution has not positively terminated")
+        if execution_future.cancelled():
+            return cls(execution_future)
+        if execution_future.exception() is None:
+            raise ValueError("successful execution is not failure evidence")
+        return cls(execution_future)
+
+    def is_confirmed(self) -> bool:
+        if not self._execution_future.done():
+            return False
+        if self._execution_future.cancelled():
+            return True
+        return self._execution_future.exception() is not None
+
+    def matches(self, execution_future: Future[object] | None) -> bool:
+        return execution_future is not None and self._execution_future is execution_future
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +118,7 @@ class _Entry:
     fingerprint: bytes
     state: AttemptState
     receipt: Receipt | None
-    finished_at: float | None
+    terminal_at: float | None
     producer_token: object | None
 
 
@@ -167,8 +204,9 @@ def dispatch_fingerprint(dispatch: Mapping[str, object]) -> bytes:
 class AttemptCache:
     """Bounded, thread-safe volatile cache; numeric bounds are test injections.
 
-    FINISHED entries expire after ttl_seconds and can be evicted oldest-first
-    under capacity pressure. IN_FLIGHT entries are never evicted or expired.
+    FINISHED and FAILED_NO_RECEIPT entries expire after ttl_seconds and can be
+    evicted oldest-first under capacity pressure. IN_FLIGHT entries are never
+    evicted or expired.
     There is no cross-process/cold-start historical conflict guarantee.
     """
 
@@ -199,9 +237,9 @@ class AttemptCache:
 
     def _prune(self, now: float) -> None:
         for attempt_id, entry in list(self._entries.items()):
-            if (entry.state is AttemptState.FINISHED
-                    and entry.finished_at is not None
-                    and now - entry.finished_at >= self._ttl):
+            if (entry.state is not AttemptState.IN_FLIGHT
+                    and entry.terminal_at is not None
+                    and now - entry.terminal_at >= self._ttl):
                 del self._entries[attempt_id]
 
     def admit(self, dispatch: Mapping[str, object]) -> Admission:
@@ -219,14 +257,14 @@ class AttemptCache:
                 return Admission(attempt_id, fingerprint, existing.state,
                                  False, existing.receipt)
             if len(self._entries) >= self._max_entries:
-                completed = [
-                    (key, entry.finished_at)
+                terminal = [
+                    (key, entry.terminal_at)
                     for key, entry in self._entries.items()
-                    if entry.state is AttemptState.FINISHED
+                    if entry.state is not AttemptState.IN_FLIGHT
                 ]
-                if not completed:
+                if not terminal:
                     raise CacheFull("all cache slots are IN_FLIGHT")
-                oldest_id = min(completed, key=lambda item: item[1])[0]
+                oldest_id = min(terminal, key=lambda item: item[1])[0]
                 del self._entries[oldest_id]
             producer_token = object()
             self._entries[attempt_id] = _Entry(
@@ -250,13 +288,44 @@ class AttemptCache:
                     or entry.state is not AttemptState.IN_FLIGHT
                     or entry.producer_token is not admission._producer_token):
                 raise InvalidTransition("attempt is absent, changed or already finished")
-            finished_at = self._now()
+            terminal_at = self._now()
             entry.state = AttemptState.FINISHED
             entry.receipt = receipt
-            entry.finished_at = finished_at
+            entry.terminal_at = terminal_at
             self._condition.notify_all()
             return Admission(admission.attempt_id, admission.fingerprint,
                              AttemptState.FINISHED, False, receipt)
+
+    def fail_after_start(
+        self,
+        admission: Admission,
+        evidence: ProducerFailureEvidence,
+    ) -> Admission:
+        """Retain a token-fenced terminal failure only after positive proof.
+
+        The terminal tombstone keeps the original fingerprint and has no
+        receipt. It cannot be transitioned to another terminal state.
+        """
+        if (type(admission) is not Admission or not admission.newly_admitted
+                or admission._producer_token is None):
+            raise InvalidTransition("only the original producer can fail")
+        if (type(evidence) is not ProducerFailureEvidence
+                or not evidence.is_confirmed()):
+            raise InvalidTransition("producer termination is not confirmed")
+        with self._condition:
+            entry = self._entries.get(admission.attempt_id)
+            if (entry is None or entry.fingerprint != admission.fingerprint
+                    or entry.state is not AttemptState.IN_FLIGHT
+                    or entry.producer_token is not admission._producer_token):
+                raise InvalidTransition("attempt is absent, changed or already terminal")
+            entry.state = AttemptState.FAILED_NO_RECEIPT
+            entry.receipt = None
+            entry.terminal_at = self._now()
+            self._condition.notify_all()
+            return Admission(
+                admission.attempt_id, admission.fingerprint,
+                AttemptState.FAILED_NO_RECEIPT, False, None,
+            )
 
     def abort_before_start(self, admission: Admission) -> bool:
         """Remove only the original IN_FLIGHT slot after a proven pre-start rejection.

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 import copy
 from threading import Barrier, Event, Thread
 from types import MappingProxyType
@@ -12,7 +12,8 @@ import pytest
 
 from gpu_marketplace_simulator.attempt_cache import (
     AttemptCache, AttemptState, CacheClosed, CacheFull, ExecutionConflict,
-    InvalidDispatch, InvalidTransition, Receipt, dispatch_fingerprint,
+    InvalidDispatch, InvalidTransition, ProducerFailureEvidence, Receipt,
+    dispatch_fingerprint,
 )
 
 
@@ -39,6 +40,12 @@ def dispatch(attempt_id: str = ATTEMPT) -> dict[str, object]:
 
 def receipt() -> Receipt:
     return Receipt(RESULT, b'{"signed_result":"frozen-original"}')
+
+
+def terminal_failure_evidence() -> ProducerFailureEvidence:
+    execution = Future()
+    execution.set_exception(RuntimeError("simulated producer termination"))
+    return ProducerFailureEvidence.from_terminated_execution(execution)
 
 
 def test_admission_duplicate_inflight_and_finished_replay() -> None:
@@ -340,6 +347,123 @@ def test_finished_ttl_never_expires_inflight_entries() -> None:
     cache.finish(first, receipt())
     now[0] = 10001.0
     assert cache.admit(dispatch(ANOTHER)).newly_admitted
+
+
+def test_confirmed_failure_transitions_inflight_to_retained_tombstone_without_receipt() -> None:
+    cache = AttemptCache(max_entries=2, ttl_seconds=30)
+    original = cache.admit(dispatch())
+
+    failed = cache.fail_after_start(original, terminal_failure_evidence())
+    retained = cache.snapshot(UUID(ATTEMPT))
+
+    assert failed.state is AttemptState.FAILED_NO_RECEIPT
+    assert failed.receipt is None
+    assert retained is not None
+    assert retained.state is AttemptState.FAILED_NO_RECEIPT
+    assert retained.fingerprint == original.fingerprint
+    assert retained.receipt is None
+    assert not cache.admit(dispatch()).newly_admitted
+    with pytest.raises(ExecutionConflict):
+        changed = dispatch()
+        changed["gpu_count"] = 3
+        cache.admit(changed)
+
+
+def test_failure_requires_future_exception_or_completed_cancellation() -> None:
+    cache = AttemptCache(max_entries=1, ttl_seconds=30)
+    original = cache.admit(dispatch())
+    pending = Future()
+    with pytest.raises(ValueError, match="not positively terminated"):
+        ProducerFailureEvidence.from_terminated_execution(pending)
+    successful = Future()
+    successful.set_result(None)
+    with pytest.raises(ValueError, match="not failure evidence"):
+        ProducerFailureEvidence.from_terminated_execution(successful)
+    with pytest.raises(InvalidTransition):
+        cache.fail_after_start(original, object())
+    assert cache.snapshot(UUID(ATTEMPT)).state is AttemptState.IN_FLIGHT
+
+    cancelled = Future()
+    assert cancelled.cancel()
+    evidence = ProducerFailureEvidence.from_terminated_execution(cancelled)
+    assert cache.fail_after_start(original, evidence).state is AttemptState.FAILED_NO_RECEIPT
+
+
+def test_completion_and_confirmed_failure_are_mutually_exclusive_terminal_winners() -> None:
+    cache = AttemptCache(max_entries=1, ttl_seconds=30)
+    first = cache.admit(dispatch())
+    finished = cache.finish(first, receipt())
+    with pytest.raises(InvalidTransition):
+        cache.fail_after_start(first, terminal_failure_evidence())
+    assert cache.snapshot(UUID(ATTEMPT)).receipt is finished.receipt
+
+    second_cache = AttemptCache(max_entries=1, ttl_seconds=30)
+    second = second_cache.admit(dispatch())
+    failed = second_cache.fail_after_start(second, terminal_failure_evidence())
+    with pytest.raises(InvalidTransition):
+        second_cache.finish(second, receipt())
+    assert second_cache.snapshot(UUID(ATTEMPT)).state is failed.state
+    assert second_cache.snapshot(UUID(ATTEMPT)).receipt is None
+
+
+def test_duplicate_failure_and_stale_token_cannot_mutate_new_admission() -> None:
+    now = [0.0]
+    cache = AttemptCache(max_entries=1, ttl_seconds=5, clock=lambda: now[0])
+    old = cache.admit(dispatch())
+    evidence = terminal_failure_evidence()
+    cache.fail_after_start(old, evidence)
+    with pytest.raises(InvalidTransition):
+        cache.fail_after_start(old, evidence)
+    now[0] = 5
+    current = cache.admit(dispatch())
+    assert current.newly_admitted
+    with pytest.raises(InvalidTransition):
+        cache.fail_after_start(old, evidence)
+    assert cache.snapshot(UUID(ATTEMPT)).state is AttemptState.IN_FLIGHT
+    assert cache.snapshot(UUID(ATTEMPT)).fingerprint == current.fingerprint
+
+
+def test_failed_tombstone_expires_and_cold_restart_has_no_history() -> None:
+    now = [10.0]
+    cache = AttemptCache(max_entries=1, ttl_seconds=5, clock=lambda: now[0])
+    failed = cache.admit(dispatch())
+    cache.fail_after_start(failed, terminal_failure_evidence())
+    now[0] = 14.999
+    assert cache.admit(dispatch()).state is AttemptState.FAILED_NO_RECEIPT
+    now[0] = 15
+    changed = dispatch()
+    changed["gpu_count"] = 4
+    assert cache.admit(changed).newly_admitted
+
+    cold_cache = AttemptCache(max_entries=1, ttl_seconds=5, clock=lambda: now[0])
+    assert cold_cache.admit(changed).newly_admitted
+
+
+def test_failed_tombstones_are_oldest_first_pressure_eviction_candidates() -> None:
+    now = [0.0]
+    cache = AttemptCache(max_entries=2, ttl_seconds=100, clock=lambda: now[0])
+    first = cache.admit(dispatch())
+    cache.fail_after_start(first, terminal_failure_evidence())
+    now[0] = 1
+    second = cache.admit(dispatch(ANOTHER))
+    cache.fail_after_start(second, terminal_failure_evidence())
+
+    replacement = cache.admit(dispatch(THIRD))
+    assert replacement.newly_admitted
+    assert cache.snapshot(UUID(ATTEMPT)) is None
+    assert cache.snapshot(UUID(ANOTHER)).state is AttemptState.FAILED_NO_RECEIPT
+    assert cache.snapshot(UUID(THIRD)).state is AttemptState.IN_FLIGHT
+
+
+def test_uncertain_inflight_is_never_expired_evicted_or_drained_as_terminal() -> None:
+    now = [0.0]
+    cache = AttemptCache(max_entries=1, ttl_seconds=1, clock=lambda: now[0])
+    cache.admit(dispatch())
+    now[0] = 100
+    assert not cache.drain(0)
+    with pytest.raises(CacheFull):
+        cache.admit(dispatch(ANOTHER))
+    assert cache.snapshot(UUID(ATTEMPT)).state is AttemptState.IN_FLIGHT
 
 
 def test_close_disallows_new_admission_and_drain_waits_for_completion() -> None:
