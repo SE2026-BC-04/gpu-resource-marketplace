@@ -1,6 +1,10 @@
 """Simulator-local bridge from validated dispatches to the volatile Attempt cache."""
 from __future__ import annotations
 
+from concurrent.futures import Future
+from dataclasses import dataclass
+from enum import Enum
+import logging
 from threading import RLock
 from typing import Protocol
 from uuid import UUID
@@ -12,6 +16,7 @@ from gpu_marketplace_simulator.attempt_cache import (
     CacheClosed,
     CacheFull,
     ExecutionConflict,
+    ProducerFailureEvidence,
     Receipt,
 )
 from gpu_marketplace_simulator.dispatch import (
@@ -20,23 +25,73 @@ from gpu_marketplace_simulator.dispatch import (
     AttemptAdmissionUnavailable,
     DispatchRequest,
 )
+from gpu_marketplace_simulator.signed_result_v1 import validate_receipt_binding_v1
+
+
+logger = logging.getLogger(__name__)
+
+
+class ProducerRegistrationUncertain(Exception):
+    """Registration may have launched work; its IN_FLIGHT owner must be kept."""
 
 
 class ProducerRegistrationPort(Protocol):
-    """Synchronous bounded handoff; rejection guarantees that no work started.
+    """Synchronous bounded handoff; its call never runs under the adapter lock.
 
-    Implementations must return ``True`` only after registering exactly one
-    producer. ``False`` or an exception must mean no producer was registered
-    or launched, so the adapter can safely roll back its pre-start cache slot.
-    The call must be bounded and must not execute GPU work inline.
+    Return True only after registering exactly one producer. Return False or
+    raise an ordinary Exception only when the implementation positively knows
+    that no work was registered or launched. Raise
+    ProducerRegistrationUncertain when it cannot prove pre-start rejection.
+    This port performs handoff only; it must not execute GPU work inline.
     """
 
-    def register(self, dispatch: DispatchRequest, admission: Admission) -> bool:
+    def register(
+        self,
+        dispatch: DispatchRequest,
+        admission: Admission,
+        lifecycle: ProducerLifecycle,
+    ) -> bool:
         ...
 
 
+class ProducerLifecycle:
+    """Trusted, Attempt-bound callback capability handed only to the registrar."""
+
+    __slots__ = ("_adapter", "_admission")
+
+    def __init__(
+        self, adapter: AttemptCacheAdmissionAdapter, admission: Admission
+    ) -> None:
+        self._adapter = adapter
+        self._admission = admission
+
+    def bind_execution_future(self, execution_future: Future[object]) -> None:
+        """Bind the actual producer execution Future exactly once."""
+        self._adapter._bind_execution_future(self, execution_future)
+
+    def complete(self, receipt: Receipt) -> AttemptAdmissionOutcome:
+        return self._adapter.complete(self._admission, receipt)
+
+    def fail_after_start(self) -> Admission:
+        return self._adapter._fail_after_start(self)
+
+
+class _RegistrationPhase(str, Enum):
+    REGISTERING = "REGISTERING"
+    REGISTERED = "REGISTERED"
+    UNCERTAIN = "UNCERTAIN"
+
+
+@dataclass(slots=True)
+class _ProducerSlot:
+    admission: Admission
+    phase: _RegistrationPhase
+    lifecycle: ProducerLifecycle
+    execution_future: Future[object] | None = None
+
+
 class AttemptCacheAdmissionAdapter:
-    """Preserve Attempt identity while requiring successful producer handoff."""
+    """Preserve Attempt identity and fence producer ownership across callbacks."""
 
     def __init__(
         self,
@@ -50,12 +105,18 @@ class AttemptCacheAdmissionAdapter:
         self._cache = cache
         self._producer = producer
         self._max_concurrent = max_concurrent_producers
-        self._registered: dict[UUID, Admission] = {}
+        # Includes pending and uncertain handoffs: both consume a bounded slot.
+        self._producer_slots: dict[UUID, _ProducerSlot] = {}
         self._closed = False
         self._lock = RLock()
 
-    def _outcome(self, admission: Admission, *, newly_admitted: bool,
-                 producer_registered: bool) -> AttemptAdmissionOutcome:
+    def _outcome(
+        self,
+        admission: Admission,
+        *,
+        newly_admitted: bool,
+        producer_registered: bool,
+    ) -> AttemptAdmissionOutcome:
         return AttemptAdmissionOutcome(
             attempt_id=str(admission.attempt_id),
             state=admission.state.value,
@@ -65,74 +126,206 @@ class AttemptCacheAdmissionAdapter:
             cache_admission=admission,
         )
 
-    def _rollback_rejected_handoff(self, admission: Admission) -> None:
-        if not self._cache.abort_before_start(admission):
-            # The token fence rejected rollback. Never claim success or remove
-            # a replacement entry if another owner changed the cache meanwhile.
-            raise AttemptAdmissionUnavailable("pre-start rollback was fenced")
+    @staticmethod
+    def _same_owner(slot: _ProducerSlot | None, admission: Admission) -> bool:
+        return (slot is not None
+                and slot.admission._producer_token is admission._producer_token
+                and slot.admission.fingerprint == admission.fingerprint)
+
+    def _retained_outcome(self, admission: Admission) -> AttemptAdmissionOutcome:
+        if admission.state is AttemptState.IN_FLIGHT:
+            slot = self._producer_slots.get(admission.attempt_id)
+            if (slot is None
+                    or slot.admission.fingerprint != admission.fingerprint):
+                raise AttemptAdmissionUnavailable("retained producer ownership is unavailable")
+            if slot.phase is not _RegistrationPhase.REGISTERED:
+                # A duplicate must never receive 202 before confirmed handoff.
+                raise AttemptAdmissionUnavailable("producer registration is not confirmed")
+            return self._outcome(
+                admission, newly_admitted=False, producer_registered=True
+            )
+        if admission.state is AttemptState.FINISHED and admission.receipt is not None:
+            return self._outcome(
+                admission, newly_admitted=False, producer_registered=True
+            )
+        if admission.state is AttemptState.FAILED_NO_RECEIPT:
+            raise AttemptAdmissionUnavailable("retained Attempt terminated without a receipt")
+        raise AttemptAdmissionUnavailable("retained Attempt has no accepted producer")
+
+    def _rollback_prestart(self, admission: Admission) -> bool:
+        """Token-fenced rollback and slot release under the adapter lock."""
+        with self._lock:
+            slot = self._producer_slots.get(admission.attempt_id)
+            if not self._same_owner(slot, admission):
+                return False
+            if slot.phase is not _RegistrationPhase.REGISTERING:
+                return False
+            if not self._cache.abort_before_start(admission):
+                # Never release capacity or forget ownership when the cache
+                # token says the handoff is no longer safely removable.
+                slot.phase = _RegistrationPhase.UNCERTAIN
+                return False
+            del self._producer_slots[admission.attempt_id]
+            return True
+
+    def _confirm_registered(self, admission: Admission) -> AttemptAdmissionOutcome:
+        with self._lock:
+            slot = self._producer_slots.get(admission.attempt_id)
+            if self._same_owner(slot, admission):
+                slot.phase = _RegistrationPhase.REGISTERED
+                if self._closed:
+                    raise AttemptAdmissionUnavailable("adapter is closing")
+                retained = self._cache.snapshot(admission.attempt_id)
+                if retained is not None and retained.state is AttemptState.IN_FLIGHT:
+                    return self._outcome(
+                        admission, newly_admitted=True, producer_registered=True
+                    )
+                if retained is not None:
+                    return self._retained_outcome(retained)
+                raise AttemptAdmissionUnavailable("registered Attempt is no longer retained")
+
+            # A very fast trusted producer may complete/fail while register()
+            # is returning. Re-read the retained terminal result under lock.
+            retained = self._cache.snapshot(admission.attempt_id)
+            if retained is None:
+                raise AttemptAdmissionUnavailable("registered Attempt is no longer retained")
+            if retained.fingerprint != admission.fingerprint:
+                raise AttemptAdmissionUnavailable("producer ownership changed")
+            if self._closed:
+                raise AttemptAdmissionUnavailable("adapter is closing")
+            return self._retained_outcome(retained)
 
     def admit(self, dispatch: DispatchRequest) -> AttemptAdmissionOutcome:
         request = dispatch.model_dump(mode="json")
         attempt_id = UUID(dispatch.attempt_id)
 
+        # Reserve Attempt identity and bounded producer capacity atomically.
+        # No potentially slow producer call is made while this lock is held.
         with self._lock:
             if self._closed:
                 raise AttemptAdmissionUnavailable("adapter is closing")
-
-            retained = self._cache.snapshot(attempt_id)
-            if retained is None and len(self._registered) >= self._max_concurrent:
-                raise AttemptAdmissionUnavailable("producer concurrency is full")
-
             try:
+                retained = self._cache.snapshot(attempt_id)
+                if retained is not None:
+                    existing = self._cache.admit(request)
+                    return self._retained_outcome(existing)
+                if len(self._producer_slots) >= self._max_concurrent:
+                    raise AttemptAdmissionUnavailable("producer concurrency is full")
                 admission = self._cache.admit(request)
             except ExecutionConflict as error:
                 raise AttemptAdmissionConflict from error
             except (CacheFull, CacheClosed) as error:
                 raise AttemptAdmissionUnavailable from error
 
-            if admission.newly_admitted:
-                if len(self._registered) >= self._max_concurrent:
-                    self._rollback_rejected_handoff(admission)
-                    raise AttemptAdmissionUnavailable("producer concurrency is full")
-                try:
-                    registered = self._producer.register(dispatch, admission)
-                except Exception as error:
-                    self._rollback_rejected_handoff(admission)
-                    raise AttemptAdmissionUnavailable from error
-                if registered is not True:
-                    self._rollback_rejected_handoff(admission)
-                    raise AttemptAdmissionUnavailable("producer rejected handoff")
-                self._registered[attempt_id] = admission
-                return self._outcome(
-                    admission, newly_admitted=True, producer_registered=True
-                )
+            if not admission.newly_admitted:
+                # Cache state can change through expiry between snapshot and
+                # admission only for terminal entries; handle by its real state.
+                return self._retained_outcome(admission)
+            if len(self._producer_slots) >= self._max_concurrent:
+                if not self._cache.abort_before_start(admission):
+                    raise AttemptAdmissionUnavailable("producer slot reservation was fenced")
+                raise AttemptAdmissionUnavailable("producer concurrency is full")
+            lifecycle = ProducerLifecycle(self, admission)
+            self._producer_slots[attempt_id] = _ProducerSlot(
+                admission, _RegistrationPhase.REGISTERING, lifecycle
+            )
 
-            if admission.state is AttemptState.IN_FLIGHT:
-                registered = self._registered.get(attempt_id)
-                if (registered is None
-                        or registered.fingerprint != admission.fingerprint):
-                    raise AttemptAdmissionUnavailable("retained producer is not registered")
-                return self._outcome(
-                    admission, newly_admitted=False, producer_registered=True
-                )
+        # Call outside the global lock: unrelated Attempts and shutdown can
+        # make progress while one registrar is slow.
+        try:
+            registered = self._producer.register(dispatch, admission, lifecycle)
+        except ProducerRegistrationUncertain:
+            with self._lock:
+                slot = self._producer_slots.get(attempt_id)
+                if self._same_owner(slot, admission):
+                    slot.phase = _RegistrationPhase.UNCERTAIN
+            logger.warning("attempt_producer_registration_uncertain")
+            raise AttemptAdmissionUnavailable("producer registration is uncertain") from None
+        except Exception as error:
+            if not self._rollback_prestart(admission):
+                logger.warning("attempt_producer_prestart_rollback_fenced")
+                raise AttemptAdmissionUnavailable(
+                    "pre-start rollback could not be proven"
+                ) from None
+            logger.warning(
+                "attempt_producer_registration_rejected",
+                extra={"exception_type": type(error).__name__},
+            )
+            raise AttemptAdmissionUnavailable("producer registration failed") from None
 
-            if admission.state is AttemptState.FINISHED and admission.receipt is not None:
-                return self._outcome(
-                    admission, newly_admitted=False, producer_registered=True
-                )
-            raise AttemptAdmissionUnavailable("retained attempt has no accepted producer")
+        if registered is not True:
+            if not self._rollback_prestart(admission):
+                logger.warning("attempt_producer_prestart_rollback_fenced")
+            raise AttemptAdmissionUnavailable(
+                "pre-start rollback could not be proven"
+            )
+            raise AttemptAdmissionUnavailable("producer rejected handoff")
+        return self._confirm_registered(admission)
 
     def complete(self, admission: Admission, receipt: Receipt) -> AttemptAdmissionOutcome:
-        """Record completion for the original registered producer only."""
+        """Bind exact V1 envelope bytes to this Attempt before retaining them."""
+        try:
+            validate_receipt_binding_v1(
+                receipt.raw_envelope,
+                outer_result_id=receipt.result_id,
+                expected_attempt_id=admission.attempt_id,
+            )
+        except (AttributeError, TypeError, ValueError) as error:
+            raise AttemptAdmissionUnavailable("receipt is not bound to this Attempt") from error
+
         with self._lock:
-            current = self._registered.get(admission.attempt_id)
-            if (current is None or current._producer_token is not admission._producer_token):
+            slot = self._producer_slots.get(admission.attempt_id)
+            if not self._same_owner(slot, admission):
                 raise AttemptAdmissionUnavailable("producer registration is stale")
-            finished = self._cache.finish(admission, receipt)
-            del self._registered[admission.attempt_id]
+            try:
+                finished = self._cache.finish(admission, receipt)
+            except Exception as error:
+                raise AttemptAdmissionUnavailable("producer completion was rejected") from error
+            del self._producer_slots[admission.attempt_id]
             return self._outcome(
                 finished, newly_admitted=False, producer_registered=True
             )
+
+    def _bind_execution_future(
+        self, lifecycle: ProducerLifecycle, execution_future: Future[object]
+    ) -> None:
+        if not isinstance(execution_future, Future):
+            raise TypeError("producer execution must be a concurrent Future")
+        with self._lock:
+            admission = lifecycle._admission
+            slot = self._producer_slots.get(admission.attempt_id)
+            if (not self._same_owner(slot, admission)
+                    or slot.lifecycle is not lifecycle
+                    or slot.execution_future is not None):
+                raise AttemptAdmissionUnavailable("producer lifecycle is stale or already bound")
+            slot.execution_future = execution_future
+
+    def _fail_after_start(self, lifecycle: ProducerLifecycle) -> Admission:
+        """Record only this registered producer's confirmed termination."""
+        with self._lock:
+            admission = lifecycle._admission
+            slot = self._producer_slots.get(admission.attempt_id)
+            if (not self._same_owner(slot, admission)
+                    or slot.lifecycle is not lifecycle
+                    or slot.execution_future is None):
+                raise AttemptAdmissionUnavailable("producer registration is stale")
+            try:
+                evidence = ProducerFailureEvidence.from_terminated_execution(
+                    slot.execution_future
+                )
+            except (TypeError, ValueError) as error:
+                raise AttemptAdmissionUnavailable(
+                    "producer termination is not confirmed"
+                ) from error
+            if not evidence.matches(slot.execution_future):
+                raise AttemptAdmissionUnavailable("producer failure evidence is mismatched")
+            try:
+                failed = self._cache.fail_after_start(admission, evidence)
+            except Exception as error:
+                raise AttemptAdmissionUnavailable("producer failure was rejected") from error
+            del self._producer_slots[admission.attempt_id]
+            logger.warning("attempt_producer_terminated_without_receipt")
+            return failed
 
     def close(self) -> None:
         with self._lock:
@@ -145,4 +338,4 @@ class AttemptCacheAdmissionAdapter:
     @property
     def active_producer_count(self) -> int:
         with self._lock:
-            return len(self._registered)
+            return len(self._producer_slots)

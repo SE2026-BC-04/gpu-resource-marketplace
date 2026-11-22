@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
+from base64 import urlsafe_b64encode
+from concurrent.futures import Future, ThreadPoolExecutor
 from threading import Barrier, Event, Lock, Thread
 import time
+import json
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -19,12 +21,17 @@ from gpu_marketplace_simulator.attempt_cache import (
     AttemptState,
     Receipt,
 )
-from gpu_marketplace_simulator.attempt_cache_adapter import AttemptCacheAdmissionAdapter
+from gpu_marketplace_simulator.attempt_cache_adapter import (
+    AttemptCacheAdmissionAdapter,
+    ProducerLifecycle,
+    ProducerRegistrationUncertain,
+)
 from gpu_marketplace_simulator.admission_executor import BoundedAdmissionExecutor
 from gpu_marketplace_simulator.config import Settings
 from gpu_marketplace_simulator.dispatch import (
     AttemptAdmissionConflict,
     AttemptAdmissionOutcome,
+    AttemptAdmissionUnavailable,
     DispatchRequest,
 )
 
@@ -69,6 +76,44 @@ def dispatch(attempt_id: str = ATTEMPT) -> dict[str, object]:
     }
 
 
+def signed_result_envelope(
+    *, attempt_id: str = ATTEMPT, result_id: UUID = RESULT
+) -> bytes:
+    """Structural ADR-004 V1 fixture; signature shape only, never verified here."""
+    fields = dispatch(attempt_id)
+    payload = {
+        "schema_version": "1",
+        "result_id": str(result_id),
+        "job_id": fields["job_id"],
+        "attempt_id": attempt_id,
+        "worker_id": fields["worker_id"],
+        "listing_id": fields["listing_id"],
+        "outcome": "SUCCESS",
+        "failure_reason": None,
+        "result_digest": "sha256:" + "0" * 64,
+        "finished_at": "2026-10-18T08:01:00.000000Z",
+        "key_id": "88888888-8888-4888-8888-888888888888",
+    }
+    signature = urlsafe_b64encode(bytes(64)).rstrip(b"=").decode("ascii")
+    return json.dumps(
+        {"payload": payload, "signature": signature,
+         "signature_encoding": "base64url-no-padding"},
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def make_receipt(*, attempt_id: str = ATTEMPT, result_id: UUID = RESULT) -> Receipt:
+    return Receipt(result_id, signed_result_envelope(
+        attempt_id=attempt_id, result_id=result_id
+    ))
+
+
+def terminate_producer(lifecycle: ProducerLifecycle) -> None:
+    execution = Future()
+    execution.set_exception(RuntimeError("test producer terminated"))
+    lifecycle.bind_execution_future(execution)
+
+
 class FakeProducerRegistrar:
     """Test handoff boundary; stores tickets but performs no execution."""
 
@@ -77,9 +122,12 @@ class FakeProducerRegistrar:
         self.calls = 0
         self.reject_next = False
         self.raise_next = False
-        self.tickets: dict[str, tuple[DispatchRequest, Admission]] = {}
+        self.tickets: dict[str, tuple[DispatchRequest, Admission, ProducerLifecycle]] = {}
 
-    def register(self, request: DispatchRequest, admission: Admission) -> bool:
+    def register(
+        self, request: DispatchRequest, admission: Admission,
+        lifecycle: ProducerLifecycle,
+    ) -> bool:
         with self.lock:
             self.calls += 1
             if self.raise_next:
@@ -88,7 +136,7 @@ class FakeProducerRegistrar:
             if self.reject_next:
                 self.reject_next = False
                 return False
-            self.tickets[request.attempt_id] = (request, admission)
+            self.tickets[request.attempt_id] = (request, admission, lifecycle)
             return True
 
     def simulate_failure_after_acceptance(self, attempt_id: str) -> None:
@@ -121,7 +169,7 @@ def test_first_admission_registers_one_producer_before_202_and_preserves_ten_fie
     assert response.status_code == 202
     assert response.json() == {"attempt_id": ATTEMPT, "accepted": True}
     assert producer.calls == 1
-    request, admission = producer.tickets[ATTEMPT]
+    request, admission, _lifecycle = producer.tickets[ATTEMPT]
     assert set(request.model_dump(mode="json")) == set(dispatch())
     assert request.attempt_id == ATTEMPT
     assert request.simulation_input.model_dump(mode="json") == {"workload_profile": "demo-v1"}
@@ -163,8 +211,8 @@ def test_finished_duplicate_reuses_retained_receipt_without_registering_again() 
     app, producer, client = make_app()
     assert client.post("/internal/v1/executions").status_code == 202
     adapter: AttemptCacheAdmissionAdapter = app.state.admission_port
-    _, original = producer.tickets[ATTEMPT]
-    original_receipt = Receipt(RESULT, b'{"same":"raw signed bytes"}')
+    _, original, _lifecycle = producer.tickets[ATTEMPT]
+    original_receipt = make_receipt()
     outcome = adapter.complete(original, original_receipt)
     assert outcome.state == "FINISHED"
     repeated = client.post("/internal/v1/executions")
@@ -175,7 +223,7 @@ def test_finished_duplicate_reuses_retained_receipt_without_registering_again() 
     retained = adapter.admit(DispatchRequest.model_validate(dispatch()))
     assert retained.state == "FINISHED"
     assert retained.receipt is original_receipt
-    assert retained.receipt.raw_envelope == b'{"same":"raw signed bytes"}'
+    assert retained.receipt.raw_envelope == original_receipt.raw_envelope
 
 
 def test_conflicting_retained_dispatch_maps_to_409_without_second_producer() -> None:
@@ -244,11 +292,14 @@ def test_slow_sync_registrar_does_not_block_unrelated_asgi_health_request() -> N
             self.entered = Event()
             self.release = Event()
 
-        def register(self, request: DispatchRequest, admission: Admission) -> bool:
+        def register(
+            self, request: DispatchRequest, admission: Admission,
+            lifecycle: ProducerLifecycle,
+        ) -> bool:
             self.entered.set()
             if not self.release.wait(timeout=3):
                 return False
-            return super().register(request, admission)
+            return super().register(request, admission, lifecycle)
 
     producer = BlockingRegistrar()
     app, _, _ = make_app(registrar=producer)
@@ -298,11 +349,14 @@ def test_dispatch_waits_for_registered_handoff_before_returning_202() -> None:
             self.entered = Event()
             self.release = Event()
 
-        def register(self, request: DispatchRequest, admission: Admission) -> bool:
+        def register(
+            self, request: DispatchRequest, admission: Admission,
+            lifecycle: ProducerLifecycle,
+        ) -> bool:
             self.entered.set()
             if not self.release.wait(timeout=3):
                 return False
-            return super().register(request, admission)
+            return super().register(request, admission, lifecycle)
 
     producer = HeldRegistrar()
     app, _, _ = make_app(registrar=producer)
@@ -336,11 +390,14 @@ def test_cancelled_http_wait_does_not_cancel_or_rollback_registered_admission() 
             self.release = Event()
             self.registered = Event()
 
-        def register(self, request: DispatchRequest, admission: Admission) -> bool:
+        def register(
+            self, request: DispatchRequest, admission: Admission,
+            lifecycle: ProducerLifecycle,
+        ) -> bool:
             self.entered.set()
             if not self.release.wait(timeout=3):
                 return False
-            result = super().register(request, admission)
+            result = super().register(request, admission, lifecycle)
             self.registered.set()
             return result
 
@@ -380,11 +437,14 @@ def test_bounded_admission_executor_returns_503_when_outstanding_limit_is_full()
             self.entered = Event()
             self.release = Event()
 
-        def register(self, request: DispatchRequest, admission: Admission) -> bool:
+        def register(
+            self, request: DispatchRequest, admission: Admission,
+            lifecycle: ProducerLifecycle,
+        ) -> bool:
             self.entered.set()
             if not self.release.wait(timeout=3):
                 return False
-            return super().register(request, admission)
+            return super().register(request, admission, lifecycle)
 
     producer = HeldRegistrar()
     app, _, _ = make_app(registrar=producer, executor_workers=1, max_outstanding=1)
@@ -436,12 +496,12 @@ def test_completion_racing_with_duplicate_never_registers_second_producer() -> N
     app, producer, _ = make_app()
     assert LocalASGIClient(app).post("/internal/v1/executions").status_code == 202
     adapter: AttemptCacheAdmissionAdapter = app.state.admission_port
-    _, admission = producer.tickets[ATTEMPT]
+    _, admission, _lifecycle = producer.tickets[ATTEMPT]
     barrier = Barrier(2)
 
     def finish() -> None:
         barrier.wait(timeout=5)
-        adapter.complete(admission, Receipt(RESULT, b"receipt"))
+        adapter.complete(admission, make_receipt())
 
     def repeat() -> int:
         barrier.wait(timeout=5)
@@ -467,6 +527,290 @@ def test_producer_concurrency_limit_rejects_new_attempt_without_side_effect() ->
     assert app.state.attempt_cache.snapshot(UUID(second_id)) is None
     # A valid duplicate does not consume a second producer slot.
     assert client.post("/internal/v1/executions").status_code == 202
+
+
+def test_confirmed_terminal_failure_releases_slot_and_retained_replay_never_reruns() -> None:
+    app, producer, client = make_app(max_entries=3, concurrency=2)
+    assert client.post("/internal/v1/executions").status_code == 202
+    second_id = "55555555-5555-4555-8555-555555555555"
+    assert client.post("/internal/v1/executions", body=dispatch(second_id)).status_code == 202
+    adapter: AttemptCacheAdmissionAdapter = app.state.admission_port
+    first_admission = producer.tickets[ATTEMPT][1]
+    second_admission = producer.tickets[second_id][1]
+
+    first_lifecycle = producer.tickets[ATTEMPT][2]
+    second_lifecycle = producer.tickets[second_id][2]
+    terminate_producer(first_lifecycle)
+    terminate_producer(second_lifecycle)
+    first_lifecycle.fail_after_start()
+    second_lifecycle.fail_after_start()
+    assert adapter.active_producer_count == 0
+    assert app.state.attempt_cache.snapshot(UUID(ATTEMPT)).state is AttemptState.FAILED_NO_RECEIPT
+    assert app.state.attempt_cache.snapshot(UUID(ATTEMPT)).receipt is None
+
+    identical = client.post("/internal/v1/executions")
+    assert identical.status_code == 503
+    assert identical.json()["error"]["code"] == "DEPENDENCY_UNAVAILABLE"
+    altered = dispatch()
+    altered["duration_seconds"] = 61
+    assert client.post("/internal/v1/executions", body=altered).status_code == 409
+    assert producer.calls == 2
+
+    third_id = "66666666-6666-4666-8666-666666666666"
+    assert client.post("/internal/v1/executions", body=dispatch(third_id)).status_code == 202
+    assert producer.calls == 3
+
+
+def test_slow_registration_does_not_hold_global_lock_or_ack_pending_duplicate() -> None:
+    class SelectivelyBlockedRegistrar(FakeProducerRegistrar):
+        def __init__(self) -> None:
+            super().__init__()
+            self.first_entered = Event()
+            self.release_first = Event()
+
+        def register(
+            self, request: DispatchRequest, admission: Admission,
+            lifecycle: ProducerLifecycle,
+        ) -> bool:
+            if request.attempt_id == ATTEMPT:
+                self.first_entered.set()
+                if not self.release_first.wait(timeout=3):
+                    return False
+            return super().register(request, admission, lifecycle)
+
+    producer = SelectivelyBlockedRegistrar()
+    app, _, _ = make_app(registrar=producer, executor_workers=2, max_outstanding=4)
+
+    async def exercise() -> tuple[int, int, int, int]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://simulator.test") as client:
+            first = asyncio.create_task(client.post(
+                "/internal/v1/executions",
+                headers={"Authorization": f"Bearer {MANAGER_TOKEN}"},
+                json=dispatch(),
+            ))
+            assert await asyncio.to_thread(producer.first_entered.wait, 1)
+            # A duplicate while the original handoff is pending gets a retryable
+            # failure, never a premature 202.
+            duplicate = await client.post(
+                "/internal/v1/executions",
+                headers={"Authorization": f"Bearer {MANAGER_TOKEN}"},
+                json=dispatch(),
+            )
+            # A different Attempt can enter and complete registration meanwhile.
+            other_id = "55555555-5555-4555-8555-555555555555"
+            other = await asyncio.wait_for(client.post(
+                "/internal/v1/executions",
+                headers={"Authorization": f"Bearer {MANAGER_TOKEN}"},
+                json=dispatch(other_id),
+            ), timeout=1)
+            assert not first.done()
+            producer.release_first.set()
+            accepted = await asyncio.wait_for(first, timeout=2)
+            replay = await client.post(
+                "/internal/v1/executions",
+                headers={"Authorization": f"Bearer {MANAGER_TOKEN}"},
+                json=dispatch(),
+            )
+            return (duplicate.status_code, other.status_code,
+                    accepted.status_code, replay.status_code)
+
+    duplicate_status, other_status, accepted_status, replay_status = asyncio.run(exercise())
+    assert duplicate_status == 503
+    assert other_status == 202
+    assert accepted_status == 202
+    assert replay_status == 202
+    assert producer.calls == 2
+
+
+def test_uncertain_registration_keeps_owner_slot_and_never_relaunches() -> None:
+    class UncertainRegistrar(FakeProducerRegistrar):
+        def register(
+            self, request: DispatchRequest, admission: Admission,
+            lifecycle: ProducerLifecycle,
+        ) -> bool:
+            self.calls += 1
+            raise ProducerRegistrationUncertain("private uncertainty details")
+
+    app, producer, client = make_app(registrar=UncertainRegistrar(), concurrency=1)
+    first = client.post("/internal/v1/executions")
+    assert first.status_code == 503
+    assert "private uncertainty details" not in first.text
+    adapter: AttemptCacheAdmissionAdapter = app.state.admission_port
+    assert adapter.active_producer_count == 1
+    assert app.state.attempt_cache.snapshot(UUID(ATTEMPT)).state is AttemptState.IN_FLIGHT
+
+    repeated = client.post("/internal/v1/executions")
+    other = client.post(
+        "/internal/v1/executions",
+        body=dispatch("55555555-5555-4555-8555-555555555555"),
+    )
+    assert repeated.status_code == 503
+    assert other.status_code == 503
+    assert producer.calls == 1
+    assert app.state.attempt_cache.snapshot(
+        UUID("55555555-5555-4555-8555-555555555555")
+    ) is None
+
+
+def test_invalid_or_mismatched_receipt_is_rejected_without_cache_mutation() -> None:
+    app, producer, client = make_app()
+    assert client.post("/internal/v1/executions").status_code == 202
+    adapter: AttemptCacheAdmissionAdapter = app.state.admission_port
+    admission = producer.tickets[ATTEMPT][1]
+    wrong_attempt = make_receipt(
+        attempt_id="55555555-5555-4555-8555-555555555555"
+    )
+    with pytest.raises(AttemptAdmissionUnavailable, match="receipt is not bound"):
+        adapter.complete(admission, wrong_attempt)
+    wrong_outer = Receipt(
+        UUID("99999999-9999-4999-8999-999999999999"),
+        signed_result_envelope(result_id=RESULT),
+    )
+    with pytest.raises(AttemptAdmissionUnavailable, match="receipt is not bound"):
+        adapter.complete(admission, wrong_outer)
+    retained = app.state.attempt_cache.snapshot(UUID(ATTEMPT))
+    assert retained.state is AttemptState.IN_FLIGHT
+    assert retained.receipt is None
+    assert adapter.active_producer_count == 1
+
+
+def test_completion_and_failure_race_releases_the_slot_exactly_once() -> None:
+    app, producer, client = make_app(max_entries=2, concurrency=1)
+    assert client.post("/internal/v1/executions").status_code == 202
+    _, admission, lifecycle = producer.tickets[ATTEMPT]
+    terminate_producer(lifecycle)
+    barrier = Barrier(3)
+
+    def complete():
+        barrier.wait(timeout=3)
+        try:
+            return app.state.admission_port.complete(admission, make_receipt()).state
+        except Exception:
+            return "LOST"
+
+    def fail():
+        barrier.wait(timeout=3)
+        try:
+            return lifecycle.fail_after_start().state
+        except Exception:
+            return "LOST"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        completion = pool.submit(complete)
+        failure = pool.submit(fail)
+        barrier.wait(timeout=3)
+        outcomes = completion.result(timeout=3), failure.result(timeout=3)
+    winners = [item for item in outcomes if item != "LOST"]
+    assert len(winners) == 1
+    assert app.state.admission_port.active_producer_count == 0
+    retained = app.state.attempt_cache.snapshot(UUID(ATTEMPT))
+    assert retained.state in {AttemptState.FINISHED, AttemptState.FAILED_NO_RECEIPT}
+    assert (retained.receipt is not None) is (retained.state is AttemptState.FINISHED)
+
+
+def test_duplicate_failure_signal_does_not_release_capacity_twice() -> None:
+    app, producer, client = make_app(max_entries=2, concurrency=1)
+    assert client.post("/internal/v1/executions").status_code == 202
+    _, admission, lifecycle = producer.tickets[ATTEMPT]
+    terminate_producer(lifecycle)
+    lifecycle.fail_after_start()
+    assert app.state.admission_port.active_producer_count == 0
+    with pytest.raises(AttemptAdmissionUnavailable):
+        lifecycle.fail_after_start()
+    assert app.state.admission_port.active_producer_count == 0
+    next_id = "55555555-5555-4555-8555-555555555555"
+    assert client.post("/internal/v1/executions", body=dispatch(next_id)).status_code == 202
+    assert app.state.admission_port.active_producer_count == 1
+    assert producer.calls == 2
+
+
+def test_failure_signal_requires_the_bound_execution_future_to_terminate() -> None:
+    app, producer, client = make_app(max_entries=2, concurrency=1)
+    assert client.post("/internal/v1/executions").status_code == 202
+    _, _admission, lifecycle = producer.tickets[ATTEMPT]
+    execution = Future()
+    lifecycle.bind_execution_future(execution)
+
+    with pytest.raises(AttemptAdmissionUnavailable, match="not confirmed"):
+        lifecycle.fail_after_start()
+    assert app.state.admission_port.active_producer_count == 1
+    assert app.state.attempt_cache.snapshot(UUID(ATTEMPT)).state is AttemptState.IN_FLIGHT
+
+    unrelated = Future()
+    unrelated.set_exception(RuntimeError("unrelated future"))
+    with pytest.raises(AttemptAdmissionUnavailable, match="already bound"):
+        lifecycle.bind_execution_future(unrelated)
+    assert app.state.admission_port.active_producer_count == 1
+
+    execution.set_exception(RuntimeError("actual producer terminated"))
+    lifecycle.fail_after_start()
+    assert app.state.admission_port.active_producer_count == 0
+    assert app.state.attempt_cache.snapshot(UUID(ATTEMPT)).state is AttemptState.FAILED_NO_RECEIPT
+
+
+def test_shutdown_racing_registration_keeps_confirmed_producer_owned_until_terminal() -> None:
+    class HeldRegistrar(FakeProducerRegistrar):
+        def __init__(self) -> None:
+            super().__init__()
+            self.entered = Event()
+            self.release = Event()
+
+        def register(
+            self, request: DispatchRequest, admission: Admission,
+            lifecycle: ProducerLifecycle,
+        ) -> bool:
+            self.entered.set()
+            if not self.release.wait(timeout=3):
+                return False
+            return super().register(request, admission, lifecycle)
+
+    producer = HeldRegistrar()
+    app, _, _ = make_app(registrar=producer)
+    adapter: AttemptCacheAdmissionAdapter = app.state.admission_port
+
+    async def exercise() -> int:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://simulator.test") as client:
+            task = asyncio.create_task(client.post(
+                "/internal/v1/executions",
+                headers={"Authorization": f"Bearer {MANAGER_TOKEN}"},
+                json=dispatch(),
+            ))
+            assert await asyncio.to_thread(producer.entered.wait, 1)
+            adapter.close()
+            producer.release.set()
+            response = await asyncio.wait_for(task, timeout=2)
+            return response.status_code
+
+    assert asyncio.run(exercise()) == 503
+    assert producer.calls == 1
+    assert adapter.active_producer_count == 1
+    assert not adapter.drain(0)
+    admission = producer.tickets[ATTEMPT][1]
+    adapter.complete(admission, make_receipt())
+    assert adapter.active_producer_count == 0
+    assert adapter.drain(0)
+
+
+def test_completed_receipt_survives_callback_transport_failure_byte_exactly() -> None:
+    app, producer, client = make_app()
+    assert client.post("/internal/v1/executions").status_code == 202
+    adapter: AttemptCacheAdmissionAdapter = app.state.admission_port
+    admission = producer.tickets[ATTEMPT][1]
+    raw = signed_result_envelope()
+    retained_receipt = Receipt(RESULT, raw)
+    adapter.complete(admission, retained_receipt)
+    # Simulate only transport failure after the immutable receipt was retained.
+    with pytest.raises(ConnectionError, match="callback transport"):
+        raise ConnectionError("callback transport unavailable")
+    replay = client.post("/internal/v1/executions")
+    assert replay.status_code == 202
+    retained = app.state.attempt_cache.snapshot(UUID(ATTEMPT))
+    assert retained.state is AttemptState.FINISHED
+    assert retained.receipt.raw_envelope is raw
+    assert retained.receipt.raw_envelope == raw
+    assert producer.calls == 1
 
 
 def test_cache_full_and_cache_closed_map_to_503_without_new_producer() -> None:
@@ -508,10 +852,10 @@ def test_shutdown_drain_completes_when_registered_producer_finishes() -> None:
     app, producer, client = make_app()
     assert client.post("/internal/v1/executions").status_code == 202
     adapter: AttemptCacheAdmissionAdapter = app.state.admission_port
-    _, admission = producer.tickets[ATTEMPT]
+    _, admission, _lifecycle = producer.tickets[ATTEMPT]
     adapter.close()
     worker = Thread(
-        target=lambda: adapter.complete(admission, Receipt(RESULT, b"finished")),
+        target=lambda: adapter.complete(admission, make_receipt()),
         daemon=True,
     )
     worker.start()
@@ -569,7 +913,7 @@ def test_d16_conflict_detection_is_retained_process_only() -> None:
     )
     original = DispatchRequest.model_validate(dispatch())
     initial = adapter.admit(original)
-    adapter.complete(initial.cache_admission, Receipt(RESULT, b"original"))
+    adapter.complete(initial.cache_admission, make_receipt())
     changed_payload = dispatch()
     changed_payload["gpu_count"] = 3
     changed = DispatchRequest.model_validate(changed_payload)
