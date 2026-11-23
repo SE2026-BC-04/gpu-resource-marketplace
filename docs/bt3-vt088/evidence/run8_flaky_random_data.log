@@ -1,0 +1,34 @@
+== seed 1 (--hypothesis-seed fixed, max_examples=150 per property)
+32 passed in 3.46s
+== seed 42 (--hypothesis-seed fixed, max_examples=150 per property)
+32 passed in 3.36s
+== seed 2026 (--hypothesis-seed fixed, max_examples=150 per property)
+32 passed in 3.08s
+== seed 23001892 (--hypothesis-seed fixed, max_examples=150 per property)
+32 passed in 2.99s
+== seed 987654321 (--hypothesis-seed fixed, max_examples=150 per property)
+32 passed in 3.50s
+== random seed run 1
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+32 passed in 2.63s
+== random seed run 2
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+32 passed in 3.31s
+== random seed run 3
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+  - Stopped because settings.max_examples=150
+32 passed in 3.08s

@@ -1,0 +1,43 @@
+{
+  "scenario": "40 concurrent tasks x 1 record, shared ScryptPasswordHasher(DEFAULT_PROFILE n=2^15 r=8 p=3, max_concurrent=4, timeout=2s)",
+  "machine": {
+    "platform": "Windows-11-10.0.26300-SP0",
+    "processor": "Intel64 Family 6 Model 140 Stepping 2, GenuineIntel",
+    "cpu_count": 8
+  },
+  "single_hash_median_s": 1.125,
+  "p95_target_s": 1.5,
+  "rounds": [
+    {
+      "round": 1,
+      "created": 8,
+      "failed_hasher_busy": 32,
+      "failed_other": 0,
+      "p50_s": 2.007,
+      "p95_s": 2.787,
+      "max_s": 2.804,
+      "p95_created_only_s": 2.8
+    },
+    {
+      "round": 2,
+      "created": 8,
+      "failed_hasher_busy": 32,
+      "failed_other": 0,
+      "p50_s": 2.002,
+      "p95_s": 2.857,
+      "max_s": 2.887,
+      "p95_created_only_s": 2.885
+    },
+    {
+      "round": 3,
+      "created": 8,
+      "failed_hasher_busy": 32,
+      "failed_other": 0,
+      "p50_s": 2.005,
+      "p95_s": 3.25,
+      "max_s": 3.466,
+      "p95_created_only_s": 3.417
+    }
+  ],
+  "target_met_all_rounds": false
+}

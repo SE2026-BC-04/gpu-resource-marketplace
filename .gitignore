@@ -34,3 +34,9 @@ coverage/
 # Operating system files
 .DS_Store
 Thumbs.db
+
+# BT3 (VT-088): property-based testing and coverage artifacts
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
