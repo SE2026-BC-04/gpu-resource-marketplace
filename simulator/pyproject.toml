@@ -4,8 +4,10 @@ version = "0.1.0"
 description = "Isolated simulator runtime foundation for GPU Resource Marketplace"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "cryptography>=44,<47",
     "fastapi>=0.115,<1",
     "pydantic-settings>=2.6,<3",
+    "rfc8785>=0.1.4,<1",
     "uvicorn>=0.34,<1",
 ]
 
