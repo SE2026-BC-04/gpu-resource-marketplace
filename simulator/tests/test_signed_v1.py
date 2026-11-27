@@ -14,6 +14,7 @@ from gpu_marketplace_simulator.signed_v1 import (
     SIGNING_PREFIX,
     PayloadValidationError,
     SignedResultV1Envelope,
+    SignedResultV1Payload,
     SigningError,
     canonical_payload_bytes,
     payload_from_json,
@@ -64,6 +65,15 @@ class FixedTestSigner:
     def sign(self, *, worker_id: str, key_id: str, message: bytes) -> bytes:
         self.identity = (worker_id, key_id)
         return self.private_key.sign(message)
+
+
+class CountingSigner:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def sign(self, *, worker_id: str, key_id: str, message: bytes) -> bytes:
+        self.calls += 1
+        return bytes(64)
 
 
 def test_adr004_exact_schema_canonical_bytes_and_public_vector() -> None:
@@ -123,6 +133,42 @@ def test_invalid_payloads_fail_closed(mutate) -> None:
 
 
 @pytest.mark.parametrize(
+    "mutation",
+    ("outcome", "uuid", "failure_reason", "digest", "timestamp", "missing", "extra"),
+)
+def test_sign_payload_revalidates_constructed_models_before_signing(mutation: str) -> None:
+    value = valid_payload()
+    if mutation == "outcome":
+        value["outcome"] = "UNKNOWN"
+    elif mutation == "uuid":
+        value["worker_id"] = "not-a-uuid"
+    elif mutation == "failure_reason":
+        value.update(outcome="FAILED", failure_reason="SYSTEM_FAULT")
+    elif mutation == "digest":
+        value["result_digest"] = "sha256:malformed"
+    elif mutation == "timestamp":
+        value["finished_at"] = "2026-02-30T08:00:00.000000Z"
+    elif mutation == "missing":
+        del value["key_id"]
+
+    payload = SignedResultV1Payload.model_construct(**value)
+    if mutation == "extra":
+        payload.__dict__["unexpected"] = "must be rejected"
+
+    signer = CountingSigner()
+    with pytest.raises(PayloadValidationError):
+        sign_payload(payload, signer)
+    assert signer.calls == 0
+
+
+def test_canonicalization_revalidates_constructed_payload() -> None:
+    invalid = valid_payload() | {"outcome": "bogus"}
+    payload = SignedResultV1Payload.model_construct(**invalid)
+    with pytest.raises(PayloadValidationError):
+        canonical_payload_bytes(payload)
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("schema_version", 1),
@@ -174,6 +220,20 @@ def test_signature_rejects_tampering_wrong_key_and_bad_provider_output() -> None
         wrong_key.verify(signed.signature_bytes, signed.signing_message)
     with pytest.raises(SigningError):
         sign_payload(payload, type("BadSigner", (), {"sign": lambda *_args, **_kwargs: b"short"})())
+
+
+def test_signer_exception_is_classified_without_leaking_provider_details() -> None:
+    class RaisingSigner:
+        def sign(self, *, worker_id: str, key_id: str, message: bytes) -> bytes:
+            raise RuntimeError("FAKE_PROVIDER_DETAIL_PRIVATE_KEY_PATH_AND_TOKEN")
+
+    payload = payload_from_mapping(valid_payload())
+    with pytest.raises(SigningError) as caught:
+        sign_payload(payload, RaisingSigner())
+
+    assert str(caught.value) == "injected signer failed"
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__ is True
 
 
 def test_envelope_rejects_noncanonical_signature_encodings() -> None:

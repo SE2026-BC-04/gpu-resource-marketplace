@@ -151,7 +151,21 @@ def payload_from_json(raw: str | bytes) -> SignedResultV1Payload:
 
 def canonical_payload_bytes(payload: SignedResultV1Payload) -> bytes:
     """Return RFC 8785 JCS UTF-8 bytes, with no BOM or trailing newline."""
-    return rfc8785.dumps(payload.model_dump(mode="json"))
+    validated = _revalidate_payload(payload)
+    return rfc8785.dumps(validated.model_dump(mode="json"))
+
+
+def _revalidate_payload(payload: object) -> SignedResultV1Payload:
+    """Rebuild a payload from its stored fields; never trust Pydantic provenance."""
+    if type(payload) is not SignedResultV1Payload:
+        raise PayloadValidationError("payload does not satisfy Signed Result V1")
+    raw_fields = vars(payload).copy()
+    if set(raw_fields) != set(SignedResultV1Payload.model_fields):
+        raise PayloadValidationError("payload does not satisfy Signed Result V1")
+    try:
+        return SignedResultV1Payload.model_validate(raw_fields, strict=True)
+    except ValidationError:
+        raise PayloadValidationError("payload does not satisfy Signed Result V1") from None
 
 
 def signing_message(payload: SignedResultV1Payload) -> bytes:
@@ -160,19 +174,20 @@ def signing_message(payload: SignedResultV1Payload) -> bytes:
 
 def sign_payload(payload: SignedResultV1Payload, signer: SignerProvider) -> SignedResultV1:
     """Sign the canonical eleven-field payload through the injected provider."""
-    canonical = canonical_payload_bytes(payload)
+    validated = _revalidate_payload(payload)
+    canonical = rfc8785.dumps(validated.model_dump(mode="json"))
     message = SIGNING_PREFIX + canonical
     try:
         signature_bytes = signer.sign(
-            worker_id=payload.worker_id,
-            key_id=payload.key_id,
+            worker_id=validated.worker_id,
+            key_id=validated.key_id,
             message=message,
         )
-    except Exception as exc:
-        raise SigningError("injected signer failed") from exc
+    except Exception:
+        raise SigningError("injected signer failed") from None
     if not isinstance(signature_bytes, bytes) or len(signature_bytes) != 64:
         raise SigningError("injected signer must return exactly 64 raw Ed25519 bytes")
     encoded = base64.urlsafe_b64encode(signature_bytes).decode("ascii").rstrip("=")
     if len(encoded) != 86:
         raise SigningError("signature encoding is not canonical V1 base64url")
-    return SignedResultV1(payload, canonical, message, signature_bytes, encoded)
+    return SignedResultV1(validated, canonical, message, signature_bytes, encoded)
