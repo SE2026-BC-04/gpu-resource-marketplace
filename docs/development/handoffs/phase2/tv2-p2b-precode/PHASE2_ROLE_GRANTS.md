@@ -75,6 +75,6 @@ R2 repeats the shape of `0002`'s final check, with the Phase 2 matrix: after gra
 
 | Item | Content |
 |---|---|
-| Reads | `list_pending_candidates` and `list_due_running_jobs` use only privileges already listed in §1-§2: `result_inbox` `R(id, received_at, state, bound_job_id, bound_attempt_id)`, `jobs` `R(id, status)`, `execution_attempts` `R(job_id, hard_deadline_at)` |
+| Reads | `list_pending_candidates`, `list_due_running_jobs` and the read-only `reconcile_settlement` (`B-IF-07A`) use only privileges already listed in §1-§2 (the last also reads `allocations`, `signed_results` and `job_reputation_contributions`, all `R(all)` for the Manager): `result_inbox` `R(id, received_at, state, bound_job_id, bound_attempt_id)`, `jobs` `R(id, status)`, `execution_attempts` `R(job_id, hard_deadline_at)` |
 | Restriction that is not a grant | the Manager holds `R(all)` on `result_inbox`, including `original_envelope_raw`; the discovery statements use an explicit column list and never select it. This is a code and test property (`P2B-DRT-39/40`), not something a column grant can enforce |
-| Proof | `P2B-DRT-40` (native `gpm_manager_app` runs both reads; `gpm_api_app` `42501`); R2 self-check inventory and the expected list do not change |
+| Proof | `P2B-DRT-40` (native `gpm_manager_app` runs the three reads; `gpm_api_app` `42501`); R2 self-check inventory and the expected list do not change |
