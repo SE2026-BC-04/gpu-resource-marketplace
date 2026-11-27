@@ -17,9 +17,17 @@ from sqlalchemy.engine import make_url
 
 
 _BEARER_TOKEN68 = re.compile(r"[A-Za-z0-9._~+/-]+={0,}")
-_MINIMUM_DISPATCH_TOKEN_CHARACTERS = 32
+_MINIMUM_DISPATCH_TOKEN_CONTENT_CHARACTERS = 32
 _MANAGER_DATABASE_LOGIN = "gpm_manager_app"
 _CONFIG_FIELDS = frozenset({"dispatch_token", "database_url"})
+_SAFE_VALIDATION_MESSAGES = {
+    ("dispatch_token", "missing"): "dispatch_token is required",
+    ("dispatch_token", "string_type"): "dispatch_token must be a string",
+    ("dispatch_token", "value_error"): "dispatch_token is invalid",
+    ("database_url", "missing"): "database_url is required",
+    ("database_url", "string_type"): "database_url must be a string",
+    ("database_url", "value_error"): "database_url is invalid",
+}
 
 
 class _ManagerPhase2ConfigModel(BaseModel):
@@ -40,13 +48,14 @@ class _ManagerPhase2ConfigModel(BaseModel):
         token = value.get_secret_value()
         if not token or token.isspace():
             raise ValueError("Manager dispatch token must not be empty")
-        if len(token) < _MINIMUM_DISPATCH_TOKEN_CHARACTERS:
-            raise ValueError(
-                "Manager dispatch token must contain at least 32 characters"
-            )
         if _BEARER_TOKEN68.fullmatch(token) is None:
             raise ValueError(
                 "Manager dispatch token must be a valid Bearer token68 value"
+            )
+        non_padding_content = token.rstrip("=")
+        if len(non_padding_content) < _MINIMUM_DISPATCH_TOKEN_CONTENT_CHARACTERS:
+            raise ValueError(
+                "Manager dispatch token must contain at least 32 non-padding characters"
             )
         return value
 
@@ -72,6 +81,14 @@ class _ManagerPhase2ConfigModel(BaseModel):
             raise ValueError(
                 "Manager database URL must use the configured gpm_manager_app login"
             )
+        if url.query:
+            # SQLAlchemy's psycopg dialect lets URL query keys override or extend
+            # the authority-derived connection arguments. No Manager connection
+            # option is approved here, so reject the entire query without
+            # normalizing or silently dropping any setting.
+            raise ValueError(
+                "Manager database URL must not include query parameters"
+            )
         return value
 
 
@@ -83,8 +100,8 @@ class ManagerConfigValidationError(ValueError):
 class ManagerPhase2Config:
     """Manager-owned Phase 2 inputs; all values must be supplied explicitly.
 
-    The 32-character dispatch-token floor is only a representation check. It
-    does not measure or prove entropy. Secure provisioning of at least 256
+    The 32-character non-padding dispatch-token floor is only a representation
+    check. It does not measure or prove entropy. Secure provisioning of at least 256
     random bits and agreement on the provisioning format remain owner/interface
     requirements. No other component's credential is accepted or retained.
     """
@@ -127,11 +144,25 @@ def _validate_values(values: Mapping[str, object]) -> _ManagerPhase2ConfigModel:
             include_url=False,
         ):
             known_field = next(
-                (part for part in issue["loc"] if part in _CONFIG_FIELDS),
+                (
+                    part
+                    for part in issue["loc"]
+                    if isinstance(part, str) and part in _CONFIG_FIELDS
+                ),
                 None,
             )
-            prefix = f"{known_field}: " if known_field is not None else ""
-            safe_issues.append(f"{prefix}{issue['msg']}")
+            category = issue["type"]
+            if category == "extra_forbidden":
+                safe_issues.append("configuration contains unsupported fields")
+            elif known_field is None:
+                safe_issues.append("configuration is invalid")
+            else:
+                safe_issues.append(
+                    _SAFE_VALIDATION_MESSAGES.get(
+                        (known_field, category),
+                        "configuration is invalid",
+                    )
+                )
         sanitized_message = "; ".join(safe_issues)
 
     # Raise outside the except block so the raw ValidationError does not remain
