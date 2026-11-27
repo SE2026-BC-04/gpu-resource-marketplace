@@ -131,7 +131,7 @@ Codex sandbox; the comparison environment was the approved native WSL terminal.
 
 | Control | Sandbox result | Native WSL result |
 |---|---|---|
-| A. Standalone cross-thread `call_soon_threadsafe` wake | External 8s timeout; the coroutine did not wake and its asyncio timeout did not fire | `WAKE_OK`, 0.0004s, exit 0 |
+| A. Standalone cross-thread `call_soon_threadsafe` wake | The scheduled callback ran, but its Future waiter did not wake; the asyncio 2s timeout also did not fire; external 8s timeout exit 124 | Same script: `CALLBACK_RAN`, `WAKE_OK`, 0.001s, external timeout exit 0 |
 | B. Published #60 health + dispatch | Health `TestClient.__enter__` stalled; faulthandler showed AnyIO portal loop in selector wait and caller blocked in `start_task_soon` | 3 passed, 0.32s |
 | C. Dependency-only d40 health + dispatch | Same `TestClient.__enter__` stall and stack shape | 3 passed, 0.30s |
 | D. Stage A implementation | Group 1 stalled in `LocalASGIClient.post`; bounded trace showed loop in selector wait and producer Future ended only after the test hook's finite wait elapsed | Group 1 passed, 0.34s; corrected full Stage A suite passed 20/20 |
