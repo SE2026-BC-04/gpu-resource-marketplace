@@ -342,9 +342,16 @@ class AttemptCacheAdmissionAdapter:
                     or slot.lifecycle is not lifecycle
                     or slot.execution_future is None):
                 raise AttemptAdmissionUnavailable("producer registration is stale")
+            execution_future = slot.execution_future
+            if (execution_future.done() and not execution_future.cancelled()
+                    and execution_future.exception() is None):
+                # A successful Future without a retained receipt is a
+                # producer-contract violation. Fail closed and alert without
+                # releasing the slot or logging receipt/provider contents.
+                logger.error("attempt_producer_succeeded_without_receipt")
             try:
                 evidence = ProducerFailureEvidence.from_terminated_execution(
-                    slot.execution_future
+                    execution_future
                 )
             except (TypeError, ValueError) as error:
                 raise AttemptAdmissionUnavailable(

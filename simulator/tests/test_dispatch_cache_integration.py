@@ -719,7 +719,7 @@ def test_invalid_or_mismatched_receipt_is_rejected_without_cache_mutation() -> N
     assert adapter.active_producer_count == 1
 
 
-def test_swallowed_completion_rejection_is_not_treated_as_producer_failure() -> None:
+def test_swallowed_completion_rejection_is_not_treated_as_producer_failure(capsys) -> None:
     app, producer, client = make_app(max_entries=2, concurrency=1)
     assert client.post("/internal/v1/executions").status_code == 202
     _, admission, lifecycle = producer.tickets[ATTEMPT]
@@ -734,6 +734,9 @@ def test_swallowed_completion_rejection_is_not_treated_as_producer_failure() -> 
     execution.set_result(None)
     with pytest.raises(AttemptAdmissionUnavailable, match="not confirmed"):
         lifecycle.fail_after_start()
+    logs = capsys.readouterr().out
+    assert "attempt_producer_succeeded_without_receipt" in logs
+    assert "receipt is not bound" not in logs
 
     retained = app.state.attempt_cache.snapshot(UUID(ATTEMPT))
     assert retained.state is AttemptState.IN_FLIGHT
