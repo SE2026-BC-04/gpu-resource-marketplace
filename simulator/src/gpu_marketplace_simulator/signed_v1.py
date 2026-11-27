@@ -38,6 +38,10 @@ class PayloadValidationError(SignedResultError):
     """The supplied payload is not an exact, valid Signed Result V1 object."""
 
 
+class EnvelopeValidationError(PayloadValidationError):
+    """The supplied raw callback envelope is not a strict Signed Result V1 value."""
+
+
 class SigningError(SignedResultError):
     """The injected signer failed or returned an invalid signature."""
 
@@ -90,6 +94,53 @@ class SignedResultV1Envelope(BaseModel):
         if len(decoded) != 64 or base64.urlsafe_b64encode(decoded).decode("ascii").rstrip("=") != self.signature:
             raise ValueError("signature is not canonical 64-byte unpadded base64url")
         return self
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedSignedResultV1Envelope:
+    """Validated envelope paired with the exact immutable bytes received."""
+
+    envelope: SignedResultV1Envelope
+    raw_envelope: bytes
+
+
+def envelope_from_json(raw: bytes) -> ParsedSignedResultV1Envelope:
+    """Strictly parse a complete V1 envelope without replacing its signed bytes.
+
+    Duplicate object members are rejected at every nesting level. The returned
+    model is for structural validation; this function does not verify Ed25519.
+    """
+    if type(raw) is not bytes:
+        raise EnvelopeValidationError("envelope must be raw UTF-8 JSON bytes")
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise EnvelopeValidationError("duplicate JSON object key")
+            result[key] = value
+        return result
+
+    def reject_constant(_: str) -> object:
+        raise EnvelopeValidationError("non-JSON numeric constant")
+
+    try:
+        decoded_text = raw.decode("utf-8", errors="strict")
+        decoded = json.loads(
+            decoded_text,
+            object_pairs_hook=unique_object,
+            parse_constant=reject_constant,
+        )
+    except EnvelopeValidationError:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, TypeError):
+        raise EnvelopeValidationError("envelope is not valid UTF-8 JSON") from None
+
+    try:
+        envelope = SignedResultV1Envelope.model_validate(decoded, strict=True)
+    except ValidationError:
+        raise EnvelopeValidationError("envelope does not satisfy Signed Result V1") from None
+    return ParsedSignedResultV1Envelope(envelope=envelope, raw_envelope=raw)
 
 
 class SignerProvider(Protocol):

@@ -12,11 +12,13 @@ import pytest
 from gpu_marketplace_simulator.signed_v1 import (
     SIGNATURE_ENCODING,
     SIGNING_PREFIX,
+    EnvelopeValidationError,
     PayloadValidationError,
     SignedResultV1Envelope,
     SignedResultV1Payload,
     SigningError,
     canonical_payload_bytes,
+    envelope_from_json,
     payload_from_json,
     payload_from_mapping,
     sign_payload,
@@ -246,6 +248,55 @@ def test_envelope_rejects_noncanonical_signature_encodings() -> None:
         )
     with pytest.raises(ValueError):
         SignedResultV1Envelope(payload=payload, signature="A" * 86, signature_encoding="other")
+
+
+def test_raw_envelope_parser_validates_structure_and_preserves_exact_bytes() -> None:
+    signed = sign_payload(payload_from_mapping(valid_payload()), FixedTestSigner())
+    expected = signed.envelope()
+    raw = json.dumps(
+        expected.model_dump(mode="json"), separators=(",", ":")
+    ).encode("utf-8")
+
+    parsed = envelope_from_json(raw)
+
+    assert parsed.envelope == expected
+    assert parsed.raw_envelope is raw
+    assert parsed.raw_envelope == raw
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"payload":{},"payload":{},"signature":"x","signature_encoding":"base64url-no-padding"}',
+        b'{"payload":{"outcome":"SUCCESS","outcome":"FAILED"},"signature":"x","signature_encoding":"base64url-no-padding"}',
+        b'{"payload":NaN,"signature":"x","signature_encoding":"base64url-no-padding"}',
+        b"\xff",
+        b"\xef\xbb\xbf{}",
+        b"not-json",
+        b"",
+        b"[" * 5000 + b"]" * 5000,
+    ],
+)
+def test_raw_envelope_parser_rejects_malformed_or_ambiguous_json(raw: bytes) -> None:
+    with pytest.raises(EnvelopeValidationError):
+        envelope_from_json(raw)
+
+
+def test_raw_envelope_parser_rejects_wrong_outer_schema_and_non_bytes() -> None:
+    valid = sign_payload(payload_from_mapping(valid_payload()), FixedTestSigner()).envelope()
+    value = valid.model_dump(mode="json")
+    cases = [
+        value | {"unexpected": True},
+        {key: field for key, field in value.items() if key != "signature"},
+        value | {"signature": 1},
+        value | {"signature_encoding": "other"},
+    ]
+    for case in cases:
+        with pytest.raises(EnvelopeValidationError):
+            envelope_from_json(json.dumps(case).encode("utf-8"))
+    for non_bytes in ("{}", bytearray(b"{}"), None):
+        with pytest.raises(EnvelopeValidationError):
+            envelope_from_json(non_bytes)  # type: ignore[arg-type]
 
 
 def test_node_independent_jcs_and_ed25519_verification() -> None:
