@@ -22,6 +22,7 @@ Outbox lease 30 s; retry backoff `2, 4, 8, 16, 30, 30, …` s; poll default 2 s;
 | graceful-shutdown budget | TV1 | ≥ longest UoW (`statement_timeout` + commit) so in-flight UoWs resolve | `P2B-DRT-11`, `P2B-UOW-05` |
 | retry budget for `40001`/`40P01` | TV2 | finite; stable identifiers; never for `23xxx`/`40003` | `P2B-UOW-04` |
 | repair lease, repair backoff (`repair_next_at`) and repair budget (`B-IF-06R`, proposed, D-19) | TV1 (+ TV2, TV5) | lease ≥ the HTTP timeouts (ADR-005 2 s / 5 s); backoff and budget bounded so a repair never reaches `hard_deadline_at`; counted per Outbox row | `P2B-DRT-30..36` (no numbers proposed) |
+| discovery page `bound` for `list_pending_candidates`/`list_due_running_jobs`; deadline-pass interval and cycle count (`B-IF-07A` §3, addendum D-20); whether a second partial `result_inbox` index on `(received_at, id) WHERE state='PENDING'` is needed | TV1 (+ TV2, TV4) | the deadline pass runs at least once per bounded time and bounded number of cycles even while candidates keep arriving (`hard_deadline_at` is fixed by ADR-005, so the pass interval must be well below the 120 s margin it protects); page bound >= 1 and small enough to keep one unlocked read short; no index is added unless measured | scan time of the transient `PENDING` set and of the due-Job read under the Phase 2B fixtures, deadline-pass lag under a steady candidate stream (`P2B-DRT-42`) |
 
 ## 2.1 Admission deadline vs processing budget (P1-02)
 
