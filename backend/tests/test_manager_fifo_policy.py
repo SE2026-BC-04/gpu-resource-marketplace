@@ -12,6 +12,7 @@ from gpu_marketplace.manager.fifo_policy import (
     ListingSnapshot,
     PolicyAssessment,
     assess_fifo,
+    assess_fifo_head,
 )
 
 
@@ -43,6 +44,24 @@ def test_fifo_uses_enqueue_seq_independent_of_input_and_uuid_order() -> None:
     for order in permutations(jobs):
         decision = assess_fifo(LISTING, iter(order))
         assert decision == FifoDecision(PolicyAssessment.ELIGIBLE, LISTING_ID, 4, head)
+
+
+def test_runtime_boundary_assesses_exact_authoritative_queued_head() -> None:
+    head = job(1, 2)
+    decision = assess_fifo_head(replace(LISTING, allocated_gpu_count=2), head)
+    assert decision == FifoDecision(PolicyAssessment.ELIGIBLE, LISTING_ID, 2, head)
+
+
+def test_runtime_boundary_accepts_authoritative_no_head() -> None:
+    decision = assess_fifo_head(LISTING, None)
+    assert decision == FifoDecision(PolicyAssessment.EMPTY, LISTING_ID, 4, None)
+
+
+def test_runtime_boundary_rejects_nonqueued_or_foreign_head() -> None:
+    with pytest.raises(ValueError, match="QUEUED"):
+        assess_fifo_head(LISTING, job(1, status="CANCELLED"))
+    with pytest.raises(ValueError, match="another Listing"):
+        assess_fifo_head(LISTING, job(1, listing_id=UUID(int=11)))
 
 
 def test_unfittable_head_blocks_smaller_later_job_without_backfill() -> None:

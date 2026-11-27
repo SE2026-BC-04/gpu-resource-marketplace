@@ -82,17 +82,13 @@ class FifoDecision:
 def assess_fifo(
     listing: ListingSnapshot, jobs: Iterable[JobSnapshot]
 ) -> FifoDecision:
-    """Return the FIFO/capacity assessment for the true queued head.
+    """Pure multi-row oracle for unit tests; runtime should pass one locked head.
 
-    The caller must supply authoritative snapshots and, for runtime use, obtain
-    the queued head under the transaction's agreed locks. This function cannot
-    detect an omitted earlier queued Job. Non-queued Jobs (including CANCELLED)
-    are excluded before choosing the minimum ``enqueue_seq``.
+    This helper can find the minimum queued ``enqueue_seq`` in the supplied
+    iterable, but cannot detect an omitted earlier row. Do not traverse a queue
+    from the runtime transaction; use :func:`assess_fifo_head` with the one
+    authoritative queued head TV2 selected under the agreed locks, or ``None``.
     """
-    available = listing.total_gpu_count - listing.allocated_gpu_count
-    if listing.status == "PAUSED":
-        return FifoDecision(PolicyAssessment.LISTING_NOT_ACTIVE, listing.listing_id, available, None)
-
     head: JobSnapshot | None = None
     seen_ids: set[UUID] = set()
     seen_sequences: set[int] = set()
@@ -108,6 +104,29 @@ def assess_fifo(
         if job.status == "QUEUED" and (head is None or job.enqueue_seq < head.enqueue_seq):
             head = job
 
+    return assess_fifo_head(listing, head)
+
+
+def assess_fifo_head(
+    listing: ListingSnapshot, head: JobSnapshot | None
+) -> FifoDecision:
+    """Assess one authoritative QUEUED head (or an authoritative empty queue).
+
+    Runtime callers must have TV2 select the actual head by ``enqueue_seq``
+    under Listing → Job locks (Worker advisory lock first where applicable),
+    without Job ``SKIP LOCKED``. This function accepts no ORM/session and does
+    not make database or allocation decisions.
+    """
+    available = listing.total_gpu_count - listing.allocated_gpu_count
+    if head is not None:
+        if not isinstance(head, JobSnapshot):
+            raise ValueError("head must be a JobSnapshot or None")
+        if head.listing_id != listing.listing_id:
+            raise ValueError("Job belongs to another Listing")
+        if head.status != "QUEUED":
+            raise ValueError("head must be QUEUED")
+    if listing.status == "PAUSED":
+        return FifoDecision(PolicyAssessment.LISTING_NOT_ACTIVE, listing.listing_id, available, None)
     if head is None:
         return FifoDecision(PolicyAssessment.EMPTY, listing.listing_id, available, None)
     if head.requested_gpu_count > available:
