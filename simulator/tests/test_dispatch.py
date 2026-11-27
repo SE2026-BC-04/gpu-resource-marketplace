@@ -16,6 +16,7 @@ from gpu_marketplace_simulator.app import create_app
 from gpu_marketplace_simulator.config import Settings
 from gpu_marketplace_simulator.dispatch import (
     AttemptAdmissionConflict,
+    AttemptAdmissionOutcome,
     AttemptAdmissionUnavailable,
     DispatchRequest,
 )
@@ -75,7 +76,7 @@ class InMemoryAdmission:
         self.calls = 0
         self.new_producers = 0
 
-    def admit(self, dispatch: DispatchRequest) -> None:
+    def admit(self, dispatch: DispatchRequest) -> AttemptAdmissionOutcome:
         request = dispatch.model_dump(mode="json")
         with self.lock:
             self.calls += 1
@@ -85,12 +86,22 @@ class InMemoryAdmission:
                 self.new_producers += 1
             elif original != request:
                 raise AttemptAdmissionConflict
+            return AttemptAdmissionOutcome(
+                attempt_id=dispatch.attempt_id,
+                state="IN_FLIGHT",
+                newly_admitted=original is None,
+                producer_registered=True,
+                receipt=None,
+                cache_admission=None,
+            )
 
 
 def app_for(port: InMemoryAdmission | None = None, token: str | None = MANAGER_TOKEN):
     settings = Settings(
         manager_dispatch_token=SecretStr(token) if token else None,
         dispatch_max_body_bytes=4096,
+        admission_executor_workers=4,
+        admission_max_outstanding=16,
     )
     return create_app(settings, admission_port=port)
 
@@ -561,7 +572,7 @@ def test_retained_conflicting_dispatch_returns_409_without_replacing_original() 
 
 def test_admission_unavailable_fails_closed_with_pending_mapping_code() -> None:
     class UnavailableAdmission:
-        def admit(self, dispatch: DispatchRequest) -> None:
+        def admit(self, dispatch: DispatchRequest) -> AttemptAdmissionOutcome:
             raise AttemptAdmissionUnavailable
 
     response = post(LocalASGIClient(app_for(UnavailableAdmission())))
@@ -572,7 +583,7 @@ def test_admission_unavailable_fails_closed_with_pending_mapping_code() -> None:
 
 def test_unexpected_admission_error_is_redacted_as_internal_error() -> None:
     class BrokenAdmission:
-        def admit(self, dispatch: DispatchRequest) -> None:
+        def admit(self, dispatch: DispatchRequest) -> AttemptAdmissionOutcome:
             raise RuntimeError("private adapter detail")
 
     response = post(LocalASGIClient(app_for(BrokenAdmission())))

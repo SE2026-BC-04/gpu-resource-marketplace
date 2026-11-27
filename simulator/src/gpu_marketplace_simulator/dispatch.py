@@ -6,7 +6,9 @@ import hmac
 import json
 import logging
 import re
-from typing import Annotated, Protocol
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Annotated, Literal, Protocol
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Request
@@ -103,7 +105,29 @@ class AttemptAdmissionConflict(Exception):
 
 
 class AttemptAdmissionUnavailable(Exception):
-    """Admission is temporarily unavailable; HTTP mapping awaits owner ACK."""
+    """Admission is unavailable; scoped G2-A maps it to retryable HTTP 503."""
+
+
+@dataclass(frozen=True, slots=True)
+class AttemptAdmissionOutcome:
+    """Internal admission result; never serialized into the dispatch response."""
+
+    attempt_id: str
+    state: Literal["IN_FLIGHT", "FINISHED"]
+    newly_admitted: bool
+    producer_registered: bool
+    receipt: object | None = field(repr=False)
+    cache_admission: object = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if self.state not in {"IN_FLIGHT", "FINISHED"}:
+            raise ValueError("unsupported attempt state")
+        if type(self.newly_admitted) is not bool or type(self.producer_registered) is not bool:
+            raise ValueError("admission flags must be booleans")
+        if self.newly_admitted and self.state != "IN_FLIGHT":
+            raise ValueError("a new admission must be IN_FLIGHT")
+        if self.state == "FINISHED" and self.receipt is None:
+            raise ValueError("a FINISHED admission requires its retained receipt")
 
 
 class DispatchBodyTooLarge(ValueError):
@@ -111,8 +135,13 @@ class DispatchBodyTooLarge(ValueError):
 
 
 class AttemptAdmissionPort(Protocol):
-    def admit(self, dispatch: DispatchRequest) -> None:
-        """Admit or coalesce this immutable request; raise typed port errors."""
+    def admit(self, dispatch: DispatchRequest) -> AttemptAdmissionOutcome:
+        """Register one bounded producer or return a valid retained duplicate."""
+
+
+class AdmissionExecutionPort(Protocol):
+    async def run(self, operation: Callable[..., object], *args: object) -> object:
+        """Execute one synchronous operation without blocking the event loop."""
 
 
 def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -171,6 +200,7 @@ def create_dispatch_router(
     manager_token: SecretStr | None,
     admission: AttemptAdmissionPort | None,
     max_request_body_bytes: int | None,
+    admission_executor: AdmissionExecutionPort | None = None,
 ) -> APIRouter:
     if (max_request_body_bytes is not None
             and (type(max_request_body_bytes) is not int or max_request_body_bytes <= 0)):
@@ -244,14 +274,14 @@ def create_dispatch_router(
         ):
             return _error(request_id, 422, "VALIDATION_ERROR", "Invalid dispatch payload.")
 
-        if admission is None:
+        if admission is None or admission_executor is None:
             return _error(
                 request_id, 503, "DEPENDENCY_UNAVAILABLE",
                 "Service temporarily unavailable.",
             )
 
         try:
-            admission.admit(dispatch)
+            outcome = await admission_executor.run(admission.admit, dispatch)
         except AttemptAdmissionConflict:
             return _error(
                 request_id, 409, "EXECUTION_CONFLICT",
@@ -266,6 +296,14 @@ def create_dispatch_router(
             logger.error("dispatch_admission_failed", extra={"request_id": request_id})
             return _error(
                 request_id, 500, "INTERNAL_ERROR", "Internal server error."
+            )
+
+        if (not isinstance(outcome, AttemptAdmissionOutcome)
+                or outcome.attempt_id != dispatch.attempt_id
+                or not outcome.producer_registered):
+            return _error(
+                request_id, 503, "DEPENDENCY_UNAVAILABLE",
+                "Service temporarily unavailable.",
             )
 
         accepted = DispatchAccepted(attempt_id=dispatch.attempt_id)
