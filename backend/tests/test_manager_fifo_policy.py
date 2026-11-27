@@ -118,6 +118,38 @@ def test_boolean_values_are_not_accepted_as_integer_counts_or_sequence(factory) 
         factory()
 
 
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: ListingSnapshot(LISTING_ID, "ACTIVE", 0, 0),
+        lambda: ListingSnapshot(LISTING_ID, "ACTIVE", -1, 0),
+        lambda: ListingSnapshot(LISTING_ID, "ACTIVE", 2**31, 0),
+        lambda: ListingSnapshot(LISTING_ID, "ACTIVE", 2, -1),
+        lambda: ListingSnapshot(LISTING_ID, "ACTIVE", 2, 3),
+        lambda: job(1, 0),
+        lambda: job(1, -1),
+        lambda: job(1, 2**31),
+        lambda: job(2**63),
+        lambda: job(-(2**63) - 1),
+    ],
+)
+def test_gpu_counts_and_sequences_must_fit_persisted_integer_ranges(factory) -> None:
+    with pytest.raises(ValueError):
+        factory()
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: ListingSnapshot(LISTING_ID, "INACTIVE", 2, 0),
+        lambda: job(1, status="PENDING"),
+    ],
+)
+def test_invalid_listing_and_job_statuses_are_rejected(factory) -> None:
+    with pytest.raises(ValueError, match="status"):
+        factory()
+
+
 def test_listing_mismatch_and_duplicate_job_identity_or_sequence_are_rejected() -> None:
     with pytest.raises(ValueError, match="another Listing"):
         assess_fifo(LISTING, [job(1, listing_id=UUID(int=11))])
