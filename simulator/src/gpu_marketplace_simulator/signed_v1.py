@@ -133,7 +133,13 @@ def envelope_from_json(raw: bytes) -> ParsedSignedResultV1Envelope:
         )
     except EnvelopeValidationError:
         raise
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, TypeError):
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        RecursionError,
+        TypeError,
+        ValueError,
+    ):
         raise EnvelopeValidationError("envelope is not valid UTF-8 JSON") from None
 
     try:
@@ -195,8 +201,8 @@ def payload_from_json(raw: str | bytes) -> SignedResultV1Payload:
         decoded = json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
     except PayloadValidationError:
         raise
-    except (UnicodeDecodeError, json.JSONDecodeError, TypeError) as exc:
-        raise PayloadValidationError("payload is not valid UTF-8 JSON") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        raise PayloadValidationError("payload is not valid UTF-8 JSON") from None
     return payload_from_mapping(decoded)
 
 

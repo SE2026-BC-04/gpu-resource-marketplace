@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
@@ -264,12 +265,27 @@ def test_raw_envelope_parser_validates_structure_and_preserves_exact_bytes() -> 
     assert parsed.raw_envelope == raw
 
 
+def test_raw_envelope_parser_preserves_pretty_printed_reordered_json_bytes() -> None:
+    signed = sign_payload(payload_from_mapping(valid_payload()), FixedTestSigner())
+    value = signed.envelope().model_dump(mode="json")
+    value["payload"] = dict(reversed(list(value["payload"].items())))
+    reordered = dict(reversed(list(value.items())))
+    raw = (json.dumps(reordered, indent=2) + "\n").encode("utf-8")
+
+    parsed = envelope_from_json(raw)
+
+    assert parsed.envelope == signed.envelope()
+    assert parsed.raw_envelope is raw
+    assert parsed.raw_envelope == raw
+
+
 @pytest.mark.parametrize(
     "raw",
     [
         b'{"payload":{},"payload":{},"signature":"x","signature_encoding":"base64url-no-padding"}',
         b'{"payload":{"outcome":"SUCCESS","outcome":"FAILED"},"signature":"x","signature_encoding":"base64url-no-padding"}',
         b'{"payload":NaN,"signature":"x","signature_encoding":"base64url-no-padding"}',
+        b'{"payload":{"value":Infinity},"signature":"x","signature_encoding":"base64url-no-padding"}',
         b"\xff",
         b"\xef\xbb\xbf{}",
         b"not-json",
@@ -280,6 +296,56 @@ def test_raw_envelope_parser_validates_structure_and_preserves_exact_bytes() -> 
 def test_raw_envelope_parser_rejects_malformed_or_ambiguous_json(raw: bytes) -> None:
     with pytest.raises(EnvelopeValidationError):
         envelope_from_json(raw)
+
+
+def test_oversized_json_integer_is_normalized_by_raw_envelope_parser() -> None:
+    oversized = b"9" * 5000
+    raw_inputs = [
+        b'{"payload":{},"signature":"x","signature_encoding":"base64url-no-padding","unknown":'
+        + oversized
+        + b"}",
+        b'{"payload":{"unknown":'
+        + oversized
+        + b'},"signature":"x","signature_encoding":"base64url-no-padding"}',
+        b'{"payload":{"schema_version":'
+        + oversized
+        + b'},"signature":"x","signature_encoding":"base64url-no-padding"}',
+    ]
+
+    previous_limit = sys.get_int_max_str_digits()
+    adjusted_limit = previous_limit == 0 or previous_limit >= len(oversized)
+    try:
+        if adjusted_limit:
+            # Keep Python's safety limit enabled, even on hosts configured with
+            # no limit or a limit above this regression's fixed 5,000 digits.
+            sys.set_int_max_str_digits(4300)
+        for raw in raw_inputs:
+            with pytest.raises(EnvelopeValidationError) as caught:
+                envelope_from_json(raw)
+            assert caught.value.__cause__ is None
+            assert caught.value.__suppress_context__ is True
+            assert "5000" not in str(caught.value)
+    finally:
+        if adjusted_limit:
+            sys.set_int_max_str_digits(previous_limit)
+
+
+def test_payload_json_parser_normalizes_oversized_integer_value_error() -> None:
+    oversized = b"9" * 5000
+    raw = b'{"unknown":' + oversized + b"}"
+    previous_limit = sys.get_int_max_str_digits()
+    adjusted_limit = previous_limit == 0 or previous_limit >= len(oversized)
+    try:
+        if adjusted_limit:
+            sys.set_int_max_str_digits(4300)
+        with pytest.raises(PayloadValidationError) as caught:
+            payload_from_json(raw)
+        assert caught.value.__cause__ is None
+        assert caught.value.__suppress_context__ is True
+        assert "5000" not in str(caught.value)
+    finally:
+        if adjusted_limit:
+            sys.set_int_max_str_digits(previous_limit)
 
 
 def test_raw_envelope_parser_rejects_wrong_outer_schema_and_non_bytes() -> None:
