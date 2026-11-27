@@ -36,6 +36,11 @@ class _PortOutcome:
     kind: str
 
 
+@dataclass(frozen=True)
+class _CycleSignal:
+    continue_immediately: bool
+
+
 def _coordinator(
     *,
     locate_candidate,
@@ -43,6 +48,10 @@ def _coordinator(
     verify,
     finalize,
     evaluate_deadlines,
+    candidate_made_progress=None,
+    deadline_made_progress=None,
+    is_transient_dependency_failure=None,
+    report_transient_dependency_failure=None,
 ):
     return InboxFinalizationCoordinator(
         locate_candidate=locate_candidate,
@@ -50,6 +59,10 @@ def _coordinator(
         verify=verify,
         finalize=finalize,
         evaluate_deadlines=evaluate_deadlines,
+        candidate_made_progress=candidate_made_progress or (lambda _candidate, _outcome: True),
+        deadline_made_progress=deadline_made_progress or (lambda _outcome: False),
+        is_transient_dependency_failure=is_transient_dependency_failure or (lambda _error: False),
+        report_transient_dependency_failure=report_transient_dependency_failure or (lambda _candidate, _code: None),
     )
 
 
@@ -235,10 +248,10 @@ def test_fin_06_candidate_verifier_finalizer_ports_run_in_order() -> None:
             evaluate_deadlines=evaluate_deadlines,
         ).run_once()
     )
-    assert calls == ["locate", "load", "verify", "finalize"]
+    assert calls == ["locate", "load", "verify", "finalize", "deadline"]
     assert observation.candidate_processed is True
     assert observation.finalization_outcome is finalized
-    assert observation.deadline_outcome is None
+    assert observation.deadline_outcome.kind == "deadline"
 
 
 def test_fin_07_verified_receipt_passes_unchanged_without_local_write() -> None:
@@ -287,10 +300,10 @@ def test_fin_08_definitive_rejection_is_forwarded_without_job_terminalization() 
     )
     assert calls == [(candidate, rejected)]
     assert observation.finalization_outcome.kind == "inbox-rejected-only"
-    assert observation.deadline_outcome is None
+    assert observation.deadline_outcome.kind == "deadline"
 
 
-def test_fin_09_verifier_unavailable_does_not_finalize_or_evaluate_deadline() -> None:
+def test_fin_09_transient_verifier_unavailable_allows_deadline_step() -> None:
     class VerifierUnavailable(RuntimeError):
         pass
 
@@ -307,24 +320,37 @@ def test_fin_09_verifier_unavailable_does_not_finalize_or_evaluate_deadline() ->
 
     async def evaluate_deadlines():
         calls.append("deadline")
+        return _PortOutcome("deadline")
 
-    with pytest.raises(VerifierUnavailable, match="key registry unavailable"):
-        asyncio.run(
-            _coordinator(
-                locate_candidate=lambda: _async_value(candidate),
-                load_evidence=lambda _candidate: _async_value(evidence),
-                verify=verify,
-                finalize=finalize,
-                evaluate_deadlines=evaluate_deadlines,
-            ).run_once()
-        )
-    assert calls == ["verify"]
+    observation = asyncio.run(
+        _coordinator(
+            locate_candidate=lambda: _async_value(candidate),
+            load_evidence=lambda _candidate: _async_value(evidence),
+            verify=verify,
+            finalize=finalize,
+            evaluate_deadlines=evaluate_deadlines,
+            is_transient_dependency_failure=lambda error: isinstance(
+                error, VerifierUnavailable
+            ),
+            report_transient_dependency_failure=lambda found, code: calls.append(
+                f"report:{found.inbox_id}:{code}"
+            ),
+        ).run_once()
+    )
+    assert calls == [
+        "verify",
+        "report:inbox-p:verification_dependency_unavailable",
+        "deadline",
+    ]
+    assert observation.candidate_processed is True
+    assert observation.finalization_outcome is None
+    assert observation.deadline_outcome.kind == "deadline"
+    assert observation.continue_immediately is False
 
 
-def test_fin_10_invalid_then_later_valid_candidate_precedes_deadline_port() -> None:
-    # Fake ports verify per-cycle ordering and that no deadline request is made
-    # while a candidate is returned. A PostgreSQL test must later prove the
-    # durable query exposes every ordered PENDING candidate across pages.
+def test_fin_10_invalid_then_later_valid_candidate_and_deadline_each_get_a_step() -> None:
+    # Fake ports verify candidate/deadline ordering. A PostgreSQL test must
+    # prove the durable query exposes every ordered PENDING candidate across pages.
     candidates = [
         _Candidate("r1", "result-1", datetime.now(UTC), datetime.now(UTC)),
         _Candidate("r2", "result-2", datetime.now(UTC), datetime.now(UTC)),
@@ -371,7 +397,7 @@ def test_fin_10_invalid_then_later_valid_candidate_precedes_deadline_port() -> N
     second = asyncio.run(coordinator.run_once())
     assert first.candidate_processed and second.candidate_processed
     assert finalized == [("result-1", "INVALID_SIGNATURE"), ("result-2", "verified")]
-    assert deadline_calls == []
+    assert deadline_calls == ["durable-check", "durable-check"]
 
 
 def test_fin_11_on_time_pending_candidate_is_left_to_authoritative_deadline_port() -> None:
@@ -642,7 +668,17 @@ def test_fin_20_poller_missing_required_port_fails_closed(missing: str) -> None:
 
 @pytest.mark.parametrize(
     "missing",
-    ["locate_candidate", "load_evidence", "verify", "finalize", "evaluate_deadlines"],
+    [
+        "locate_candidate",
+        "load_evidence",
+        "verify",
+        "finalize",
+        "evaluate_deadlines",
+        "candidate_made_progress",
+        "deadline_made_progress",
+        "is_transient_dependency_failure",
+        "report_transient_dependency_failure",
+    ],
 )
 def test_fin_20_coordinator_missing_required_port_fails_closed(missing: str) -> None:
     ports = {
@@ -651,6 +687,10 @@ def test_fin_20_coordinator_missing_required_port_fails_closed(missing: str) -> 
         "verify": lambda _evidence: _async_value(None),
         "finalize": lambda _candidate, _evidence, _verdict: _async_value(None),
         "evaluate_deadlines": lambda: _async_value(None),
+        "candidate_made_progress": lambda _candidate, _outcome: True,
+        "deadline_made_progress": lambda _outcome: False,
+        "is_transient_dependency_failure": lambda _error: False,
+        "report_transient_dependency_failure": lambda _candidate, _code: None,
     }
     ports[missing] = None
     with pytest.raises(ValueError, match="required"):
@@ -661,9 +701,13 @@ def test_fin_21_failure_does_not_log_secret_or_raw_evidence(caplog) -> None:
     sentinel = "SYNTHETIC-PRIVATE-KEY-AND-RAW-RECEIPT"
     candidate = _Candidate("inbox-secret", "result-secret", datetime.now(UTC), datetime.now(UTC))
     evidence = _Evidence(candidate, sentinel)
+    deadline_calls: list[str] = []
 
     async def verify(_evidence):
         raise RuntimeError(sentinel)
+
+    async def evaluate_deadlines():
+        deadline_calls.append("deadline")
 
     with pytest.raises(RuntimeError, match=sentinel):
         asyncio.run(
@@ -672,10 +716,11 @@ def test_fin_21_failure_does_not_log_secret_or_raw_evidence(caplog) -> None:
                 load_evidence=lambda _candidate: _async_value(evidence),
                 verify=verify,
                 finalize=lambda *_args: _async_value(None),
-                evaluate_deadlines=lambda: _async_value(None),
+                evaluate_deadlines=evaluate_deadlines,
             ).run_once()
         )
     assert sentinel not in caplog.text
+    assert deadline_calls == []
 
 
 def test_fin_22_completion_hook_failure_propagates_without_rerunning_cycle() -> None:
@@ -758,6 +803,345 @@ def test_fin_24_empty_locator_does_not_supply_exhaustion_proof() -> None:
     )
     assert calls == [("locate-page", page), ("authoritative-deadline-port",)]
     assert observation.deadline_outcome is blocked
+
+
+def test_fin_r01_candidate_cycle_also_requests_authoritative_deadline_step() -> None:
+    candidate = _Candidate("inbox-r01", "result-r01", datetime.now(UTC), datetime.now(UTC))
+    calls: list[str] = []
+
+    async def finalize(_candidate, _evidence, _verdict):
+        calls.append("candidate")
+        return _PortOutcome("finalized")
+
+    async def evaluate_deadlines():
+        calls.append("deadline")
+        return _PortOutcome("checked")
+
+    observation = asyncio.run(
+        _coordinator(
+            locate_candidate=lambda: _async_value(candidate),
+            load_evidence=lambda found: _async_value(_Evidence(found, "sha256:r01")),
+            verify=lambda _evidence: _async_value(_Verdict("verified")),
+            finalize=finalize,
+            evaluate_deadlines=evaluate_deadlines,
+        ).run_once()
+    )
+
+    assert calls == ["candidate", "deadline"]
+    assert observation.deadline_outcome.kind == "checked"
+
+
+def test_fin_r02_productive_cycles_continue_without_fixed_poll_interval() -> None:
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        calls: list[str] = []
+        cycle_results = iter(
+            (_CycleSignal(True), _CycleSignal(True), _CycleSignal(False))
+        )
+
+        async def cycle() -> _CycleSignal:
+            calls.append("cycle")
+            return next(cycle_results)
+
+        async def wait_for_interval(_event: asyncio.Event, interval: float) -> bool:
+            assert interval == INBOX_POLL_INTERVAL_SECONDS
+            calls.append("wait")
+            stop_event.set()
+            return True
+
+        poller = InboxFinalizationPoller(
+            cycle=cycle,
+            stop_event=stop_event,
+            claim_allowed=lambda: True,
+            wait_for_interval=wait_for_interval,
+        )
+        await poller.run()
+        assert calls == ["cycle", "cycle", "cycle", "wait"]
+
+    asyncio.run(scenario())
+
+
+def test_fin_r04_nonprogress_candidate_waits_instead_of_busy_spinning() -> None:
+    candidate = _Candidate("inbox-r04", "result-r04", datetime.now(UTC), datetime.now(UTC))
+    observation = asyncio.run(
+        _coordinator(
+            locate_candidate=lambda: _async_value(candidate),
+            load_evidence=lambda found: _async_value(_Evidence(found, "sha256:r04")),
+            verify=lambda _evidence: _async_value(_Verdict("verified")),
+            finalize=lambda *_args: _async_value(_PortOutcome("no-change")),
+            evaluate_deadlines=lambda: _async_value(_PortOutcome("checked")),
+            candidate_made_progress=lambda _candidate, _outcome: False,
+            # Even a due Job progressing does not force an immediate loop over
+            # the same candidate whose adapter reported no progress.
+            deadline_made_progress=lambda _outcome: True,
+        ).run_once()
+    )
+
+    assert observation.continue_immediately is False
+    assert observation.deadline_outcome.kind == "checked"
+
+
+def test_fin_r08_preceding_pending_is_no_progress_and_still_checks_deadlines() -> None:
+    candidate = _Candidate("later-row", "result-later", datetime.now(UTC), datetime.now(UTC))
+    calls: list[str] = []
+
+    async def finalize(_candidate, _evidence, _verdict):
+        calls.append("preceding-pending")
+        return _PortOutcome("preceding-pending")
+
+    async def evaluate_deadlines():
+        calls.append("authoritative-deadline")
+        return _PortOutcome("blocked-for-this-job")
+
+    observation = asyncio.run(
+        _coordinator(
+            locate_candidate=lambda: _async_value(candidate),
+            load_evidence=lambda found: _async_value(_Evidence(found, "sha256:later")),
+            verify=lambda _evidence: _async_value(_Verdict("verified")),
+            finalize=finalize,
+            evaluate_deadlines=evaluate_deadlines,
+            candidate_made_progress=lambda _candidate, outcome: outcome.kind
+            != "preceding-pending",
+        ).run_once()
+    )
+
+    assert calls == ["preceding-pending", "authoritative-deadline"]
+    assert observation.finalization_outcome.kind == "preceding-pending"
+    assert observation.continue_immediately is False
+
+
+def test_fin_r13_binding_mismatch_can_be_escalated_by_local_classifier() -> None:
+    candidate = _Candidate("inbox-mismatch", "result-mismatch", datetime.now(UTC), datetime.now(UTC))
+    deadline_calls: list[str] = []
+
+    def classify_outcome(_candidate, _outcome):
+        raise RuntimeError("binding mismatch requires invariant escalation")
+
+    async def evaluate_deadlines():
+        deadline_calls.append("deadline")
+        return _PortOutcome("deadline")
+
+    with pytest.raises(RuntimeError, match="invariant escalation"):
+        asyncio.run(
+            _coordinator(
+                locate_candidate=lambda: _async_value(candidate),
+                load_evidence=lambda found: _async_value(_Evidence(found, "sha256:mismatch")),
+                verify=lambda _evidence: _async_value(_Verdict("verified")),
+                finalize=lambda *_args: _async_value(_PortOutcome("binding-mismatch")),
+                evaluate_deadlines=evaluate_deadlines,
+                candidate_made_progress=classify_outcome,
+            ).run_once()
+        )
+
+    assert deadline_calls == []
+
+
+def test_fin_r10_transient_job_a_does_not_suppress_unrelated_due_job_b() -> None:
+    class VerifierUnavailable(RuntimeError):
+        pass
+
+    candidate_a = _Candidate(
+        "inbox-job-a", "result-a", datetime.now(UTC), datetime.now(UTC)
+    )
+    job_a_remains_pending = True
+    calls: list[str] = []
+
+    async def verify(_evidence):
+        calls.append("verify-a")
+        raise VerifierUnavailable("synthetic temporary dependency failure")
+
+    async def evaluate_deadlines():
+        # The real adapter must query durable state per Job: A's PENDING receipt
+        # blocks only A while unrelated due Job B can still be considered.
+        assert job_a_remains_pending is True
+        calls.append("deadline-pass-job-b")
+        return _PortOutcome("job-b-eligible-for-authoritative-fallback-check")
+
+    observation = asyncio.run(
+        _coordinator(
+            locate_candidate=lambda: _async_value(candidate_a),
+            load_evidence=lambda found: _async_value(_Evidence(found, "sha256:a")),
+            verify=verify,
+            finalize=lambda *_args: pytest.fail("transient verifier failure finalized"),
+            evaluate_deadlines=evaluate_deadlines,
+            is_transient_dependency_failure=lambda error: isinstance(
+                error, VerifierUnavailable
+            ),
+            report_transient_dependency_failure=lambda found, code: calls.append(
+                f"report:{found.inbox_id}:{code}"
+            ),
+        ).run_once()
+    )
+
+    assert calls == [
+        "verify-a",
+        "report:inbox-job-a:verification_dependency_unavailable",
+        "deadline-pass-job-b",
+    ]
+    assert observation.finalization_outcome is None
+    assert observation.deadline_outcome.kind == (
+        "job-b-eligible-for-authoritative-fallback-check"
+    )
+
+
+@pytest.mark.parametrize(
+    "verdict_kind",
+    ["verified", "INVALID_SIGNATURE"],
+    ids=["finalize", "reject"],
+)
+def test_fin_r14_r15_unknown_finalization_commit_is_never_blindly_retried(
+    verdict_kind: str,
+) -> None:
+    class CommitOutcomeUnknown(RuntimeError):
+        pass
+
+    candidate = _Candidate(
+        f"inbox-{verdict_kind}",
+        f"result-{verdict_kind}",
+        datetime.now(UTC),
+        datetime.now(UTC),
+    )
+    write_attempts: list[str] = []
+    deadline_calls: list[str] = []
+
+    async def finalize(_candidate, _evidence, verdict):
+        write_attempts.append(verdict.kind)
+        raise CommitOutcomeUnknown("synthetic unknown commit")
+
+    async def evaluate_deadlines():
+        deadline_calls.append("called")
+        return _PortOutcome("should-not-follow-unknown-commit")
+
+    with pytest.raises(CommitOutcomeUnknown, match="synthetic unknown commit"):
+        asyncio.run(
+            _coordinator(
+                locate_candidate=lambda: _async_value(candidate),
+                load_evidence=lambda found: _async_value(_Evidence(found, "sha256:x")),
+                verify=lambda _evidence: _async_value(_Verdict(verdict_kind)),
+                finalize=finalize,
+                evaluate_deadlines=evaluate_deadlines,
+            ).run_once()
+        )
+
+    assert write_attempts == [verdict_kind]
+    assert deadline_calls == []
+
+
+def test_fin_r16_unknown_fallback_commit_without_candidate_is_not_retried() -> None:
+    class CommitOutcomeUnknown(RuntimeError):
+        pass
+
+    fallback_calls = 0
+
+    async def evaluate_deadlines() -> _PortOutcome:
+        nonlocal fallback_calls
+        # Deliberately accepts no Inbox/result identity: only the authoritative
+        # adapter owns the Job/Attempt identity for this fallback operation.
+        fallback_calls += 1
+        raise CommitOutcomeUnknown("synthetic fallback commit uncertainty")
+
+    with pytest.raises(CommitOutcomeUnknown, match="fallback commit uncertainty"):
+        asyncio.run(
+            _coordinator(
+                locate_candidate=lambda: _async_value(None),
+                load_evidence=lambda _candidate: _async_value(None),
+                verify=lambda _evidence: _async_value(None),
+                finalize=lambda *_args: _async_value(None),
+                evaluate_deadlines=evaluate_deadlines,
+            ).run_once()
+        )
+
+    assert fallback_calls == 1
+
+
+def test_fin_r24_sustained_candidates_still_run_deadline_each_cycle() -> None:
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        candidates = [
+            _Candidate("r24-a", "result-a", datetime.now(UTC), datetime.now(UTC)),
+            _Candidate("r24-b", "result-b", datetime.now(UTC), datetime.now(UTC)),
+        ]
+        candidate_index = 0
+        finalizations: list[str] = []
+        deadline_calls: list[str] = []
+
+        async def locate():
+            nonlocal candidate_index
+            if candidate_index == len(candidates):
+                return None
+            candidate = candidates[candidate_index]
+            candidate_index += 1
+            return candidate
+
+        async def finalize(candidate, _evidence, _verdict):
+            finalizations.append(candidate.inbox_id)
+            return _PortOutcome("settled")
+
+        async def evaluate_deadlines():
+            deadline_calls.append("authoritative-pass")
+            return _PortOutcome("checked")
+
+        coordinator = _coordinator(
+            locate_candidate=locate,
+            load_evidence=lambda candidate: _async_value(
+                _Evidence(candidate, f"sha256:{candidate.inbox_id}")
+            ),
+            verify=lambda _evidence: _async_value(_Verdict("verified")),
+            finalize=finalize,
+            evaluate_deadlines=evaluate_deadlines,
+        )
+
+        async def wait_for_interval(_event: asyncio.Event, interval: float) -> bool:
+            assert interval == INBOX_POLL_INTERVAL_SECONDS
+            stop_event.set()
+            return True
+
+        poller = InboxFinalizationPoller(
+            cycle=coordinator.run_once,
+            stop_event=stop_event,
+            claim_allowed=lambda: True,
+            wait_for_interval=wait_for_interval,
+        )
+        await poller.run()
+
+        assert finalizations == ["r24-a", "r24-b"]
+        assert deadline_calls == ["authoritative-pass"] * 3
+
+    asyncio.run(scenario())
+
+
+def test_fin_r21_admission_gate_is_rechecked_before_productive_continuation() -> None:
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        claim_checks = 0
+        cycle_calls = 0
+
+        async def cycle() -> _CycleSignal:
+            nonlocal cycle_calls
+            cycle_calls += 1
+            return _CycleSignal(True)
+
+        def claim_allowed() -> bool:
+            nonlocal claim_checks
+            claim_checks += 1
+            return claim_checks == 1
+
+        async def wait_for_interval(_event: asyncio.Event, _interval: float) -> bool:
+            stop_event.set()
+            return True
+
+        poller = InboxFinalizationPoller(
+            cycle=cycle,
+            stop_event=stop_event,
+            claim_allowed=claim_allowed,
+            wait_for_interval=wait_for_interval,
+        )
+        await poller.run()
+
+        assert cycle_calls == 1
+        assert claim_checks == 2
+
+    asyncio.run(scenario())
 
 
 async def _async_value(value):

@@ -15,23 +15,27 @@ verifier port. The finalizer must re-read and validate the stored original
 evidence under Listing -> Job -> Allocation -> Inbox -> Contribution ->
 Aggregate locks before any durable effect, with no Worker advisory lock. A
 typed verified or definitively rejected verdict is passed through unchanged;
-verifier/dependency failures propagate and do not reach finalizer or deadline
-evaluation. A rejection can mark only its matching Inbox item REJECTED; it
-cannot itself terminalize the Job, release a GPU, or change reputation.
+only an explicitly classified transient evidence/verifier dependency failure
+is contained locally, leaving the Inbox PENDING and allowing the deadline port
+to inspect durable state. Unexpected errors and cancellation propagate. A
+rejection can mark only its matching Inbox item REJECTED; it cannot itself
+terminalize the Job, release a GPU, or change reputation.
 
 The finalizer adapter must use trusted persisted received_at and the
 (received_at, inbox_id) candidate order. It must preserve an already-committed
 on-time candidate after a late Manager restart, while new ingress at or after
 the hard deadline is ineligible. TV1 makes none of these durable decisions.
 
-At most one candidate is processed per cycle. If one is found, deadline
-evaluation is deferred to a later cycle so a following on-time candidate can
-be located and handled first. If no candidate is located, the coordinator only
-invokes the injected authoritative deadline port without passing a page,
-cursor, or exhaustion assertion. That adapter must independently recheck all
-committed on-time candidates and any pending/unavailable-verification evidence
-under durable state and locks. An empty locator result is never proof that
-SYSTEM_FAULT fallback is safe.
+At most one candidate is processed per cycle. Every normally completed cycle
+also invokes the injected authoritative deadline port, whether or not a
+candidate was found. The adapter receives no page, cursor, or exhaustion
+assertion and must independently recheck committed on-time candidates and
+pending/unavailable-verification evidence under durable state and locks. An
+empty locator result is never proof that SYSTEM_FAULT fallback is safe. The
+progress classifiers are TV1-local scheduling adapters; they do not freeze
+TV2/TV3/TV5 outcomes. Candidate discovery remains one opaque candidate per
+call: D-20 pagination, deferred-candidate revisit policy, and durable unknown-
+COMMIT reconciliation remain blocked until owner ACKs and measured budgets.
 
 The poller is a lifecycle helper, not a readiness signal. It serializes cycles,
 uses the approved 2-second cadence, records only local monotonic progress, and
@@ -47,6 +51,7 @@ from typing import Awaitable, Callable, Generic, TypeVar
 
 
 INBOX_POLL_INTERVAL_SECONDS = 2.0
+_TRANSIENT_VERIFICATION_DIAGNOSTIC = "verification_dependency_unavailable"
 
 CandidateT = TypeVar("CandidateT")
 EvidenceT = TypeVar("EvidenceT")
@@ -59,11 +64,12 @@ DeadlineOutcomeT = TypeVar("DeadlineOutcomeT")
 class FinalizationCycleObservation(
     Generic[FinalizationOutcomeT, DeadlineOutcomeT]
 ):
-    """TV1-local observation of which injected coordination path completed."""
+    """TV1-local observation of bounded work and its continuation signal."""
 
     candidate_processed: bool
     finalization_outcome: FinalizationOutcomeT | None
     deadline_outcome: DeadlineOutcomeT | None
+    continue_immediately: bool = False
 
 
 class InboxFinalizationCoordinator(
@@ -75,12 +81,16 @@ class InboxFinalizationCoordinator(
         DeadlineOutcomeT,
     ]
 ):
-    """Run one candidate handoff or request an authoritative deadline check.
+    """Run one candidate handoff and an authoritative deadline check.
 
-    All port outcomes are opaque and passed through unchanged. An exception at
-    any stage propagates. In particular, an unknown finalization COMMIT is not
-    retried, and an unavailable verifier cannot be converted into a definitive
-    rejection or SYSTEM_FAULT decision.
+    All port outcomes are opaque and passed through unchanged. Both progress
+    classifiers are TV1-local scheduling adapters, not shared business enums.
+    A normally completed cycle always invokes the deadline port, whether or not
+    it found a candidate. An exception from verification/evidence loading is
+    contained only when the injected classifier explicitly marks it transient;
+    the reporter receives a fixed redacted code, never the exception. Other
+    exceptions, cancellation, and unknown COMMIT outcomes propagate. No
+    operation is blindly retried or locally authorized as SYSTEM_FAULT.
     """
 
     def __init__(
@@ -95,6 +105,14 @@ class InboxFinalizationCoordinator(
         ]
         | None,
         evaluate_deadlines: Callable[[], Awaitable[DeadlineOutcomeT]] | None,
+        candidate_made_progress: Callable[
+            [CandidateT, FinalizationOutcomeT], bool
+        ]
+        | None,
+        deadline_made_progress: Callable[[DeadlineOutcomeT], bool] | None,
+        is_transient_dependency_failure: Callable[[Exception], bool] | None,
+        report_transient_dependency_failure: Callable[[CandidateT, str], None]
+        | None,
     ) -> None:
         required_ports = {
             "locate_candidate": locate_candidate,
@@ -102,6 +120,10 @@ class InboxFinalizationCoordinator(
             "verify": verify,
             "finalize": finalize,
             "evaluate_deadlines": evaluate_deadlines,
+            "candidate_made_progress": candidate_made_progress,
+            "deadline_made_progress": deadline_made_progress,
+            "is_transient_dependency_failure": is_transient_dependency_failure,
+            "report_transient_dependency_failure": report_transient_dependency_failure,
         }
         for name, port in required_ports.items():
             if not callable(port):
@@ -112,37 +134,70 @@ class InboxFinalizationCoordinator(
         self._verify = verify
         self._finalize = finalize
         self._evaluate_deadlines = evaluate_deadlines
+        self._candidate_made_progress = candidate_made_progress
+        self._deadline_made_progress = deadline_made_progress
+        self._is_transient_dependency_failure = is_transient_dependency_failure
+        self._report_transient_dependency_failure = report_transient_dependency_failure
         self._running = False
 
     async def run_once(
         self,
     ) -> FinalizationCycleObservation[FinalizationOutcomeT, DeadlineOutcomeT]:
-        """Process at most one committed candidate, or request deadline work."""
+        """Process at most one candidate, then request deadline work every cycle."""
         if self._running:
             raise RuntimeError("Inbox finalization coordinator is already running")
 
         self._running = True
         try:
             candidate = await self._locate_candidate()
-            if candidate is None:
-                deadline_outcome = await self._evaluate_deadlines()
-                return FinalizationCycleObservation(
-                    candidate_processed=False,
-                    finalization_outcome=None,
-                    deadline_outcome=deadline_outcome,
-                )
+            candidate_processed = candidate is not None
+            finalization_outcome: FinalizationOutcomeT | None = None
+            candidate_made_progress = False
+            if candidate is not None:
+                try:
+                    evidence = await self._load_evidence(candidate)
+                    verdict = await self._verify(evidence)
+                except Exception as error:
+                    if not self._is_transient_dependency_failure(error):
+                        raise
+                    # The durable Inbox remains PENDING. The owner deadline
+                    # adapter must recheck that evidence and defer fallback
+                    # only for its bound Job; TV1 makes no durable decision.
+                    self._report_transient_dependency_failure(
+                        candidate,
+                        _TRANSIENT_VERIFICATION_DIAGNOSTIC,
+                    )
+                else:
+                    finalization_outcome = await self._finalize(
+                        candidate,
+                        evidence,
+                        verdict,
+                    )
+                    candidate_made_progress = bool(
+                        self._candidate_made_progress(
+                            candidate,
+                            finalization_outcome,
+                        )
+                    )
 
-            evidence = await self._load_evidence(candidate)
-            verdict = await self._verify(evidence)
-            finalization_outcome = await self._finalize(
-                candidate,
-                evidence,
-                verdict,
+            # This port is an opportunity for authoritative durable evaluation,
+            # not proof of cursor exhaustion or permission to terminalize a Job.
+            deadline_outcome = await self._evaluate_deadlines()
+            deadline_made_progress = bool(
+                self._deadline_made_progress(deadline_outcome)
             )
             return FinalizationCycleObservation(
-                candidate_processed=True,
+                candidate_processed=candidate_processed,
                 finalization_outcome=finalization_outcome,
-                deadline_outcome=None,
+                deadline_outcome=deadline_outcome,
+                # If a candidate is present, its adapter classification controls
+                # continuation so a no-change outcome cannot busy-spin. With an
+                # empty discovery result, productive deadline work can continue.
+                continue_immediately=(
+                    candidate_made_progress
+                    if candidate is not None
+                    else deadline_made_progress
+                ),
             )
         finally:
             self._running = False
@@ -231,13 +286,18 @@ class InboxFinalizationPoller:
 
                 # Graceful stop does not cancel this await. Forced task
                 # cancellation propagates and bypasses completion bookkeeping.
-                await self._cycle()
+                cycle_observation = await self._cycle()
                 self._last_completed_at = float(self._monotonic_clock())
                 if self._on_cycle_completed is not None:
                     self._on_cycle_completed()
 
                 if self._stop_event.is_set():
                     return
+                if getattr(cycle_observation, "continue_immediately", False) is True:
+                    # Yield so other event-loop work can run; the loop top
+                    # rechecks stop and admission before starting another cycle.
+                    await asyncio.sleep(0)
+                    continue
                 if await self._wait_for_interval(
                     self._stop_event,
                     INBOX_POLL_INTERVAL_SECONDS,
