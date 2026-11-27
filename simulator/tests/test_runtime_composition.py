@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from concurrent.futures import Future
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import json
-from threading import Event, Lock
+from threading import Event, Lock, Thread
 from typing import Iterator
 from uuid import UUID
 
@@ -17,12 +18,14 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from gpu_marketplace_simulator.attempt_cache import AttemptState, Receipt
+from gpu_marketplace_simulator.attempt_cache_adapter import AttemptAdmissionUnavailable
 from gpu_marketplace_simulator.callback_client import CallbackRetryPolicy
 from gpu_marketplace_simulator.deterministic import (
     SimulationInput,
     _derive_seed_value,
     simulate,
 )
+from gpu_marketplace_simulator.dispatch import DispatchRequest
 from gpu_marketplace_simulator.runtime_composition import TestOnlyRuntimeComposition
 from gpu_marketplace_simulator.signed_v1 import envelope_from_json
 
@@ -137,6 +140,59 @@ class LocalASGIClient:
         self.runner.__exit__(exc_type, exc, tb)
 
 
+class ThreadedASGIClient:
+    """ASGI test client whose loop keeps running while barriers are held."""
+
+    def __init__(self, app: FastAPI, runtime: TestOnlyRuntimeComposition) -> None:
+        self.app = app
+        self.runtime = runtime
+        self.loop = asyncio.new_event_loop()
+        self.ready = Event()
+        self.thread = Thread(target=self._run_loop, name="stage-a-test-loop", daemon=True)
+        self.client: httpx.AsyncClient | None = None
+        self.lifespan = app.router.lifespan_context(app)
+
+    def _run_loop(self) -> None:
+        asyncio.set_event_loop(self.loop)
+        self.ready.set()
+        self.loop.run_forever()
+
+    def __enter__(self) -> ThreadedASGIClient:
+        self.thread.start()
+        assert self.ready.wait(2)
+
+        async def startup() -> None:
+            await self.lifespan.__aenter__()
+            self.client = httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=self.app),
+                base_url="http://simulator.test",
+            )
+
+        asyncio.run_coroutine_threadsafe(startup(), self.loop).result(timeout=2)
+        return self
+
+    def post(self, path: str, **kwargs: object) -> httpx.Response:
+        assert self.client is not None
+        return asyncio.run_coroutine_threadsafe(
+            self.client.post(path, **kwargs), self.loop
+        ).result(timeout=3)
+
+    def wait_for_attempt(self, attempt_id: str, timeout: float = 5.0) -> bool:
+        return self.runtime.wait_for_attempt(attempt_id, timeout)
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        async def shutdown() -> None:
+            if self.client is not None:
+                await self.client.aclose()
+            await self.lifespan.__aexit__(exc_type, exc, tb)
+
+        asyncio.run_coroutine_threadsafe(shutdown(), self.loop).result(timeout=4)
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self.thread.join(timeout=2)
+        assert not self.thread.is_alive()
+        self.loop.close()
+
+
 def valid_dispatch(attempt_id: str = ATTEMPT_ID) -> dict[str, object]:
     due = START + timedelta(minutes=1)
     hard = due + timedelta(seconds=120)
@@ -183,6 +239,10 @@ def runtime_context(
     callback_policy: CallbackRetryPolicy | None = None,
     clock: datetime = START,
     result_ids: tuple[str, ...] | None = None,
+    threaded_client: bool = False,
+    bind_execution_future=None,
+    on_worker_waiting_gate=None,
+    on_bind_failure=None,
 ) -> Iterator[tuple[TestOnlyRuntimeComposition, LocalASGIClient, list[httpx.Request], FixedSigner]]:
     private_key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
     signer = signer or FixedSigner(private_key)
@@ -214,6 +274,9 @@ def runtime_context(
         clock=lambda: clock,
         result_id_factory=lambda: UUID(next(next_result)),
         before_produce=before_produce,
+        bind_execution_future=bind_execution_future,
+        on_worker_waiting_gate=on_worker_waiting_gate,
+        on_bind_failure=on_bind_failure,
         cache_clock=cache_clock,
         cache_max_entries=cache_max_entries,
         cache_ttl_seconds=cache_ttl_seconds,
@@ -222,7 +285,8 @@ def runtime_context(
         max_in_flight=max_in_flight,
         shutdown_timeout_seconds=0.2,
     )
-    with LocalASGIClient(composition.create_app(), composition) as client:
+    client_type = ThreadedASGIClient if threaded_client else LocalASGIClient
+    with client_type(composition.create_app(), composition) as client:
         yield composition, client, requests, signer
 
 
@@ -637,6 +701,182 @@ def test_16_d16_conflicts_only_while_fingerprint_retained_and_cold_start_is_new_
         assert cold.registration_count == 1
         cold_result_id = cold_client.app.state.attempt_cache.snapshot(UUID(ATTEMPT_ID)).receipt.result_id
         assert cold_result_id != retained_result_id
+
+
+def test_21_expired_same_attempt_old_callback_cannot_signal_new_registration() -> None:
+    monotonic = FakeMonotonic()
+    first_producer_entered, release_first_producer = Event(), Event()
+    old_callback_entered, release_old_callback = Event(), Event()
+    new_producer_entered, release_new_producer = Event(), Event()
+    callback_lock, produce_lock = Lock(), Lock()
+    callback_count = produce_count = 0
+
+    def callback_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal callback_count
+        with callback_lock:
+            callback_count += 1
+            current = callback_count
+        if current == 1:
+            old_callback_entered.set()
+            assert release_old_callback.wait(3)
+        result_id = json.loads(request.content)["payload"]["result_id"]
+        return httpx.Response(202, json={"receipt_status": "STORED", "result_id": result_id}, request=request)
+
+    def hold_second_producer(_dispatch) -> None:
+        nonlocal produce_count
+        with produce_lock:
+            produce_count += 1
+            current = produce_count
+        if current == 1:
+            first_producer_entered.set()
+            assert release_first_producer.wait(3)
+        elif current == 2:
+            new_producer_entered.set()
+            assert release_new_producer.wait(3)
+
+    with runtime_context(
+        threaded_client=True,
+        callback_handler=callback_handler,
+        before_produce=hold_second_producer,
+        cache_clock=monotonic,
+        cache_ttl_seconds=5,
+        result_ids=(RESULT_ID, "88888888-8888-4888-8888-888888888888"),
+    ) as (runtime, client, _, _):
+        try:
+            assert post(client).status_code == 202
+            assert first_producer_entered.wait(2)
+            release_first_producer.set()
+            assert old_callback_entered.wait(2)
+            first_entry = client.app.state.attempt_cache.snapshot(UUID(ATTEMPT_ID))
+            assert first_entry.state is AttemptState.FINISHED
+            first_result_id = first_entry.receipt.result_id
+            old_future = runtime.execution_futures[ATTEMPT_ID]
+            monotonic.advance(5)
+            outcome = client.app.state.admission_port.admit(
+                DispatchRequest.model_validate(valid_dispatch())
+            )
+            assert outcome.newly_admitted is True
+            assert runtime.registration_count == 2
+            assert new_producer_entered.wait(2)
+            new_future = runtime.execution_futures[ATTEMPT_ID]
+            assert new_future is not old_future
+            assert runtime.wait_for_attempt(ATTEMPT_ID, timeout=0) is False
+
+            old_done = Event()
+            old_future.add_done_callback(lambda _: old_done.set())
+            release_old_callback.set()
+            assert old_done.wait(2)
+            assert runtime.wait_for_attempt(ATTEMPT_ID, timeout=0) is False
+            assert not new_future.done()
+
+            release_new_producer.set()
+            assert runtime.wait_for_attempt(ATTEMPT_ID, timeout=2)
+            second_entry = client.app.state.attempt_cache.snapshot(UUID(ATTEMPT_ID))
+            assert second_entry.state is AttemptState.FINISHED
+            assert second_entry.receipt.result_id != first_result_id
+        finally:
+            release_first_producer.set()
+            release_old_callback.set()
+            release_new_producer.set()
+
+
+def test_22_queued_future_bind_failure_cancels_before_execution_and_releases_once() -> None:
+    first_started, release_first = Event(), Event()
+    binder_calls = 0
+    binder_lock = Lock()
+    failures: list[tuple[Future[object], bool]] = []
+    executed: list[str] = []
+
+    def binder(lifecycle, future) -> None:
+        nonlocal binder_calls
+        with binder_lock:
+            binder_calls += 1
+            current = binder_calls
+        if current != 2:
+            lifecycle.bind_execution_future(future)
+            return
+        raise RuntimeError("injected bind failure")
+
+    def before_produce(dispatch) -> None:
+        executed.append(dispatch.attempt_id)
+        if dispatch.attempt_id == ATTEMPT_ID:
+            first_started.set()
+            assert release_first.wait(3)
+
+    with runtime_context(
+        bind_execution_future=binder,
+        on_bind_failure=lambda future, cancelled: failures.append((future, cancelled)),
+        before_produce=before_produce,
+        worker_count=1,
+        max_in_flight=2,
+    ) as (runtime, client, _, _):
+        try:
+            assert post(client).status_code == 202
+            assert first_started.wait(2)
+            failed_id = "88888888-8888-4888-8888-888888888888"
+            assert post(client, valid_dispatch(failed_id)).status_code == 503
+            assert len(failures) == 1
+            failed_future, cancelled = failures[0]
+            assert cancelled is True and failed_future.cancelled()
+            assert runtime.active_execution_count == 1
+            assert runtime.available_execution_capacity == 1
+            assert failed_id not in executed
+            assert runtime.registration_count == 1
+
+            third_id = "99999999-9999-4999-8999-999999999999"
+            assert post(client, valid_dispatch(third_id)).status_code == 202
+            release_first.set()
+            assert client.wait_for_attempt(ATTEMPT_ID)
+            assert client.wait_for_attempt(third_id)
+            assert runtime.active_execution_count == 0
+            assert runtime.available_execution_capacity == 2
+        finally:
+            release_first.set()
+
+
+def test_23_running_future_bind_failure_keeps_capacity_until_gated_worker_terminates() -> None:
+    worker_waiting, terminated = Event(), Event()
+    observed: list[tuple[bool, int, int, bool]] = []
+    executed: list[str] = []
+    runtime_holder: dict[str, TestOnlyRuntimeComposition] = {}
+    client_holder: dict[str, ThreadedASGIClient] = {}
+
+    def binder(_lifecycle, _future) -> None:
+        assert worker_waiting.wait(2)
+        raise RuntimeError("injected running Future bind failure")
+
+    def on_bind_failure(future, cancelled) -> None:
+        runtime = runtime_holder["runtime"]
+        observed.append((cancelled, runtime.active_execution_count,
+                         runtime.available_execution_capacity, future.done()))
+        future.add_done_callback(lambda _: terminated.set())
+        client = client_holder["client"]
+        with pytest.raises(AttemptAdmissionUnavailable):
+            client.app.state.admission_port.admit(DispatchRequest.model_validate(
+                valid_dispatch("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+            ))
+
+    with runtime_context(
+        threaded_client=True,
+        bind_execution_future=binder,
+        on_worker_waiting_gate=lambda _dispatch: worker_waiting.set(),
+        on_bind_failure=on_bind_failure,
+        before_produce=lambda dispatch: executed.append(dispatch.attempt_id),
+        worker_count=1,
+        max_in_flight=1,
+    ) as (runtime, client, requests, signer):
+        runtime_holder["runtime"] = runtime
+        client_holder["client"] = client
+        failed_id = "88888888-8888-4888-8888-888888888888"
+        assert post(client, valid_dispatch(failed_id)).status_code == 503
+        assert observed == [(False, 1, 0, False)]
+        assert terminated.wait(2)
+        assert runtime.active_execution_count == 0
+        assert runtime.available_execution_capacity == 1
+        assert runtime.registration_count == 0
+        assert client.app.state.attempt_cache.snapshot(UUID(failed_id)) is None
+        assert executed == []
+        assert requests == [] and signer.calls == []
 
 
 def test_17_direction_credentials_are_distinct_and_wrong_token_is_rejected() -> None:

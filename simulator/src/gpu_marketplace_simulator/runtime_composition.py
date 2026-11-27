@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import Future, ThreadPoolExecutor, wait
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import logging
 from threading import BoundedSemaphore, Event, RLock, current_thread
@@ -46,6 +47,18 @@ from gpu_marketplace_simulator.signed_v1 import (
 logger = logging.getLogger(__name__)
 
 
+@dataclass(slots=True)
+class _ExecutionRegistration:
+    attempt_id: str
+    future: Future[object]
+    lifecycle: ProducerLifecycle
+    done: Event = field(default_factory=Event)
+    wake_worker: Event = field(default_factory=Event)
+    execution_allowed: Event = field(default_factory=Event)
+    accepted: bool = False
+    capacity_released: bool = False
+
+
 def _canonical_service_token(value: str) -> bool:
     import base64
     import binascii
@@ -78,6 +91,9 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
         clock: Callable[[], datetime] | None = None,
         result_id_factory: Callable[[], UUID] = uuid4,
         before_produce: Callable[[DispatchRequest], None] | None = None,
+        bind_execution_future: Callable[[ProducerLifecycle, Future[object]], None] | None = None,
+        on_worker_waiting_gate: Callable[[DispatchRequest], None] | None = None,
+        on_bind_failure: Callable[[Future[object], bool], None] | None = None,
         cache_clock: Callable[[], float] | None = None,
         cache_max_entries: int = 64,
         cache_ttl_seconds: float = 30.0,
@@ -115,6 +131,11 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._new_result_id = result_id_factory
         self._before_produce = before_produce
+        self._bind_execution_future = bind_execution_future or (
+            lambda lifecycle, future: lifecycle.bind_execution_future(future)
+        )
+        self._on_worker_waiting_gate = on_worker_waiting_gate
+        self._on_bind_failure = on_bind_failure
         self._cache_clock = cache_clock
         self._cache_max_entries = cache_max_entries
         self._cache_ttl_seconds = cache_ttl_seconds
@@ -139,6 +160,10 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
         )
         self._capacity = BoundedSemaphore(max_in_flight)
         self._guard = RLock()
+        # Every submitted Future owns one capacity permit until its done
+        # callback observes actual termination. This set is bounded by
+        # max_in_flight and also covers same-ID registrations overlapping TTL.
+        self._active_futures: set[Future[object]] = set()
         self._futures: dict[str, Future[object]] = {}
         self._attempt_done: dict[str, Event] = {}
         self._lifecycles: dict[str, ProducerLifecycle] = {}
@@ -155,7 +180,7 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
         self._shutdown_started.set()
         with self._guard:
             self._closed = True
-            pending = tuple(self._futures.values())
+            pending = tuple(self._active_futures)
         _, not_done = await asyncio.to_thread(
             wait, pending, timeout=self._shutdown_timeout
         )
@@ -184,37 +209,57 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
         if not self._capacity.acquire(blocking=False):
             return False
 
-        start_gate = Event()
+        wake_worker = Event()
+        execution_allowed = Event()
         try:
             future = self._executor.submit(
-                self._execute, dispatch, _admission, lifecycle, start_gate
+                self._execute, dispatch, _admission, lifecycle,
+                wake_worker, execution_allowed,
             )
-        except RuntimeError:
+        except BaseException as error:
             self._capacity.release()
-            return False
+            if isinstance(error, RuntimeError):
+                return False
+            raise
+
+        registration = _ExecutionRegistration(
+            attempt_id=dispatch.attempt_id,
+            future=future,
+            lifecycle=lifecycle,
+            wake_worker=wake_worker,
+            execution_allowed=execution_allowed,
+        )
+        with self._guard:
+            self._active_futures.add(future)
+        future.add_done_callback(
+            lambda completed, current=registration: self._producer_done(current, completed)
+        )
 
         try:
-            lifecycle.bind_execution_future(future)
+            self._bind_execution_future(lifecycle, future)
         except Exception:
-            start_gate.set()
-            future.cancel()
-            self._capacity.release()
+            cancelled = future.cancel()
+            try:
+                if self._on_bind_failure is not None:
+                    self._on_bind_failure(future, cancelled)
+            finally:
+                # Wake a worker that had already transitioned to RUNNING, but
+                # keep execution permission closed. A failed cancel is not
+                # evidence of termination; the Future callback owns release.
+                wake_worker.set()
             raise
 
         attempt_id = dispatch.attempt_id
         logger.info("stage_a_registration_bound", extra={"thread_name": current_thread().name})
         with self._guard:
             self._futures[attempt_id] = future
-            self._attempt_done[attempt_id] = Event()
+            self._attempt_done[attempt_id] = registration.done
             self._lifecycles[attempt_id] = lifecycle
             self._admissions[attempt_id] = _admission
             self._registration_count += 1
-        future.add_done_callback(
-            lambda completed, key=attempt_id, owner=lifecycle: self._producer_done(
-                key, completed, owner
-            )
-        )
-        start_gate.set()
+            registration.accepted = True
+        execution_allowed.set()
+        wake_worker.set()
         logger.info("stage_a_registration_return", extra={"thread_name": current_thread().name})
         return True
 
@@ -223,9 +268,14 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
         dispatch: DispatchRequest,
         admission: Admission,
         lifecycle: ProducerLifecycle,
-        start_gate: Event,
+        wake_worker: Event,
+        execution_allowed: Event,
     ) -> object:
-        start_gate.wait()
+        if self._on_worker_waiting_gate is not None:
+            self._on_worker_waiting_gate(dispatch)
+        wake_worker.wait()
+        if not execution_allowed.is_set():
+            return None
         if self._before_produce is not None:
             self._before_produce(dispatch)
 
@@ -293,25 +343,28 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
 
     def _producer_done(
         self,
-        attempt_id: str,
+        registration: _ExecutionRegistration,
         future: Future[object],
-        lifecycle: ProducerLifecycle,
     ) -> None:
-        self._capacity.release()
         with self._guard:
-            if self._futures.get(attempt_id) is future:
-                self._futures.pop(attempt_id, None)
-        if future.cancelled() or future.exception() is not None:
+            if registration.future is future and not registration.capacity_released:
+                registration.capacity_released = True
+                self._active_futures.discard(future)
+                self._capacity.release()
+            if self._futures.get(registration.attempt_id) is future:
+                self._futures.pop(registration.attempt_id, None)
+        if registration.accepted and (future.cancelled() or future.exception() is not None):
             try:
-                lifecycle.fail_after_start()
+                registration.lifecycle.fail_after_start()
             except Exception:
                 # Receipt completion may already have succeeded before callback
                 # reporting. The original cache state remains authoritative.
                 logger.debug("stage_a_failure_evidence_not_applicable")
         with self._guard:
-            event = self._attempt_done.get(attempt_id)
-            if event is not None:
-                event.set()
+            # Signal only this registration's event, after lifecycle failure
+            # evidence is recorded. A same-ID replacement owns a different
+            # Event, so stale callbacks cannot wake it.
+            registration.done.set()
 
     def create_app(self) -> FastAPI:
         settings = Settings(
@@ -364,3 +417,13 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
     @property
     def shutdown_drained(self) -> bool | None:
         return self._shutdown_drained
+
+    @property
+    def active_execution_count(self) -> int:
+        with self._guard:
+            return len(self._active_futures)
+
+    @property
+    def available_execution_capacity(self) -> int:
+        # Test-only diagnostic for deterministic lifecycle assertions.
+        return self._capacity._value

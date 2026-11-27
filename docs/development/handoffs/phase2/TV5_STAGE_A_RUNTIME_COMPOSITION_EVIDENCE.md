@@ -94,6 +94,9 @@ CI or owner approval.
 | 18 | Oversize 422, auth-before-read, no sensitive leakage | `PASS` — test_18 |
 | 19 | No unauthorized rerun; stale token fence and once-only release | `PASS` — test_19 |
 | 20 | Canonical V1, signature verification, receipt/callback byte identity | `PASS` — test_20 |
+| 21 | Expired same-Attempt re-admission while old callback is blocked | `PASS` — old Future completion signals only its own registration event; replacement Future remains pending and gets a distinct result ID |
+| 22 | Queued Future bind failure | `PASS` — `cancel()` confirmed true; denied producer never enters; only the canceled Future releases its permit |
+| 23 | RUNNING Future bind failure at start gate | `PASS` — `cancel()` false; execution permission remains closed; capacity remains owned until the real Future terminates; nested admission is rejected |
 
 ## Verification recorded for this local checkout
 
@@ -101,26 +104,18 @@ CI or owner approval.
 |---|---|
 | Published #60 control at `6eb520d8dd2b9a3d9fb5b9bf8246f7919d42ada4` | `PASS` — health plus approved dispatch tests: 3 passed, 0.32s, outside sandbox |
 | Dependency-only control at `d40e043a78c0ce233ba2a504033ff823d6681af7` | `PASS` — same health plus dispatch tests: 3 passed, 0.30s, outside sandbox |
-| Stage A test file | `PASS` — all 20 integration tests passed, 1.68s, outside sandbox |
-| Full Simulator suite | `PASS` — 390 passed, 0 failed, 3.33s, outside sandbox; one Starlette/httpx deprecation warning |
-| Deterministic, Signed Result V1/parser, Attempt Cache focused suites | `PASS` — earlier focused run 174 passed; these tests are also included in full-suite 390 |
-| Callback Client suite | `PASS` — earlier focused run 52 passed; included in full-suite 390 |
-| Node interoperability and frozen vectors | `PASS` — full Simulator suite includes the Node/JCS and Signed Result V1 vector tests; earlier targeted Node run on Node `v22.22.2` passed 62 tests |
-| Repeated race/lifecycle subset | `PASS` — 10 independent runs; each run passed 5 tests (50 executions total) |
+| Baseline regression confirmation | `PASS` — temporary in-memory restoration of the old Attempt-ID event lookup made test_21 fail because the old Future signaled the replacement waiter. A standalone deterministic `Future`/gate reproduction of the old bind-failure order observed `cancel=False`, denied producer execution, and capacity reacquisition before Future termination. No repository source was changed for these reproductions. |
+| Stage A test file | `PASS` — 23 passed, 1.69s, native WSL; includes all original 20 groups and three P2 lifecycle tests |
+| Full Simulator suite | `PASS` — 393 passed, 0 failed, 3.14s, native WSL; one Starlette/httpx deprecation warning |
+| Deterministic V1–V4, Node/JCS interop, Signed Result V1 and Attempt Cache | `PASS` — 157 passed, 0 skipped; Node `v22.22.2` was available and interop tests ran |
+| Repeated race/lifecycle subset | `PASS` — 10 independent runs; each run passed 8 selected tests (80 executions total), including test_21–23 |
 | Compile and lock | `PASS` — compileall succeeded; `uv lock --check --offline --project .` resolved 30 packages without changing the lock |
 | Whitespace | `PASS` — `git diff --check`; untracked Stage A files also checked with `git diff --no-index --check` |
 | Ruff | `NOT_RUN` — Ruff is not installed |
 
-The full-suite command was `python -B -m pytest -p no:cacheprovider tests -q`
-from `simulator/`; the Stage A command was the same invocation against
-`tests/test_runtime_composition.py`. The race subset was run ten separate times;
-each run executed five named concurrency/lifecycle tests and reported `5
-passed`. `compileall`, lock validation and whitespace checks were run after the
-final test-harness edits. The first native run before those edits was `17
-passed, 3 failed`; the three failures were test-oracle/lifecycle-harness bugs,
-then group 8 exposed an additional test scheduling flaw in the full-suite run.
-All four were corrected only in the Stage A test file, and the final Stage A
-and full-suite runs passed.
+The full-suite command was `/home/nguyenducthang/gpu-resource-marketplace/simulator/.venv/bin/python -B -m pytest -p no:cacheprovider tests -q` from `simulator/`; it reported `393 passed` and one deprecation warning. The focused command against `tests/test_runtime_composition.py` reported `23 passed`. The deterministic/interop/Signed Result/cache command reported `157 passed`; actual Node execution was available. The concurrency subset used `-k 'test_08 or test_14 or test_15 or test_16 or test_19 or test_21 or test_22 or test_23'` in ten separate runs; each reported `8 passed, 15 deselected`. `compileall`, offline lock validation and whitespace checks passed. `uv run` itself was `BLOCKED` by sandbox DNS while resolving pinned setuptools; verification used the previously validated locked Simulator venv in native WSL. Ruff is unavailable and remains `NOT_RUN`.
+
+At reviewed baseline `415b083`, the done callback looked up the event by Attempt ID, and bind failure opened the execution gate and released capacity unconditionally after `Future.cancel()`. P2-01 old behavior was reproduced with a temporary in-memory legacy callback mutation against test_21; it failed because the new waiter became signaled. P2-02's old sequence was reproduced with a real `ThreadPoolExecutor` Future and Events: cancellation returned false, the denied task entered, and capacity was reacquired while that Future remained unfinished. Remediated tests 21–23 pass on the current local tree. These are local results, not GitHub CI.
 
 ### Environment comparison and hang diagnosis
 
