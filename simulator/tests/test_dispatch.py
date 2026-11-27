@@ -21,8 +21,8 @@ from gpu_marketplace_simulator.dispatch import (
 )
 
 
-MANAGER_TOKEN = "manager-test-token-0123456789abcdef"
-CALLBACK_TOKEN = "callback-test-token-0123456789abcdef"
+MANAGER_TOKEN = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+CALLBACK_TOKEN = "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8"
 USER_JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature"
 ATTEMPT = "44444444-4444-4444-8444-444444444444"
 _NO_BODY = object()
@@ -240,9 +240,38 @@ def test_missing_server_token_fails_closed_without_admission() -> None:
     assert admission.calls == 0
 
 
-def test_config_rejects_dispatch_tokens_shorter_than_256_bit_length_floor() -> None:
-    with pytest.raises(ValidationError):
-        Settings(manager_dispatch_token=SecretStr("too-short"))
+def test_config_accepts_canonical_32_byte_service_token_encoding() -> None:
+    settings = Settings(manager_dispatch_token=SecretStr(MANAGER_TOKEN))
+    assert settings.manager_dispatch_token.get_secret_value() == MANAGER_TOKEN
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "too-short",
+        MANAGER_TOKEN + "=",
+        MANAGER_TOKEN[:-1],
+        MANAGER_TOKEN[:-1] + "+",
+        MANAGER_TOKEN[:-1] + "/",
+        # Same top four data bits as the canonical last character, but nonzero
+        # base64 pad bits; decoding alone would otherwise accept this spelling.
+        MANAGER_TOKEN[:-1] + "9",
+        "é" + MANAGER_TOKEN[1:],
+    ],
+)
+def test_config_rejects_noncanonical_service_token_encodings(token: str) -> None:
+    with pytest.raises(ValidationError) as caught:
+        Settings(manager_dispatch_token=SecretStr(token))
+    assert token not in str(caught.value)
+
+
+def test_missing_token_remains_unprovisioned_and_route_fails_closed() -> None:
+    settings = Settings(manager_dispatch_token=None)
+    admission = InMemoryAdmission()
+    response = post(LocalASGIClient(create_app(settings, admission_port=admission)))
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "DEPENDENCY_UNAVAILABLE"
+    assert admission.calls == 0
 
 
 @pytest.mark.parametrize("limit", [0, -1, True, 1.5])
@@ -339,6 +368,47 @@ def test_hard_deadline_must_match_adr005_offset() -> None:
     assert admission.calls == 0
 
 
+@pytest.mark.parametrize(
+    ("hard_deadline", "expected_status"),
+    [
+        ("2026-10-18T08:02:59.999999Z", 422),
+        ("2026-10-18T08:03:00.000000Z", 202),
+        ("2026-10-18T08:03:00.000001Z", 422),
+    ],
+)
+def test_deadline_grace_requires_exact_120_second_microsecond_equality(
+    hard_deadline: str, expected_status: int
+) -> None:
+    body = payload() | {"hard_deadline_at": hard_deadline}
+    admission = InMemoryAdmission()
+    response = post(LocalASGIClient(app_for(admission)), body)
+    assert response.status_code == expected_status
+    assert admission.calls == (1 if expected_status == 202 else 0)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["finish_due_at", "hard_deadline_at"],
+)
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        "2026-02-30T08:01:00.000000Z",
+        "2026-10-18T09:01:00.000000+01:00",
+        "2026-10-18T08:01:00.000000+00:00",
+        "2026-10-18T08:01:00Z",
+        "not-a-time",
+    ],
+)
+def test_both_deadline_fields_reject_invalid_dates_and_non_utc_forms(
+    field: str, timestamp: str
+) -> None:
+    body = payload() | {field: timestamp}
+    admission = InMemoryAdmission()
+    assert post(LocalASGIClient(app_for(admission)), body).status_code == 422
+    assert admission.calls == 0
+
+
 def test_duplicate_json_keys_are_rejected_without_admission() -> None:
     raw = json.dumps(payload(), separators=(",", ":"))
     raw = raw.replace('"gpu_count":2', '"gpu_count":2,"gpu_count":3')
@@ -386,6 +456,39 @@ def test_oversized_content_length_is_rejected_before_stream_read() -> None:
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
     assert response.headers["cache-control"] == "no-store"
     assert admission.calls == 0
+
+
+def test_oversized_chunked_dispatch_returns_422_without_admission() -> None:
+    admission = InMemoryAdmission()
+    app = app_for(admission)
+    raw = json.dumps(payload(), separators=(",", ":")).encode("utf-8")
+
+    async def chunks():
+        yield raw
+        yield b" " * (4097 - len(raw))
+
+    async def send():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://simulator.test"
+        ) as client:
+            return await client.post(
+                "/internal/v1/executions",
+                headers={
+                    "Authorization": f"Bearer {MANAGER_TOKEN}",
+                    "Content-Type": "application/json",
+                },
+                content=chunks(),
+            )
+
+    response = asyncio.run(send())
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert " " * 32 not in response.text
+    assert response.headers["cache-control"] == "no-store"
+    assert UUID(response.headers["x-request-id"]).version == 4
+    assert admission.calls == 0
+    assert admission.new_producers == 0
 
 
 def test_streaming_reader_stops_before_buffering_oversized_body() -> None:
