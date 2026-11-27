@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 import logging
+from collections.abc import Callable
+from typing import Protocol
 
 from fastapi import FastAPI
 
@@ -14,9 +16,19 @@ from gpu_marketplace_simulator.dispatch import AttemptAdmissionPort, create_disp
 from gpu_marketplace_simulator.logging import configure_logging
 
 
+class RuntimeLifecycle(Protocol):
+    """Optional Simulator-local resource owner; absent in normal production startup."""
+
+    async def startup(self) -> None: ...
+
+    async def shutdown(self) -> None: ...
+
+
 def create_app(settings: Settings | None = None, *,
                admission_port: AttemptAdmissionPort | None = None,
-               producer_registrar: ProducerRegistrationPort | None = None) -> FastAPI:
+               producer_registrar: ProducerRegistrationPort | None = None,
+               runtime_lifecycle: RuntimeLifecycle | None = None,
+               attempt_cache_clock: Callable[[], float] | None = None) -> FastAPI:
     resolved_settings = settings or Settings()
     configure_logging(resolved_settings.log_level)
     logger = logging.getLogger(__name__)
@@ -41,6 +53,7 @@ def create_app(settings: Settings | None = None, *,
         attempt_cache = AttemptCache(
             max_entries=resolved_settings.attempt_cache_max_entries,
             ttl_seconds=resolved_settings.attempt_cache_ttl_seconds,
+            **({"clock": attempt_cache_clock} if attempt_cache_clock is not None else {}),
         )
         adapter = AttemptCacheAdmissionAdapter(
             cache=attempt_cache,
@@ -61,6 +74,8 @@ def create_app(settings: Settings | None = None, *,
     async def lifespan(_: FastAPI):
         logger.info("simulator_started")
         try:
+            if runtime_lifecycle is not None:
+                await runtime_lifecycle.startup()
             yield
         finally:
             if admission_executor is not None:
@@ -78,6 +93,8 @@ def create_app(settings: Settings | None = None, *,
                 )
                 if adapter is not None and drained is not True:
                     logger.warning("simulator_producer_drain_timed_out")
+            if runtime_lifecycle is not None:
+                await runtime_lifecycle.shutdown()
             logger.info("simulator_stopped")
 
     app = FastAPI(
