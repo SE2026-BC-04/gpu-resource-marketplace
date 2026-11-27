@@ -1,5 +1,9 @@
 # TV5 Phase 2E — Open Decision Register
 
+
+> **Current D-16 decision reconciliation (2026-11-28):** `P2E-CACHE-GAP-01 / D-16 = APPROVED_DESIGN — Option B` via merged PR #53 / `DEC-P2-L2-SOURCE-SYNC-01` and API Contract §13.1 + `API-INT-04`. **E-IF-02 = PENDING_ACK_AND_TESTS** (not `NEEDS_OWNER_DECISION`): conflict `409` only during retained in-process Attempt fingerprint; after eviction/cold restart no historical `409` guarantee. Manager retransmits only the original authenticated immutable ten-key Outbox payload; a reexecution may create a new signed `result_id`, while callback retries of an existing receipt preserve its original bytes and ID. PostgreSQL retains exactly-once business effect authority. Test `P2E-DRT-04` must distinguish live-retained `409` from lost-cache no guarantee and remain **NOT_RUN** at runtime. **E-IF-01 PENDING_ACK, E-IF-03 PENDING_PARAMS, D-19 repair NOT_AUTHORIZED.** The dated decision table and preservation note below are historical snapshots and must not be construed as superseding this approved source.
+
+
 All recommendations below are **PROPOSED — NOT OWNER APPROVED** unless the row explicitly cites an already approved design decision. Status is as of baseline `bee832eaf5463df20f6c6815174322871eb6685a`.
 
 | ID | Current status | Options / recommendation for review | Trade-off and contract impact | Required ACK / owner | Blocks |

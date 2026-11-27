@@ -1,5 +1,9 @@
 # TV5 Interface Review Matrix — E-IF-01..12
 
+
+> **Current E-IF-02 source-status addendum (2026-11-28):** `D-16 / P2E-CACHE-GAP-01` **Option B approved at design level** in merged PR #53 / `DEC-P2-L2-SOURCE-SYNC-01`; API Contract §13.1 and `API-INT-04` control the acceptance oracle. For a **retained** fingerprint a changed same-Attempt dispatch returns `409 EXECUTION_CONFLICT`; after **eviction/cold restart**, a volatile DB-less Simulator cannot establish historical mismatch and does not guarantee `409`. Only the Manager's authenticated immutable original ten-key Outbox request is eligible for retry; reexecution may produce a new `result_id`, while retries of retained signed bytes remain byte-identical. PostgreSQL ensures once-only business effects. **E-IF-02 = APPROVED_DESIGN / PENDING_ACK_AND_TESTS**, not runtime PASS; `P2E-DRT-04` must include retained/lost-cache tests. `E-IF-01` remains `PENDING_ACK`, `E-IF-03` remains `PENDING_PARAMS`; no cross-service activation or D-19 repair approved. Previous `NEEDS_OWNER_DECISION` entries below represent older snapshots.
+
+
 **Snapshot:** main `bee832eaf5463df20f6c6815174322871eb6685a`; all rows below are review status, not ACKs. `ACK_COMPATIBLE` and `ACK_WITH_ACTIONS` require actual owner evidence; none is manufactured here.
 
 ## Source manifest
