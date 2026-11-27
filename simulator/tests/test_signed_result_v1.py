@@ -15,6 +15,17 @@ from gpu_marketplace_simulator.signed_result_v1 import (
 
 ATTEMPT_ID = UUID("44444444-4444-4444-8444-444444444444")
 RESULT_ID = UUID("77777777-7777-4777-8777-777777777777")
+JOB_ID = UUID("33333333-3333-4333-8333-333333333333")
+WORKER_ID = UUID("11111111-1111-4111-8111-111111111111")
+LISTING_ID = UUID("22222222-2222-4222-8222-222222222222")
+
+
+def expected_identity() -> dict[str, UUID]:
+    return {
+        "expected_job_id": JOB_ID,
+        "expected_worker_id": WORKER_ID,
+        "expected_listing_id": LISTING_ID,
+    }
 
 
 def payload() -> dict[str, object]:
@@ -45,7 +56,8 @@ def envelope_bytes(item: dict[str, object] | None = None) -> bytes:
 
 def test_v1_exact_fields_and_attempt_result_binding() -> None:
     validate_receipt_binding_v1(
-        envelope_bytes(), outer_result_id=RESULT_ID, expected_attempt_id=ATTEMPT_ID
+        envelope_bytes(), outer_result_id=RESULT_ID, expected_attempt_id=ATTEMPT_ID,
+        **expected_identity(),
     )
 
 
@@ -55,12 +67,32 @@ def test_v1_rejects_wrong_attempt_and_wrong_outer_result_id() -> None:
             envelope_bytes(),
             outer_result_id=RESULT_ID,
             expected_attempt_id=UUID("55555555-5555-4555-8555-555555555555"),
+            **expected_identity(),
         )
     with pytest.raises(InvalidSignedResultV1, match="result_id"):
         validate_receipt_binding_v1(
             envelope_bytes(),
             outer_result_id=UUID("99999999-9999-4999-8999-999999999999"),
             expected_attempt_id=ATTEMPT_ID,
+            **expected_identity(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        ("job_id", UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")),
+        ("worker_id", UUID("99999999-9999-4999-8999-999999999999")),
+        ("listing_id", UUID("99999999-9999-4999-8999-999999999998")),
+    ],
+)
+def test_v1_rejects_dispatch_identity_mismatch(field: str, expected: UUID) -> None:
+    with pytest.raises(InvalidSignedResultV1, match=field):
+        validate_receipt_binding_v1(
+            envelope_bytes(),
+            outer_result_id=RESULT_ID,
+            expected_attempt_id=ATTEMPT_ID,
+            **{**expected_identity(), f"expected_{field}": expected},
         )
 
 
@@ -87,6 +119,7 @@ def test_v1_rejects_invalid_or_ambiguous_payload_fields(mutation: str) -> None:
         validate_receipt_binding_v1(
             envelope_bytes(item), outer_result_id=RESULT_ID,
             expected_attempt_id=ATTEMPT_ID,
+            **expected_identity(),
         )
 
 
@@ -104,6 +137,7 @@ def test_v1_rejects_outer_shape_signature_and_encoding_errors() -> None:
                 json.dumps(invalid, separators=(",", ":")).encode(),
                 outer_result_id=RESULT_ID,
                 expected_attempt_id=ATTEMPT_ID,
+                **expected_identity(),
             )
 
 
@@ -119,7 +153,8 @@ def test_v1_rejects_outer_shape_signature_and_encoding_errors() -> None:
 def test_v1_rejects_malformed_json_duplicate_members_and_non_json_constants(raw: bytes) -> None:
     with pytest.raises(InvalidSignedResultV1):
         validate_receipt_binding_v1(
-            raw, outer_result_id=RESULT_ID, expected_attempt_id=ATTEMPT_ID
+            raw, outer_result_id=RESULT_ID, expected_attempt_id=ATTEMPT_ID,
+            **expected_identity(),
         )
 
 
@@ -136,5 +171,6 @@ def test_v1_rejects_duplicate_member_inside_payload() -> None:
     ).encode()
     with pytest.raises(InvalidSignedResultV1, match="duplicate"):
         validate_receipt_binding_v1(
-            raw, outer_result_id=RESULT_ID, expected_attempt_id=ATTEMPT_ID
+            raw, outer_result_id=RESULT_ID, expected_attempt_id=ATTEMPT_ID,
+            **expected_identity(),
         )

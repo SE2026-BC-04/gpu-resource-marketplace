@@ -55,7 +55,13 @@ class ProducerRegistrationPort(Protocol):
 
 
 class ProducerLifecycle:
-    """Trusted, Attempt-bound callback capability handed only to the registrar."""
+    """Trusted, Attempt-bound callback capability handed only to the registrar.
+
+    A producer must propagate a rejected ``complete()`` call into the actual
+    execution Future. It must not report successful execution after receipt
+    completion was rejected; only a terminated Future with an exception or a
+    completed cancellation is currently accepted as post-start failure evidence.
+    """
 
     __slots__ = ("_adapter", "_admission")
 
@@ -70,6 +76,10 @@ class ProducerLifecycle:
         self._adapter._bind_execution_future(self, execution_future)
 
     def complete(self, receipt: Receipt) -> AttemptAdmissionOutcome:
+        """Retain a structurally valid, identity-bound receipt or raise.
+
+        The producer must allow this exception to fail its execution Future.
+        """
         return self._adapter.complete(self._admission, receipt)
 
     def fail_after_start(self) -> Admission:
@@ -87,7 +97,15 @@ class _ProducerSlot:
     admission: Admission
     phase: _RegistrationPhase
     lifecycle: ProducerLifecycle
+    receipt_identity: _ReceiptIdentity
     execution_future: Future[object] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ReceiptIdentity:
+    job_id: UUID
+    worker_id: UUID
+    listing_id: UUID
 
 
 class AttemptCacheAdmissionAdapter:
@@ -227,7 +245,14 @@ class AttemptCacheAdmissionAdapter:
                 raise AttemptAdmissionUnavailable("producer concurrency is full")
             lifecycle = ProducerLifecycle(self, admission)
             self._producer_slots[attempt_id] = _ProducerSlot(
-                admission, _RegistrationPhase.REGISTERING, lifecycle
+                admission,
+                _RegistrationPhase.REGISTERING,
+                lifecycle,
+                _ReceiptIdentity(
+                    UUID(dispatch.job_id),
+                    UUID(dispatch.worker_id),
+                    UUID(dispatch.listing_id),
+                ),
             )
 
         # Call outside the global lock: unrelated Attempts and shutdown can
@@ -254,21 +279,29 @@ class AttemptCacheAdmissionAdapter:
             raise AttemptAdmissionUnavailable("producer registration failed") from None
 
         if registered is not True:
-            if not self._rollback_prestart(admission):
-                logger.warning("attempt_producer_prestart_rollback_fenced")
+            if self._rollback_prestart(admission):
+                raise AttemptAdmissionUnavailable("producer rejected handoff")
+            logger.warning("attempt_producer_prestart_rollback_fenced")
             raise AttemptAdmissionUnavailable(
                 "pre-start rollback could not be proven"
             )
-            raise AttemptAdmissionUnavailable("producer rejected handoff")
         return self._confirm_registered(admission)
 
     def complete(self, admission: Admission, receipt: Receipt) -> AttemptAdmissionOutcome:
         """Bind exact V1 envelope bytes to this Attempt before retaining them."""
+        with self._lock:
+            slot = self._producer_slots.get(admission.attempt_id)
+            if not self._same_owner(slot, admission):
+                raise AttemptAdmissionUnavailable("producer registration is stale")
+            identity = slot.receipt_identity
         try:
             validate_receipt_binding_v1(
                 receipt.raw_envelope,
                 outer_result_id=receipt.result_id,
                 expected_attempt_id=admission.attempt_id,
+                expected_job_id=identity.job_id,
+                expected_worker_id=identity.worker_id,
+                expected_listing_id=identity.listing_id,
             )
         except (AttributeError, TypeError, ValueError) as error:
             raise AttemptAdmissionUnavailable("receipt is not bound to this Attempt") from error

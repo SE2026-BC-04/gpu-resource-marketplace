@@ -77,7 +77,8 @@ def dispatch(attempt_id: str = ATTEMPT) -> dict[str, object]:
 
 
 def signed_result_envelope(
-    *, attempt_id: str = ATTEMPT, result_id: UUID = RESULT
+    *, attempt_id: str = ATTEMPT, result_id: UUID = RESULT,
+    payload_overrides: dict[str, object] | None = None,
 ) -> bytes:
     """Structural ADR-004 V1 fixture; signature shape only, never verified here."""
     fields = dispatch(attempt_id)
@@ -94,6 +95,8 @@ def signed_result_envelope(
         "finished_at": "2026-10-18T08:01:00.000000Z",
         "key_id": "88888888-8888-4888-8888-888888888888",
     }
+    if payload_overrides:
+        payload.update(payload_overrides)
     signature = urlsafe_b64encode(bytes(64)).rstrip(b"=").decode("ascii")
     return json.dumps(
         {"payload": payload, "signature": signature,
@@ -102,9 +105,13 @@ def signed_result_envelope(
     ).encode("utf-8")
 
 
-def make_receipt(*, attempt_id: str = ATTEMPT, result_id: UUID = RESULT) -> Receipt:
+def make_receipt(
+    *, attempt_id: str = ATTEMPT, result_id: UUID = RESULT,
+    payload_overrides: dict[str, object] | None = None,
+) -> Receipt:
     return Receipt(result_id, signed_result_envelope(
-        attempt_id=attempt_id, result_id=result_id
+        attempt_id=attempt_id, result_id=result_id,
+        payload_overrides=payload_overrides,
     ))
 
 
@@ -248,6 +255,28 @@ def test_failed_handoff_returns_503_and_token_guarded_rollback_allows_safe_retry
     assert app.state.attempt_cache.snapshot(UUID(ATTEMPT)) is None
     assert client.post("/internal/v1/executions").status_code == 202
     assert producer.calls == 2
+
+
+def test_rejected_handoff_reports_proven_prestart_rollback_without_leaking_details() -> None:
+    app, producer, _client = make_app()
+    producer.reject_next = True
+    with pytest.raises(AttemptAdmissionUnavailable, match="producer rejected handoff"):
+        app.state.admission_port.admit(DispatchRequest.model_validate(dispatch()))
+    assert app.state.attempt_cache.snapshot(UUID(ATTEMPT)) is None
+    assert app.state.admission_port.active_producer_count == 0
+
+
+def test_rejected_handoff_reports_uncertain_rollback_and_keeps_capacity() -> None:
+    app, producer, _client = make_app()
+    producer.reject_next = True
+    app.state.attempt_cache.abort_before_start = lambda _admission: False
+    with pytest.raises(
+        AttemptAdmissionUnavailable, match="pre-start rollback could not be proven"
+    ):
+        app.state.admission_port.admit(DispatchRequest.model_validate(dispatch()))
+    assert producer.calls == 1
+    assert app.state.attempt_cache.snapshot(UUID(ATTEMPT)).state is AttemptState.IN_FLIGHT
+    assert app.state.admission_port.active_producer_count == 1
 
 
 def test_handoff_exception_is_redacted_and_prestart_admission_is_removed() -> None:
@@ -669,10 +698,74 @@ def test_invalid_or_mismatched_receipt_is_rejected_without_cache_mutation() -> N
     )
     with pytest.raises(AttemptAdmissionUnavailable, match="receipt is not bound"):
         adapter.complete(admission, wrong_outer)
+    wrong_payload_result = make_receipt(
+        payload_overrides={"result_id": "99999999-9999-4999-8999-999999999999"}
+    )
+    with pytest.raises(AttemptAdmissionUnavailable, match="receipt is not bound"):
+        adapter.complete(admission, wrong_payload_result)
+    mismatched_identities = {
+        "job_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "worker_id": "99999999-9999-4999-8999-999999999999",
+        "listing_id": "99999999-9999-4999-8999-999999999998",
+    }
+    for field, value in mismatched_identities.items():
+        with pytest.raises(AttemptAdmissionUnavailable, match="receipt is not bound"):
+            adapter.complete(
+                admission, make_receipt(payload_overrides={field: value})
+            )
     retained = app.state.attempt_cache.snapshot(UUID(ATTEMPT))
     assert retained.state is AttemptState.IN_FLIGHT
     assert retained.receipt is None
     assert adapter.active_producer_count == 1
+
+
+def test_swallowed_completion_rejection_is_not_treated_as_producer_failure() -> None:
+    app, producer, client = make_app(max_entries=2, concurrency=1)
+    assert client.post("/internal/v1/executions").status_code == 202
+    _, admission, lifecycle = producer.tickets[ATTEMPT]
+    execution = Future()
+    lifecycle.bind_execution_future(execution)
+
+    with pytest.raises(AttemptAdmissionUnavailable, match="receipt is not bound"):
+        lifecycle.complete(make_receipt(payload_overrides={
+            "job_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        }))
+    # Reproduce a producer swallowing the rejection and falsely succeeding.
+    execution.set_result(None)
+    with pytest.raises(AttemptAdmissionUnavailable, match="not confirmed"):
+        lifecycle.fail_after_start()
+
+    retained = app.state.attempt_cache.snapshot(UUID(ATTEMPT))
+    assert retained.state is AttemptState.IN_FLIGHT
+    assert retained.receipt is None
+    assert app.state.admission_port.active_producer_count == 1
+    assert producer.calls == 1
+
+
+def test_propagated_completion_rejection_becomes_failure_only_after_future_terminates() -> None:
+    app, producer, client = make_app(max_entries=2, concurrency=1)
+    assert client.post("/internal/v1/executions").status_code == 202
+    _, _admission, lifecycle = producer.tickets[ATTEMPT]
+    execution = Future()
+    lifecycle.bind_execution_future(execution)
+    with pytest.raises(AttemptAdmissionUnavailable, match="receipt is not bound") as rejected:
+        lifecycle.complete(make_receipt(payload_overrides={
+            "job_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        }))
+
+    with pytest.raises(AttemptAdmissionUnavailable, match="not confirmed"):
+        lifecycle.fail_after_start()
+    assert app.state.admission_port.active_producer_count == 1
+    execution.set_exception(rejected.value)
+    failure = lifecycle.fail_after_start()
+    assert failure.state is AttemptState.FAILED_NO_RECEIPT
+    assert failure.receipt is None
+    assert app.state.attempt_cache.snapshot(UUID(ATTEMPT)).receipt is None
+    assert app.state.admission_port.active_producer_count == 0
+    assert producer.calls == 1
+    replay = client.post("/internal/v1/executions")
+    assert replay.status_code == 503
+    assert producer.calls == 1
 
 
 def test_completion_and_failure_race_releases_the_slot_exactly_once() -> None:

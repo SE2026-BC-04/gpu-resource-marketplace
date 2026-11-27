@@ -75,6 +75,9 @@ def validate_receipt_binding_v1(
     *,
     outer_result_id: UUID,
     expected_attempt_id: UUID,
+    expected_job_id: UUID,
+    expected_worker_id: UUID,
+    expected_listing_id: UUID,
 ) -> None:
     """Strictly parse V1 and bind payload IDs without rewriting its raw bytes.
 
@@ -85,8 +88,15 @@ def validate_receipt_binding_v1(
         raise InvalidSignedResultV1("envelope must be nonempty immutable bytes")
     if type(outer_result_id) is not UUID or outer_result_id.version != 4:
         raise InvalidSignedResultV1("outer result_id must be UUIDv4")
-    if type(expected_attempt_id) is not UUID or expected_attempt_id.version != 4:
-        raise InvalidSignedResultV1("expected attempt_id must be UUIDv4")
+    expected_ids = {
+        "attempt_id": expected_attempt_id,
+        "job_id": expected_job_id,
+        "worker_id": expected_worker_id,
+        "listing_id": expected_listing_id,
+    }
+    for field, value in expected_ids.items():
+        if type(value) is not UUID or value.version != 4:
+            raise InvalidSignedResultV1(f"expected {field} must be UUIDv4")
     try:
         envelope = json.loads(
             raw_envelope.decode("utf-8", errors="strict"),
@@ -115,6 +125,11 @@ def validate_receipt_binding_v1(
         raise InvalidSignedResultV1("payload result_id differs from the receipt identity")
     if ids["attempt_id"] != expected_attempt_id:
         raise InvalidSignedResultV1("payload attempt_id differs from the admitted Attempt")
+    for field in ("job_id", "worker_id", "listing_id"):
+        if ids[field] != expected_ids[field]:
+            raise InvalidSignedResultV1(
+                f"payload {field} differs from the admitted dispatch"
+            )
 
     outcome = payload["outcome"]
     failure_reason = payload["failure_reason"]
