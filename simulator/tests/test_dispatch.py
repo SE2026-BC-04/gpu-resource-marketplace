@@ -143,6 +143,98 @@ def test_invalid_or_wrong_direction_auth_is_401_before_admission(token: str) -> 
     assert CALLBACK_TOKEN not in response.text
 
 
+@pytest.mark.parametrize("scheme", ["Bearer", "bearer", "BEARER", "bEaReR"])
+def test_bearer_scheme_is_case_insensitive_but_token_remains_exact(scheme: str) -> None:
+    admission = InMemoryAdmission()
+    client = LocalASGIClient(app_for(admission))
+    response = client.post(
+        "/internal/v1/executions",
+        headers={"Authorization": f"{scheme} {MANAGER_TOKEN}"},
+        json=payload(),
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {"attempt_id": ATTEMPT, "accepted": True}
+    assert admission.calls == 1
+
+
+@pytest.mark.parametrize(
+    "authorization",
+    [
+        "",
+        "Bearer",
+        "Bearer ",
+        "Bearer  " + MANAGER_TOKEN,
+        " Bearer " + MANAGER_TOKEN,
+        "Bearer " + MANAGER_TOKEN + " ",
+        "Bearer\t" + MANAGER_TOKEN,
+        "Bearer wrong-manager-secret",
+    ],
+)
+def test_malformed_or_wrong_bearer_header_is_rejected_before_admission(
+    authorization: str,
+) -> None:
+    admission = InMemoryAdmission()
+    client = LocalASGIClient(app_for(admission))
+    response = client.post(
+        "/internal/v1/executions",
+        headers={"Authorization": authorization},
+        json=payload(),
+    )
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert admission.calls == 0
+
+
+def test_multiple_authorization_headers_are_rejected_before_admission() -> None:
+    admission = InMemoryAdmission()
+    client = LocalASGIClient(app_for(admission))
+    response = client.request(
+        "POST",
+        "/internal/v1/executions",
+        headers=[
+            ("Authorization", f"Bearer {MANAGER_TOKEN}"),
+            ("authorization", f"Bearer {CALLBACK_TOKEN}"),
+        ],
+        json=payload(),
+    )
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert admission.calls == 0
+
+
+def test_authentication_rejection_does_not_read_request_body() -> None:
+    class TrackingBody(httpx.AsyncByteStream):
+        def __init__(self) -> None:
+            self.iterated = False
+
+        async def __aiter__(self):
+            self.iterated = True
+            yield json.dumps(payload()).encode("utf-8")
+
+    admission = InMemoryAdmission()
+    app = app_for(admission)
+    body = TrackingBody()
+
+    async def send() -> httpx.Response:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://simulator.test"
+        ) as client:
+            return await client.post(
+                "/internal/v1/executions",
+                headers={"Authorization": f"bearer {CALLBACK_TOKEN}"},
+                content=body,
+            )
+
+    response = asyncio.run(send())
+
+    assert response.status_code == 401
+    assert body.iterated is False
+    assert admission.calls == 0
+
+
 def test_missing_authorization_is_401_before_admission() -> None:
     admission = InMemoryAdmission()
     client = LocalASGIClient(app_for(admission))

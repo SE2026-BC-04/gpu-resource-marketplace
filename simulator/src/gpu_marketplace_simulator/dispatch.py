@@ -225,14 +225,19 @@ def create_dispatch_router(
                 "Service temporarily unavailable.",
             )
 
-        auth = request.headers.get("authorization", "")
-        prefix = "Bearer "
-        if not auth.startswith(prefix):
+        authorization_values = request.headers.getlist("authorization")
+        if len(authorization_values) != 1:
             return _error(
                 request_id, 401, "UNAUTHENTICATED", "Manager authentication is required.",
                 bearer_challenge=True,
             )
-        supplied_token = auth[len(prefix):]
+        auth = authorization_values[0]
+        scheme, separator, supplied_token = auth.partition(" ")
+        if not separator or not scheme.isascii() or scheme.lower() != "bearer":
+            return _error(
+                request_id, 401, "UNAUTHENTICATED", "Manager authentication is required.",
+                bearer_challenge=True,
+            )
         expected_token = manager_token.get_secret_value()
         if (not supplied_token or any(character.isspace() for character in supplied_token)
                 or not hmac.compare_digest(
