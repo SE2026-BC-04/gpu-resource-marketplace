@@ -207,6 +207,22 @@ def test_json_parser_rejects_duplicate_keys_and_non_json_constants() -> None:
         payload_from_json(b"\xff")
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"\xef\xbb\xbf{}",
+        b"not-json",
+        b'{"value":Infinity}',
+        b'{"outer":{"duplicate":1,"duplicate":2}}',
+    ],
+)
+def test_payload_json_parser_normalizes_other_expected_decode_failures(
+    raw: bytes,
+) -> None:
+    with pytest.raises(PayloadValidationError):
+        payload_from_json(raw)
+
+
 def test_signature_rejects_tampering_wrong_key_and_bad_provider_output() -> None:
     payload = payload_from_mapping(valid_payload())
     signed = sign_payload(payload, FixedTestSigner())
@@ -346,6 +362,34 @@ def test_payload_json_parser_normalizes_oversized_integer_value_error() -> None:
     finally:
         if adjusted_limit:
             sys.set_int_max_str_digits(previous_limit)
+
+
+@pytest.mark.parametrize(
+    "wrap_in_object", [False, True], ids=["top-level", "nested-value"]
+)
+def test_payload_json_parser_normalizes_deep_nesting_recursion_error(
+    wrap_in_object: bool,
+) -> None:
+    deeply_nested = b"[" * 20000 + b"0" + b"]" * 20000
+    raw = b'{"nested":' + deeply_nested + b"}" if wrap_in_object else deeply_nested
+
+    with pytest.raises(PayloadValidationError) as caught:
+        payload_from_json(raw)
+
+    assert str(caught.value) == "payload is not valid UTF-8 JSON"
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__ is True
+    assert raw.decode("ascii") not in str(caught.value)
+
+
+@pytest.mark.parametrize("value", [None, 1, {}])
+def test_payload_json_parser_normalizes_runtime_input_type_errors(value: object) -> None:
+    with pytest.raises(PayloadValidationError) as caught:
+        payload_from_json(value)  # type: ignore[arg-type]
+
+    assert str(caught.value) == "payload is not valid UTF-8 JSON"
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__ is True
 
 
 def test_raw_envelope_parser_rejects_wrong_outer_schema_and_non_bytes() -> None:
