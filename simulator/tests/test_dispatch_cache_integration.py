@@ -36,7 +36,8 @@ from gpu_marketplace_simulator.dispatch import (
 )
 
 
-MANAGER_TOKEN = "manager-test-token-0123456789abcdef"
+# Synthetic test-only canonical base64url encoding of 32 bytes (0..31).
+MANAGER_TOKEN = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
 ATTEMPT = "44444444-4444-4444-8444-444444444444"
 RESULT = UUID("77777777-7777-4777-8777-777777777777")
 
