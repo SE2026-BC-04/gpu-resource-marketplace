@@ -6,26 +6,24 @@ The future composition boundary must pass Manager-owned values explicitly and
 must separately verify live database identity, schema, and grants.
 """
 
+from __future__ import annotations
+
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 import re
 
-from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, SecretStr, ValidationError, field_validator
 from sqlalchemy.engine import make_url
 
 
 _BEARER_TOKEN68 = re.compile(r"[A-Za-z0-9._~+/-]+={0,}")
 _MINIMUM_DISPATCH_TOKEN_CHARACTERS = 32
 _MANAGER_DATABASE_LOGIN = "gpm_manager_app"
+_CONFIG_FIELDS = frozenset({"dispatch_token", "database_url"})
 
 
-class ManagerPhase2Config(BaseModel):
-    """Manager-owned Phase 2 inputs; all values must be supplied explicitly.
-
-    The 32-character dispatch-token floor is only a representation check. It
-    does not measure or prove entropy. Secure provisioning of at least 256
-    random bits and agreement on the provisioning format remain owner/interface
-    requirements. No other component's credential is accepted or retained.
-    """
+class _ManagerPhase2ConfigModel(BaseModel):
+    """Private validator model; raw Pydantic errors must not cross the API."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -77,6 +75,72 @@ class ManagerPhase2Config(BaseModel):
         return value
 
 
+class ManagerConfigValidationError(ValueError):
+    """Redacted configuration error safe for logs and structured diagnostics."""
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class ManagerPhase2Config:
+    """Manager-owned Phase 2 inputs; all values must be supplied explicitly.
+
+    The 32-character dispatch-token floor is only a representation check. It
+    does not measure or prove entropy. Secure provisioning of at least 256
+    random bits and agreement on the provisioning format remain owner/interface
+    requirements. No other component's credential is accepted or retained.
+    """
+
+    dispatch_token: SecretStr = field(repr=True)
+    database_url: SecretStr = field(repr=True)
+
+    def __init__(
+        self,
+        *,
+        dispatch_token: str | SecretStr,
+        database_url: str | SecretStr,
+    ) -> None:
+        validated = _validate_values(
+            {"dispatch_token": dispatch_token, "database_url": database_url}
+        )
+        object.__setattr__(self, "dispatch_token", validated.dispatch_token)
+        object.__setattr__(self, "database_url", validated.database_url)
+
+    @classmethod
+    def _from_validated(
+        cls,
+        validated: _ManagerPhase2ConfigModel,
+    ) -> ManagerPhase2Config:
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "dispatch_token", validated.dispatch_token)
+        object.__setattr__(instance, "database_url", validated.database_url)
+        return instance
+
+
+def _validate_values(values: Mapping[str, object]) -> _ManagerPhase2ConfigModel:
+    sanitized_message: str | None = None
+    try:
+        return _ManagerPhase2ConfigModel.model_validate(values)
+    except ValidationError as error:
+        safe_issues: list[str] = []
+        for issue in error.errors(
+            include_input=False,
+            include_context=False,
+            include_url=False,
+        ):
+            known_field = next(
+                (part for part in issue["loc"] if part in _CONFIG_FIELDS),
+                None,
+            )
+            prefix = f"{known_field}: " if known_field is not None else ""
+            safe_issues.append(f"{prefix}{issue['msg']}")
+        sanitized_message = "; ".join(safe_issues)
+
+    # Raise outside the except block so the raw ValidationError does not remain
+    # reachable through the public exception's context.
+    raise ManagerConfigValidationError(
+        f"Invalid Manager Phase 2 configuration: {sanitized_message}"
+    )
+
+
 def validate_manager_phase2_config(
     values: Mapping[str, object],
 ) -> ManagerPhase2Config:
@@ -87,4 +151,4 @@ def validate_manager_phase2_config(
     PostgreSQL session identity, schema revision, or column grants.
     """
 
-    return ManagerPhase2Config.model_validate(values)
+    return ManagerPhase2Config._from_validated(_validate_values(values))

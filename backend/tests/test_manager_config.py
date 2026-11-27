@@ -1,9 +1,9 @@
 """Tests for the explicitly invoked, isolated Phase 2 Manager config gate."""
 
 import importlib
+from dataclasses import MISSING, fields
 
 import pytest
-from pydantic import ValidationError
 from sqlalchemy.engine import Engine
 
 from gpu_marketplace.common import database
@@ -39,7 +39,10 @@ def test_cfg02_explicit_manager_configuration_is_accepted() -> None:
 def test_cfg03_missing_dispatch_credential_fails_closed() -> None:
     values = {"database_url": _DATABASE_URL}
 
-    with pytest.raises(ValidationError, match="dispatch_token"):
+    with pytest.raises(
+        manager_config.ManagerConfigValidationError,
+        match="dispatch_token",
+    ):
         manager_config.validate_manager_phase2_config(values)
 
 
@@ -49,14 +52,17 @@ def test_cfg04_empty_or_whitespace_dispatch_credential_is_rejected(
 ) -> None:
     values = {**_valid_values(), "dispatch_token": token}
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(manager_config.ManagerConfigValidationError):
         manager_config.validate_manager_phase2_config(values)
 
 
 def test_cfg05_dispatch_credential_below_minimum_representation_is_rejected() -> None:
     values = {**_valid_values(), "dispatch_token": "A" * 31}
 
-    with pytest.raises(ValidationError, match="dispatch token"):
+    with pytest.raises(
+        manager_config.ManagerConfigValidationError,
+        match="dispatch token",
+    ):
         manager_config.validate_manager_phase2_config(values)
 
 
@@ -69,7 +75,7 @@ def test_cfg06_dispatch_credential_must_be_safe_bearer_header_value(
 ) -> None:
     values = {**_valid_values(), "dispatch_token": token}
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(manager_config.ManagerConfigValidationError):
         manager_config.validate_manager_phase2_config(values)
 
 
@@ -93,24 +99,37 @@ def test_cfg08_repr_and_validation_errors_do_not_disclose_credentials() -> None:
         ),
     }
 
-    with pytest.raises(ValidationError) as error:
+    with pytest.raises(manager_config.ManagerConfigValidationError) as error:
         manager_config.validate_manager_phase2_config(values)
 
     assert token not in str(error.value)
     assert token not in repr(error.value)
     assert dsn_password not in str(error.value)
     assert dsn_password not in repr(error.value)
+    assert error.value.__context__ is None
+    assert error.value.__cause__ is None
+    assert not hasattr(error.value, "errors")
 
     valid_config = manager_config.validate_manager_phase2_config(_valid_values())
     assert _TOKEN not in repr(valid_config)
     assert "dsn-password-sentinel" not in repr(valid_config)
 
+    with pytest.raises(
+        manager_config.ManagerConfigValidationError
+    ) as constructor_error:
+        manager_config.ManagerPhase2Config(
+            dispatch_token=token,
+            database_url=values["database_url"],
+        )
+    assert token not in repr(constructor_error.value)
+    assert constructor_error.value.__context__ is None
+
 
 def test_cfg12_unresolved_resource_budgets_have_no_fabricated_defaults() -> None:
-    fields = manager_config.ManagerPhase2Config.model_fields
+    config_fields = fields(manager_config.ManagerPhase2Config)
 
-    assert set(fields) == {"dispatch_token", "database_url"}
-    assert all(field.is_required() for field in fields.values())
+    assert {item.name for item in config_fields} == {"dispatch_token", "database_url"}
+    assert all(item.default is MISSING for item in config_fields)
 
 
 def test_cfg14_manager_config_rejects_other_owners_credentials() -> None:
@@ -122,12 +141,12 @@ def test_cfg14_manager_config_rejects_other_owners_credentials() -> None:
         "worker_private_key": callback_token,
     }
 
-    with pytest.raises(ValidationError) as error:
+    with pytest.raises(manager_config.ManagerConfigValidationError) as error:
         manager_config.validate_manager_phase2_config(values)
 
     assert callback_token not in str(error.value)
     assert callback_token not in repr(error.value)
-    assert set(manager_config.ManagerPhase2Config.model_fields) == {
+    assert {item.name for item in fields(manager_config.ManagerPhase2Config)} == {
         "dispatch_token",
         "database_url",
     }
@@ -147,7 +166,7 @@ def test_cfg15_invalid_or_wrong_manager_dsn_is_rejected_without_leaking_password
 ) -> None:
     values = {**_valid_values(), "database_url": database_url}
 
-    with pytest.raises(ValidationError) as error:
+    with pytest.raises(manager_config.ManagerConfigValidationError) as error:
         manager_config.validate_manager_phase2_config(values)
 
     assert "secret-sentinel" not in str(error.value)
@@ -172,7 +191,7 @@ def test_cfg16_explicit_validator_does_not_read_environment_or_touch_database(
 
     reloaded = importlib.reload(manager_config)
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(manager_config.ManagerConfigValidationError):
         reloaded.validate_manager_phase2_config({})
 
     config = reloaded.validate_manager_phase2_config(_valid_values())
