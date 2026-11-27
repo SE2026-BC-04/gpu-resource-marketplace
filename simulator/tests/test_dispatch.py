@@ -462,10 +462,11 @@ def test_oversized_chunked_dispatch_returns_422_without_admission() -> None:
     admission = InMemoryAdmission()
     app = app_for(admission)
     raw = json.dumps(payload(), separators=(",", ":")).encode("utf-8")
+    marker = b"DISPATCH_BODY_MUST_NOT_BE_ECHOED"
 
     async def chunks():
         yield raw
-        yield b" " * (4097 - len(raw))
+        yield b" " * (4097 - len(raw) - len(marker)) + marker
 
     async def send():
         transport = httpx.ASGITransport(app=app)
@@ -484,7 +485,7 @@ def test_oversized_chunked_dispatch_returns_422_without_admission() -> None:
     response = asyncio.run(send())
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
-    assert " " * 32 not in response.text
+    assert marker.decode("ascii") not in response.text
     assert response.headers["cache-control"] == "no-store"
     assert UUID(response.headers["x-request-id"]).version == 4
     assert admission.calls == 0
