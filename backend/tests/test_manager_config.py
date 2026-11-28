@@ -1,5 +1,6 @@
 """Tests for the explicitly invoked, isolated Phase 2 Manager config gate."""
 
+import base64
 import importlib
 from dataclasses import MISSING, fields
 
@@ -14,7 +15,11 @@ from gpu_marketplace.common.config import Settings
 from gpu_marketplace.manager import config as manager_config
 
 
-_TOKEN = "A" * 32  # Synthetic fixture; this test does not claim entropy.
+def _encode_token(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+_TOKEN = _encode_token(bytes(range(32)))  # Synthetic fixture; not an entropy claim.
 _DATABASE_URL = (
     "postgresql+psycopg://gpm_manager_app:dsn-password-sentinel"
     "@localhost:5432/gpu_marketplace"
@@ -83,7 +88,7 @@ def test_cfg06_dispatch_credential_must_be_safe_bearer_header_value(
 
 
 def test_cfg07_dispatch_credential_round_trips_without_normalization() -> None:
-    token = "AbC123._~+/" * 3 + "=="
+    token = _encode_token(bytes(range(32)))
     values = {**_valid_values(), "dispatch_token": token}
 
     config = manager_config.validate_manager_phase2_config(values)
@@ -94,16 +99,23 @@ def test_cfg07_dispatch_credential_round_trips_without_normalization() -> None:
 @pytest.mark.parametrize(
     "token",
     [
+        "A" * 32,
         "A" + "=" * 31,
         "A" * 31 + "=",
         "=" * 32,
         "A" * 16 + "=" + "B" * 16,
-        "A" * 32 + "\r\n",
-        "A" * 32 + " B",
-        "A" * 31 + "é",
+        _encode_token(bytes(range(31))),
+        _encode_token(bytes(range(33))),
+        _TOKEN[:-1] + "+",
+        _TOKEN[:-1] + "/",
+        _TOKEN + "\r\n",
+        _TOKEN + "\t",
+        _TOKEN + " ",
+        _TOKEN + "\x00",
+        _TOKEN[:-1] + "é",
     ],
 )
-def test_cfg17_token_requires_32_non_padding_characters_and_complete_token68(
+def test_cfg17_token_rejects_noncanonical_service_token_values(
     token: str,
 ) -> None:
     with pytest.raises(manager_config.ManagerConfigValidationError):
@@ -112,12 +124,107 @@ def test_cfg17_token_requires_32_non_padding_characters_and_complete_token68(
         )
 
 
-def test_cfg18_token_accepts_32_non_padding_characters_and_trailing_padding() -> None:
-    for token in ("A" * 32, "A" * 32 + "=="):
-        config = manager_config.validate_manager_phase2_config(
+def test_sec02_accepts_canonical_base64url_encoding_of_32_bytes() -> None:
+    token = _encode_token(bytes(range(32)))
+
+    config = manager_config.validate_manager_phase2_config(
+        {**_valid_values(), "dispatch_token": token}
+    )
+
+    assert len(token) == 43
+    assert config.dispatch_token.get_secret_value() == token
+
+
+def test_sec01_rejects_legacy_32_character_token() -> None:
+    with pytest.raises(manager_config.ManagerConfigValidationError):
+        manager_config.validate_manager_phase2_config(
+            {**_valid_values(), "dispatch_token": "A" * 32}
+        )
+
+
+def test_sec03_rejects_decoded_token_shorter_than_32_bytes() -> None:
+    with pytest.raises(manager_config.ManagerConfigValidationError):
+        manager_config.validate_manager_phase2_config(
+            {**_valid_values(), "dispatch_token": _encode_token(bytes(31))}
+        )
+
+
+def test_sec04_rejects_decoded_token_longer_than_32_bytes() -> None:
+    with pytest.raises(manager_config.ManagerConfigValidationError):
+        manager_config.validate_manager_phase2_config(
+            {**_valid_values(), "dispatch_token": _encode_token(bytes(33))}
+        )
+
+
+@pytest.mark.parametrize("token", [_TOKEN + "=", _TOKEN + "==", _TOKEN + "==="])
+def test_sec05_rejects_padding(token: str) -> None:
+    with pytest.raises(manager_config.ManagerConfigValidationError):
+        manager_config.validate_manager_phase2_config(
             {**_valid_values(), "dispatch_token": token}
         )
-        assert config.dispatch_token.get_secret_value() == token
+
+
+def test_sec06_rejects_noncanonical_trailing_bits() -> None:
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    last_index = alphabet.index(_TOKEN[-1])
+    assert last_index % 4 == 0
+    token = _TOKEN[:-1] + alphabet[last_index + 1]
+
+    with pytest.raises(manager_config.ManagerConfigValidationError):
+        manager_config.validate_manager_phase2_config(
+            {**_valid_values(), "dispatch_token": token}
+        )
+
+
+@pytest.mark.parametrize("token", ["", "\x00" * 43, "A" * 42 + "é"])
+def test_sec07_and_sec08_reject_invalid_alphabet_and_non_ascii(
+    token: str,
+) -> None:
+    with pytest.raises(manager_config.ManagerConfigValidationError):
+        manager_config.validate_manager_phase2_config(
+            {**_valid_values(), "dispatch_token": token}
+        )
+
+
+def test_sec09_missing_dispatch_token_fails_closed() -> None:
+    with pytest.raises(
+        manager_config.ManagerConfigValidationError, match="dispatch_token"
+    ):
+        manager_config.validate_manager_phase2_config({"database_url": _DATABASE_URL})
+
+
+def test_sec10_canonical_token_is_preserved_without_normalization() -> None:
+    token = _encode_token(bytes(range(32)))
+    config = manager_config.validate_manager_phase2_config(
+        {**_valid_values(), "dispatch_token": token}
+    )
+
+    assert config.dispatch_token.get_secret_value().encode("ascii") == (
+        token.encode("ascii")
+    )
+
+
+def test_sec11_invalid_token_error_does_not_disclose_credential() -> None:
+    secret = "legacy-token-secret-sentinel-0123456789"
+    with pytest.raises(manager_config.ManagerConfigValidationError) as error:
+        manager_config.validate_manager_phase2_config(
+            {**_valid_values(), "dispatch_token": secret}
+        )
+
+    assert secret not in str(error.value)
+    assert secret not in repr(error.value)
+
+
+def test_sec14_canonical_shape_does_not_claim_to_measure_entropy() -> None:
+    # This structurally valid encoding represents 32 zero bytes. Syntax alone
+    # cannot establish how the supplied bytes were generated.
+    low_entropy_token = _encode_token(bytes(32))
+
+    config = manager_config.validate_manager_phase2_config(
+        {**_valid_values(), "dispatch_token": low_entropy_token}
+    )
+
+    assert config.dispatch_token.get_secret_value() == low_entropy_token
 
 
 def test_cfg19_psycopg_dialect_applies_url_query_user_override_offline() -> None:
@@ -153,7 +260,7 @@ def test_cfg19_psycopg_dialect_applies_url_query_user_override_offline() -> None
         ("application_name=unapproved-client", "application_name", "unapproved-client"),
     ],
 )
-def test_cfg20_manager_dsn_rejects_query_overrides_without_leaking_values(
+def test_sec12_manager_dsn_rejects_query_overrides_without_leaking_values(
     query: str,
     effective_key: str,
     effective_value: object,

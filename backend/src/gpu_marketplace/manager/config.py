@@ -8,6 +8,8 @@ must separately verify live database identity, schema, and grants.
 
 from __future__ import annotations
 
+import base64
+import binascii
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 import re
@@ -16,8 +18,7 @@ from pydantic import BaseModel, ConfigDict, SecretStr, ValidationError, field_va
 from sqlalchemy.engine import make_url
 
 
-_BEARER_TOKEN68 = re.compile(r"[A-Za-z0-9._~+/-]+={0,}")
-_MINIMUM_DISPATCH_TOKEN_CONTENT_CHARACTERS = 32
+_CANONICAL_SERVICE_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
 _MANAGER_DATABASE_LOGIN = "gpm_manager_app"
 _CONFIG_FIELDS = frozenset({"dispatch_token", "database_url"})
 _SAFE_VALIDATION_MESSAGES = {
@@ -46,16 +47,23 @@ class _ManagerPhase2ConfigModel(BaseModel):
     @classmethod
     def validate_dispatch_token(cls, value: SecretStr) -> SecretStr:
         token = value.get_secret_value()
-        if not token or token.isspace():
-            raise ValueError("Manager dispatch token must not be empty")
-        if _BEARER_TOKEN68.fullmatch(token) is None:
+        if _CANONICAL_SERVICE_TOKEN.fullmatch(token) is None:
             raise ValueError(
-                "Manager dispatch token must be a valid Bearer token68 value"
+                "Manager dispatch token must use canonical 32-byte Base64URL"
             )
-        non_padding_content = token.rstrip("=")
-        if len(non_padding_content) < _MINIMUM_DISPATCH_TOKEN_CONTENT_CHARACTERS:
+        try:
+            decoded = base64.b64decode(token + "=", altchars=b"-_", validate=True)
+        except (binascii.Error, ValueError):
             raise ValueError(
-                "Manager dispatch token must contain at least 32 non-padding characters"
+                "Manager dispatch token must use canonical 32-byte Base64URL"
+            ) from None
+        if (
+            len(decoded) != 32
+            or base64.urlsafe_b64encode(decoded).rstrip(b"=").decode("ascii")
+            != token
+        ):
+            raise ValueError(
+                "Manager dispatch token must use canonical 32-byte Base64URL"
             )
         return value
 
@@ -100,10 +108,10 @@ class ManagerConfigValidationError(ValueError):
 class ManagerPhase2Config:
     """Manager-owned Phase 2 inputs; all values must be supplied explicitly.
 
-    The 32-character non-padding dispatch-token floor is only a representation
-    check. It does not measure or prove entropy. Secure provisioning of at least 256
-    random bits and agreement on the provisioning format remain owner/interface
-    requirements. No other component's credential is accepted or retained.
+    A dispatch token must be the canonical unpadded Base64URL encoding of 32
+    bytes. This format check does not measure or prove entropy; secure
+    provisioning of at least 256 random bits remains an owner/interface
+    requirement. No other component's credential is accepted or retained.
     """
 
     dispatch_token: SecretStr = field(repr=True)
