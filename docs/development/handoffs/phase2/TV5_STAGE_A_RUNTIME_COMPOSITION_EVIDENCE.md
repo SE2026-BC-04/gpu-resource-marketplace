@@ -1,7 +1,9 @@
 # TV5 Phase 2E Stage A — Runtime Composition Evidence (DRAFT)
 
 **State:** `CODE_AUTHORIZED_WITH_LIMITS` · `LOCAL_VERIFICATION_PASS` · `DRAFT/HOLD`
-**Authorization:** TV1 `DEC-P2E-STAGE-A-01` and `DEC-P2E-EIF02-SYNC-01`
+**Authorization:** TV1 `DEC-P2E-STAGE-A-01`, `DEC-P2E-EIF02-SYNC-01`, and
+`DEC-P2E-STAGE-A-SHUTDOWN-01`
+([shutdown authorization](https://github.com/SE2026-BC-04/gpu-resource-marketplace/pull/73#issuecomment-7241814719))
 **Branch:** `feat/p2e-stage-a-simulator-composition`
 **Authorized base:** PR #60 at `6eb520d8dd2b9a3d9fb5b9bf8246f7919d42ada4`
 
@@ -65,6 +67,72 @@ The Stage A harness rejects equal dispatch/callback credentials and requires
 synthetic canonical service tokens plus an HTTPX MockTransport. It does not
 load keys, contact a real service, or enable normal application startup.
 
+## TV1-authorized shutdown timeout remediation
+
+### Baseline reproduction
+
+Before implementation changes, the added deterministic test
+`test_24_shutdown_timeout_cancels_callback_and_preserves_finished_receipt`
+failed on baseline `e318829f890fa62d1545352853374c35e462dd1d`. The exact failure
+was `assert runtime._callback_client._closed is True` with actual value
+`False`, after `shutdown_drained` became false. Captured events showed an
+active callback request, an unfinished producer Future, and the timeout log;
+no permanent process hang was reproduced. This is the P2 owner gap identified
+by TV3/TV4, not a separate finding.
+
+### Ownership and budget behavior
+
+- `TestOnlyRuntimeComposition` remains the sole Stage A owner of the callback
+  client, its in-flight delivery tasks, and the producer executor. The
+  test-only app composition wraps that app instance's admission-executor
+  shutdown entry point to start one monotonic deadline before adapter
+  close/drain begins. `app.py` and the adapter close/drain contract are
+  unchanged.
+- Runtime closure sets the registration fence first. Producer submission and
+  active-Future tracking are linearized under the runtime guard; if shutdown
+  wins while a Future is being bound, execution remains denied and the
+  registration returns as rejected. The regression test proves the request
+  receives 503, the producer hook is never entered, and the Future remains
+  capacity-owning until its actual completion.
+- The same absolute monotonic deadline bounds admission drain, producer wait,
+  callback Future waiting, and observation of callback close. The worker waits
+  on synchronization Events rather than polling; shutdown-start and deadline
+  signals wake it. Its bridge Future is cancelled through
+  `run_coroutine_threadsafe`'s owning event loop. It never blocks the ASGI loop
+  on a synchronous Future wait.
+- At deadline the runtime cancels only producer Futures that are still queued
+  and already accepted. `Future.cancel()` success is the evidence for queued
+  termination; running Futures whose cancellation is refused retain capacity
+  until their done callback observes actual termination. The original Future
+  callback remains the only capacity-release owner.
+- `SimulatorCallbackClient.aclose()` is initiated on normal and timeout paths
+  through one retained close Task. Runtime shutdown observes it only for the
+  remaining budget. A cancellation-resistant transport leaves
+  `shutdown_drained=False` and cleanup incomplete while the close Task and
+  client remain owned. No transport close or successful drain is claimed
+  until that task actually finishes. Repeated shutdown reuses the same task.
+- Callback cancellation or uncertainty never becomes `CallbackAccepted`.
+  Tests preserve `FINISHED`, the original `result_id`, exact immutable receipt
+  bytes, one signing/production pass, and no second callback owner. No
+  `FAILED_NO_RECEIPT` transition occurs after receipt completion. Option A and
+  D-16 Option B are unchanged.
+
+### Added shutdown regression cases
+
+| Test | Evidence |
+|---|---|
+| `test_24` cooperative timeout | Callback cancellation starts at the deadline; producer Future terminates; capacity is released only after `Future.done`; FINISHED receipt identity/bytes remain unchanged; no acceptance is reported. |
+| `test_25` same-receipt retry plus duplicate dispatch | One producer/signature/callback owner; retry is cancelled at shutdown; immutable bytes and result identity remain fixed. |
+| `test_26` cancellation-resistant transport | Shutdown returns within budget as incomplete; HTTPX remains open while `aclose()` is waiting; explicit release barrier allows cleanup, transport close, and worker-thread termination. |
+| `test_27` queued and running producers | Accepted queued Future is cancelled and fails closed; RUNNING Future keeps its permit while blocked, then releases once on actual completion. |
+| `test_28` callback scheduling/close race | Producer paused after receipt completion cannot create an unowned callback after owner closure; receipt remains FINISHED. |
+| `test_29` repeated concurrent shutdown | Shared monotonic deadline and close Task are unchanged across repeated calls; client closes once through the single owner. |
+| `test_30` shutdown during producer registration | Binding Future is tracked before shutdown; late bind is rejected without producer execution or 202; capacity releases only after Future completion. |
+
+The pre-existing tests 21–23 remain unchanged in intent and continue to cover
+same-Attempt Future fencing, queued cancellation, and RUNNING cancellation
+refusal. Existing successful-drain test 15 remains in place.
+
 ## Required 20 integration groups
 
 The tests are collected in `simulator/tests/test_runtime_composition.py`.
@@ -98,22 +166,41 @@ CI or owner approval.
 | 22 | Queued Future bind failure | `PASS` — `cancel()` confirmed true; denied producer never enters; only the canceled Future releases its permit |
 | 23 | RUNNING Future bind failure at start gate | `PASS` — `cancel()` false; execution permission remains closed; capacity remains owned until the real Future terminates; nested admission is rejected |
 
-## Verification recorded for this local checkout
+## Verification recorded for the shutdown remediation checkout
 
 | Check | Actual result |
 |---|---|
 | Published #60 control at `6eb520d8dd2b9a3d9fb5b9bf8246f7919d42ada4` | `PASS` — health plus approved dispatch tests: 3 passed, 0.32s, outside sandbox |
 | Dependency-only control at `d40e043a78c0ce233ba2a504033ff823d6681af7` | `PASS` — same health plus dispatch tests: 3 passed, 0.30s, outside sandbox |
 | Baseline regression confirmation | `PASS` — temporary in-memory restoration of the old Attempt-ID event lookup made test_21 fail because the old Future signaled the replacement waiter. A standalone deterministic `Future`/gate reproduction of the old bind-failure order observed `cancel=False`, denied producer execution, and capacity reacquisition before Future termination. No repository source was changed for these reproductions. |
-| Stage A test file | `PASS` — 23 passed, 1.69s, native WSL; includes all original 20 groups and three P2 lifecycle tests |
-| Full Simulator suite | `PASS` — 393 passed, 0 failed, 3.14s, native WSL; one Starlette/httpx deprecation warning |
-| Deterministic V1–V4, Node/JCS interop, Signed Result V1 and Attempt Cache | `PASS` — 157 passed, 0 skipped; Node `v22.22.2` was available and interop tests ran |
-| Repeated race/lifecycle subset | `PASS` — 10 independent runs; each run passed 8 selected tests (80 executions total), including test_21–23 |
-| Compile and lock | `PASS` — compileall succeeded; `uv lock --check --offline --project .` resolved 30 packages without changing the lock |
-| Whitespace | `PASS` — `git diff --check`; untracked Stage A files also checked with `git diff --no-index --check` |
+| Baseline shutdown regression before implementation | `FAIL` as expected on `e318829f890fa62d1545352853374c35e462dd1d` — callback client remained open after drain timeout; bounded test cleanup released the stream and closed resources |
+| Stage A test file | `PASS` — 30 passed, 0 failed, native WSL; all original 23 tests plus seven shutdown cases |
+| Full Simulator suite | `PASS` — 400 passed, 0 failed, 3.32s, native WSL; one Starlette/httpx deprecation warning |
+| Dispatch/cache, callback, deterministic V1–V4, Node/JCS, Signed Result V1 and frozen vectors | `PASS` — 368 passed, 0 failed; Node interoperability tests were collected and executed in this focused set |
+| Repeated concurrency/lifecycle/shutdown subset | `PASS` — 10 independent runs; each passed 15 tests (150 executions total). Per-run: 1–10 all `15 passed`; includes tests 08, 14–16, 19, 21–30 |
+| Compile | `PASS` — `python3 -m compileall -q simulator/src/gpu_marketplace_simulator simulator/tests/test_runtime_composition.py` |
+| Lock | `PASS` — `uv lock --check --offline --project simulator` resolved 30 packages; lock unchanged |
+| Whitespace | `PASS` — `git diff --check` |
 | Ruff | `NOT_RUN` — Ruff is not installed |
+| GitHub Actions for new shutdown HEAD | `NOT_RUN` — the old #74 run is historical evidence for `e318829` only; fresh exact-SHA CI authorization was requested separately and is not inferred here |
 
-The full-suite command was `/home/nguyenducthang/gpu-resource-marketplace/simulator/.venv/bin/python -B -m pytest -p no:cacheprovider tests -q` from `simulator/`; it reported `393 passed` and one deprecation warning. The focused command against `tests/test_runtime_composition.py` reported `23 passed`. The deterministic/interop/Signed Result/cache command reported `157 passed`; actual Node execution was available. The concurrency subset used `-k 'test_08 or test_14 or test_15 or test_16 or test_19 or test_21 or test_22 or test_23'` in ten separate runs; each reported `8 passed, 15 deselected`. `compileall`, offline lock validation and whitespace checks passed. `uv run` itself was `BLOCKED` by sandbox DNS while resolving pinned setuptools; verification used the previously validated locked Simulator venv in native WSL. Ruff is unavailable and remains `NOT_RUN`.
+Repeated-run detail (each command was a separate pytest subprocess on the same
+code tree):
+
+| Run | Result |
+|---:|---|
+| 1 | `PASS` — 15 passed |
+| 2 | `PASS` — 15 passed |
+| 3 | `PASS` — 15 passed |
+| 4 | `PASS` — 15 passed |
+| 5 | `PASS` — 15 passed |
+| 6 | `PASS` — 15 passed |
+| 7 | `PASS` — 15 passed |
+| 8 | `PASS` — 15 passed |
+| 9 | `PASS` — 15 passed |
+| 10 | `PASS` — 15 passed |
+
+Commands run from `simulator/` used `.venv/bin/python -B -m pytest -p no:cacheprovider`. The full suite reported `400 passed`; the Stage A file reported `30 passed`; the focused dispatch/cache/deterministic/interop/signed-result command reported `368 passed`. A Python subprocess harness executed the listed 15 concurrency/lifecycle/shutdown node IDs in ten separate pytest processes; every process reported `15 passed`. These are local native-WSL results, not GitHub CI. Ruff is unavailable and remains `NOT_RUN`.
 
 At reviewed baseline `415b083`, the done callback looked up the event by Attempt ID, and bind failure opened the execution gate and released capacity unconditionally after `Future.cancel()`. P2-01 old behavior was reproduced with a temporary in-memory legacy callback mutation against test_21; it failed because the new waiter became signaled. P2-02's old sequence was reproduced with a real `ThreadPoolExecutor` Future and Events: cancellation returned false, the denied task entered, and capacity was reacquired while that Future remained unfinished. Remediated tests 21–23 pass on the current local tree. These are local results, not GitHub CI.
 
@@ -129,7 +216,7 @@ Codex sandbox; the comparison environment was the approved native WSL terminal.
 | A. Standalone cross-thread `call_soon_threadsafe` wake | The scheduled callback ran, but its Future waiter did not wake; the asyncio 2s timeout also did not fire; external 8s timeout exit 124 | Same script: `CALLBACK_RAN`, `WAKE_OK`, 0.001s, external timeout exit 0 |
 | B. Published #60 health + dispatch | Health `TestClient.__enter__` stalled; faulthandler showed AnyIO portal loop in selector wait and caller blocked in `start_task_soon` | 3 passed, 0.32s |
 | C. Dependency-only d40 health + dispatch | Same `TestClient.__enter__` stall and stack shape | 3 passed, 0.30s |
-| D. Stage A implementation | Group 1 stalled in `LocalASGIClient.post`; bounded trace showed loop in selector wait and producer Future ended only after the test hook's finite wait elapsed | Group 1 passed, 0.34s; corrected full Stage A suite passed 20/20 |
+| D. Stage A pre-shutdown baseline at `e318829` | Earlier bounded sandbox diagnostic stalled before the original Stage A POST response; this is separate from the shutdown P2 reproduction | Native WSL baseline passed 23/23 at `e318829`; shutdown regression independently reproduced the open callback owner after timeout |
 
 The original stall is therefore demonstrated to be sandbox-specific: both
 published/dependency-only controls failed there, while the standalone wake and

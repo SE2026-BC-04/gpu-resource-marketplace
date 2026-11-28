@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import logging
 from threading import BoundedSemaphore, Event, RLock, current_thread
+import time
 from typing import Callable, Protocol
 from uuid import UUID, uuid4
 
@@ -55,6 +56,7 @@ class _ExecutionRegistration:
     done: Event = field(default_factory=Event)
     wake_worker: Event = field(default_factory=Event)
     execution_allowed: Event = field(default_factory=Event)
+    callback_wait_wake: Event = field(default_factory=Event)
     accepted: bool = False
     capacity_released: bool = False
 
@@ -91,6 +93,7 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
         clock: Callable[[], datetime] | None = None,
         result_id_factory: Callable[[], UUID] = uuid4,
         before_produce: Callable[[DispatchRequest], None] | None = None,
+        before_callback_schedule: Callable[[DispatchRequest], None] | None = None,
         bind_execution_future: Callable[[ProducerLifecycle, Future[object]], None] | None = None,
         on_worker_waiting_gate: Callable[[DispatchRequest], None] | None = None,
         on_bind_failure: Callable[[Future[object], bool], None] | None = None,
@@ -131,6 +134,7 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._new_result_id = result_id_factory
         self._before_produce = before_produce
+        self._before_callback_schedule = before_callback_schedule
         self._bind_execution_future = bind_execution_future or (
             lambda lifecycle, future: lifecycle.bind_execution_future(future)
         )
@@ -164,32 +168,191 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
         # callback observes actual termination. This set is bounded by
         # max_in_flight and also covers same-ID registrations overlapping TTL.
         self._active_futures: set[Future[object]] = set()
+        self._active_registrations: dict[Future[object], _ExecutionRegistration] = {}
         self._futures: dict[str, Future[object]] = {}
         self._attempt_done: dict[str, Event] = {}
         self._lifecycles: dict[str, ProducerLifecycle] = {}
         self._admissions: dict[str, Admission] = {}
         self._registration_count = 0
         self._callback_results: dict[str, CallbackAccepted | Exception] = {}
+        self._callback_waiters: set[Event] = set()
         self._closed = False
         self._shutdown_drained: bool | None = None
+        self._shutdown_cleanup_complete: bool | None = None
+        self._shutdown_deadline: float | None = None
+        self._shutdown_timed_out = False
+        self._shutdown_deadline_handle: asyncio.TimerHandle | None = None
+        self._shutdown_task: asyncio.Task[None] | None = None
+        self._callback_close_task: asyncio.Task[None] | None = None
+        self._callback_closing = False
+        self._executor_shutdown = False
 
     async def startup(self) -> None:
         self._loop = asyncio.get_running_loop()
 
     async def shutdown(self) -> None:
-        self._shutdown_started.set()
+        self._begin_shutdown()
+        if self._shutdown_task is None:
+            self._shutdown_task = asyncio.create_task(
+                self._shutdown_once(), name="stage-a-runtime-shutdown"
+            )
+        await asyncio.shield(self._shutdown_task)
+
+    async def _shutdown_once(self) -> None:
+        self._install_shutdown_deadline()
         with self._guard:
-            self._closed = True
             pending = tuple(self._active_futures)
-        _, not_done = await asyncio.to_thread(
-            wait, pending, timeout=self._shutdown_timeout
-        )
-        self._shutdown_drained = not not_done
-        self._executor.shutdown(wait=False, cancel_futures=False)
-        if not not_done:
-            await self._callback_client.aclose()
+            deadline = self._shutdown_deadline
+        remaining = max(0.0, (deadline or time.monotonic()) - time.monotonic())
+        if pending and remaining > 0:
+            _, not_done = await asyncio.to_thread(wait, pending, timeout=remaining)
         else:
-            logger.warning("stage_a_producer_drain_timed_out", extra={"pending": len(not_done)})
+            not_done = set(pending)
+
+        with self._guard:
+            deadline_elapsed = (
+                self._shutdown_timed_out
+                or deadline is None
+                or time.monotonic() >= deadline
+            )
+        if deadline_elapsed:
+            self._shutdown_timed_out = True
+            self._wake_callback_waiters()
+            self._cancel_queued_producers()
+        if self._callback_close_task is None:
+            self._start_callback_close()
+
+        if not self._executor_shutdown:
+            self._executor_shutdown = True
+            self._executor.shutdown(wait=False, cancel_futures=False)
+
+        remaining = max(0.0, (deadline or time.monotonic()) - time.monotonic())
+        close_task = self._callback_close_task
+        close_finished = False
+        if close_task is not None and not close_task.done() and remaining > 0:
+            done, _ = await asyncio.wait({close_task}, timeout=remaining)
+            close_finished = close_task in done
+        elif close_task is not None:
+            close_finished = close_task.done()
+
+        cleanup_ok = False
+        if close_task is not None and close_finished and not close_task.cancelled():
+            try:
+                close_task.result()
+            except BaseException:
+                cleanup_ok = False
+            else:
+                cleanup_ok = True
+        self._shutdown_cleanup_complete = cleanup_ok
+        self._shutdown_drained = not not_done and not deadline_elapsed and cleanup_ok
+        if not self._shutdown_drained:
+            logger.warning(
+                "stage_a_shutdown_incomplete",
+                extra={
+                    "pending_producers": len(not_done),
+                    "callback_cleanup_complete": cleanup_ok,
+                },
+            )
+
+    def _begin_shutdown(self) -> float:
+        with self._guard:
+            first_request = self._shutdown_deadline is None
+            if self._shutdown_deadline is None:
+                self._shutdown_deadline = time.monotonic() + self._shutdown_timeout
+            deadline = self._shutdown_deadline
+            self._closed = True
+            waiters = tuple(self._callback_waiters)
+        for waiter in waiters:
+            waiter.set()
+        if first_request:
+            logger.info(
+                "stage_a_shutdown_started",
+                extra={
+                    "monotonic_ns": time.monotonic_ns(),
+                    "thread_name": current_thread().name,
+                    "shutdown_timeout_seconds": self._shutdown_timeout,
+                },
+            )
+        loop = self._loop
+        if loop is not None and not loop.is_closed():
+            try:
+                if asyncio.get_running_loop() is loop:
+                    self._install_shutdown_deadline()
+                else:
+                    loop.call_soon_threadsafe(self._install_shutdown_deadline)
+            except RuntimeError:
+                loop.call_soon_threadsafe(self._install_shutdown_deadline)
+        return deadline
+
+    def _install_shutdown_deadline(self) -> None:
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+        self._shutdown_started.set()
+        if self._shutdown_deadline_handle is not None:
+            return
+        with self._guard:
+            deadline = self._shutdown_deadline
+        if deadline is None:
+            return
+        delay = max(0.0, deadline - time.monotonic())
+        self._shutdown_deadline_handle = loop.call_later(delay, self._shutdown_deadline_reached)
+
+    def _shutdown_deadline_reached(self) -> None:
+        self._shutdown_timed_out = True
+        logger.warning(
+            "stage_a_shutdown_deadline_reached",
+            extra={
+                "monotonic_ns": time.monotonic_ns(),
+                "thread_name": current_thread().name,
+            },
+        )
+        self._wake_callback_waiters()
+        self._cancel_queued_producers()
+        self._start_callback_close()
+
+    def _cancel_queued_producers(self) -> None:
+        with self._guard:
+            pending = tuple(
+                future
+                for future, registration in self._active_registrations.items()
+                if registration.accepted
+            )
+        # Future.cancel() succeeds only before worker execution starts. Its
+        # done callback remains the sole owner of capacity release and Option A
+        # failure evidence; running work stays owned until actual termination.
+        for future in pending:
+            future.cancel()
+
+    def _wake_callback_waiters(self) -> None:
+        with self._guard:
+            waiters = tuple(self._callback_waiters)
+        for waiter in waiters:
+            waiter.set()
+
+    def _start_callback_close(self) -> None:
+        if self._callback_close_task is not None:
+            return
+        self._callback_closing = True
+        current = asyncio.current_task()
+        logger.info(
+            "stage_a_callback_close_started",
+            extra={
+                "monotonic_ns": time.monotonic_ns(),
+                "thread_name": current_thread().name,
+                "asyncio_task_name": current.get_name() if current is not None else None,
+            },
+        )
+        if self._shutdown_deadline_handle is not None:
+            self._shutdown_deadline_handle.cancel()
+            self._shutdown_deadline_handle = None
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            self._shutdown_cleanup_complete = False
+            return
+        self._callback_close_task = loop.create_task(
+            self._callback_client.aclose(), name="stage-a-callback-client-close"
+        )
 
     async def wait_for_shutdown_start(self) -> None:
         await self._shutdown_started.wait()
@@ -203,34 +366,35 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
         logger.info("stage_a_registration_enter", extra={"thread_name": current_thread().name})
         if self._loop is None or self._loop.is_closed():
             return False
-        with self._guard:
-            if self._closed:
-                return False
-        if not self._capacity.acquire(blocking=False):
-            return False
 
         wake_worker = Event()
         execution_allowed = Event()
-        try:
-            future = self._executor.submit(
-                self._execute, dispatch, _admission, lifecycle,
-                wake_worker, execution_allowed,
-            )
-        except BaseException as error:
-            self._capacity.release()
-            if isinstance(error, RuntimeError):
-                return False
-            raise
-
-        registration = _ExecutionRegistration(
-            attempt_id=dispatch.attempt_id,
-            future=future,
-            lifecycle=lifecycle,
-            wake_worker=wake_worker,
-            execution_allowed=execution_allowed,
-        )
+        callback_wait_wake = Event()
         with self._guard:
+            # Linearize submit-and-track with _begin_shutdown: every accepted
+            # producer is either in the shutdown snapshot or is rejected.
+            if self._closed or not self._capacity.acquire(blocking=False):
+                return False
+            try:
+                future = self._executor.submit(
+                    self._execute, dispatch, _admission, lifecycle,
+                    wake_worker, execution_allowed, callback_wait_wake,
+                )
+            except BaseException as error:
+                self._capacity.release()
+                if isinstance(error, RuntimeError):
+                    return False
+                raise
+            registration = _ExecutionRegistration(
+                attempt_id=dispatch.attempt_id,
+                future=future,
+                lifecycle=lifecycle,
+                wake_worker=wake_worker,
+                execution_allowed=execution_allowed,
+                callback_wait_wake=callback_wait_wake,
+            )
             self._active_futures.add(future)
+            self._active_registrations[future] = registration
         future.add_done_callback(
             lambda completed, current=registration: self._producer_done(current, completed)
         )
@@ -252,14 +416,24 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
         attempt_id = dispatch.attempt_id
         logger.info("stage_a_registration_bound", extra={"thread_name": current_thread().name})
         with self._guard:
-            self._futures[attempt_id] = future
-            self._attempt_done[attempt_id] = registration.done
-            self._lifecycles[attempt_id] = lifecycle
-            self._admissions[attempt_id] = _admission
-            self._registration_count += 1
-            registration.accepted = True
-        execution_allowed.set()
-        wake_worker.set()
+            if self._closed:
+                accepted = False
+            else:
+                accepted = True
+                registration.accepted = True
+                self._futures[attempt_id] = future
+                self._attempt_done[attempt_id] = registration.done
+                self._lifecycles[attempt_id] = lifecycle
+                self._admissions[attempt_id] = _admission
+                self._registration_count += 1
+                execution_allowed.set()
+                wake_worker.set()
+        if not accepted:
+            # Shutdown won the admission race after submit/bind. Keep execution
+            # fenced, then let the real Future callback own any permit release.
+            future.cancel()
+            wake_worker.set()
+            return False
         logger.info("stage_a_registration_return", extra={"thread_name": current_thread().name})
         return True
 
@@ -270,6 +444,7 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
         lifecycle: ProducerLifecycle,
         wake_worker: Event,
         execution_allowed: Event,
+        callback_wait_wake: Event,
     ) -> object:
         if self._on_worker_waiting_gate is not None:
             self._on_worker_waiting_gate(dispatch)
@@ -316,30 +491,84 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
             raise ValueError("canonical envelope payload differs from the signed payload")
         lifecycle.complete(Receipt(result_id=result_id, raw_envelope=raw_envelope))
 
+        if self._before_callback_schedule is not None:
+            self._before_callback_schedule(dispatch)
+
         loop = self._loop
         if loop is None or loop.is_closed():
             raise RuntimeError("Stage A event loop closed before callback delivery")
         receipt = FrozenCallbackReceipt(result_id=str(result_id), raw_envelope=raw_envelope)
+        hard_deadline_at = datetime.fromisoformat(
+            dispatch.hard_deadline_at.replace("Z", "+00:00")
+        )
         callback_future = asyncio.run_coroutine_threadsafe(
-            self._callback_client.deliver(
+            self._deliver_callback_owned(
                 receipt,
-                hard_deadline_at=datetime.fromisoformat(
-                    dispatch.hard_deadline_at.replace("Z", "+00:00")
-                ),
+                hard_deadline_at=hard_deadline_at,
             ),
             loop,
         )
+        callback_future.add_done_callback(lambda _: callback_wait_wake.set())
+        with self._guard:
+            self._callback_waiters.add(callback_wait_wake)
+            shutting_down = self._closed
+        if shutting_down:
+            callback_wait_wake.set()
         try:
-            accepted = callback_future.result()
-        except Exception as error:
-            # Receipt is already immutable and FINISHED. Callback failure never
-            # retries production, changes the bytes, or re-signs the result.
+            callback_result = self._await_callback_result(
+                callback_future, callback_wait_wake, hard_deadline_at
+            )
+        finally:
             with self._guard:
-                self._callback_results[str(result_id)] = error
-        else:
-            with self._guard:
-                self._callback_results[str(result_id)] = accepted
+                self._callback_waiters.discard(callback_wait_wake)
+        with self._guard:
+            self._callback_results[str(result_id)] = callback_result
         return result_id
+
+    async def _deliver_callback_owned(
+        self, receipt: FrozenCallbackReceipt, *, hard_deadline_at: datetime
+    ) -> CallbackAccepted:
+        if self._callback_closing:
+            raise RuntimeError("callback delivery owner is closing")
+        return await self._callback_client.deliver(
+            receipt, hard_deadline_at=hard_deadline_at
+        )
+
+    def _await_callback_result(
+        self,
+        callback_future: Future[CallbackAccepted],
+        wake: Event,
+        hard_deadline_at: datetime,
+    ) -> CallbackAccepted | Exception:
+        hard_deadline = time.monotonic() + max(
+            0.0, (hard_deadline_at - self._clock().astimezone(timezone.utc)).total_seconds()
+        )
+        while True:
+            if callback_future.done():
+                try:
+                    return callback_future.result(timeout=0)
+                except Exception as error:
+                    return error
+
+            wake.clear()
+            # Recheck after clearing so a completion signal cannot be lost.
+            if callback_future.done():
+                continue
+            with self._guard:
+                shutdown_deadline = self._shutdown_deadline
+            now = time.monotonic()
+            deadline = min(
+                hard_deadline,
+                shutdown_deadline if shutdown_deadline is not None else hard_deadline,
+            )
+            remaining = deadline - now
+            if remaining <= 0:
+                callback_future.cancel()
+                try:
+                    return callback_future.result(timeout=0)
+                except Exception as error:
+                    return error
+            wake.wait(remaining)
 
     def _producer_done(
         self,
@@ -350,6 +579,7 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
             if registration.future is future and not registration.capacity_released:
                 registration.capacity_released = True
                 self._active_futures.discard(future)
+                self._active_registrations.pop(future, None)
                 self._capacity.release()
             if self._futures.get(registration.attempt_id) is future:
                 self._futures.pop(registration.attempt_id, None)
@@ -379,12 +609,23 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
             admission_max_outstanding=self._admission_max_outstanding,
             shutdown_drain_timeout_seconds=self._shutdown_timeout,
         )
-        return create_app(
+        app = create_app(
             settings,
             producer_registrar=self,
             runtime_lifecycle=self,
             attempt_cache_clock=self._cache_clock,
         )
+        admission_executor = app.state.admission_executor
+        if admission_executor is not None:
+            original_shutdown = admission_executor.shutdown
+
+            async def shutdown_with_shared_deadline(cleanup, *, timeout_seconds):
+                deadline = self._begin_shutdown()
+                remaining = max(0.0, min(timeout_seconds, deadline - time.monotonic()))
+                return await original_shutdown(cleanup, timeout_seconds=remaining)
+
+            admission_executor.shutdown = shutdown_with_shared_deadline
+        return app
 
     @property
     def callback_results(self) -> dict[str, CallbackAccepted | Exception]:
@@ -417,6 +658,27 @@ class TestOnlyRuntimeComposition(ProducerRegistrationPort):
     @property
     def shutdown_drained(self) -> bool | None:
         return self._shutdown_drained
+
+    @property
+    def shutdown_cleanup_complete(self) -> bool | None:
+        task = self._callback_close_task
+        if task is None:
+            return self._shutdown_cleanup_complete
+        if not task.done() or task.cancelled():
+            return False
+        try:
+            task.result()
+        except BaseException:
+            return False
+        return True
+
+    @property
+    def callback_close_started(self) -> bool:
+        return self._callback_closing
+
+    @property
+    def shutdown_timed_out(self) -> bool:
+        return self._shutdown_timed_out
 
     @property
     def active_execution_count(self) -> int:

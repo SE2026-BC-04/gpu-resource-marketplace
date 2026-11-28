@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from gpu_marketplace_simulator.attempt_cache import AttemptState, Receipt
 from gpu_marketplace_simulator.attempt_cache_adapter import AttemptAdmissionUnavailable
-from gpu_marketplace_simulator.callback_client import CallbackRetryPolicy
+from gpu_marketplace_simulator.callback_client import CallbackAccepted, CallbackRetryPolicy
 from gpu_marketplace_simulator.deterministic import (
     SimulationInput,
     _derive_seed_value,
@@ -151,6 +151,7 @@ class ThreadedASGIClient:
         self.thread = Thread(target=self._run_loop, name="stage-a-test-loop", daemon=True)
         self.client: httpx.AsyncClient | None = None
         self.lifespan = app.router.lifespan_context(app)
+        self.shutdown_future = None
 
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self.loop)
@@ -180,17 +181,72 @@ class ThreadedASGIClient:
     def wait_for_attempt(self, attempt_id: str, timeout: float = 5.0) -> bool:
         return self.runtime.wait_for_attempt(attempt_id, timeout)
 
+    def begin_shutdown(self, *, close_client: bool = True) -> None:
+        async def begin() -> None:
+            if close_client and self.client is not None:
+                await self.client.aclose()
+            self.shutdown_future = asyncio.create_task(
+                self.lifespan.__aexit__(None, None, None)
+            )
+            await self.runtime.wait_for_shutdown_start()
+
+        asyncio.run_coroutine_threadsafe(begin(), self.loop).result(timeout=2)
+
+    def post_async(self, path: str, **kwargs: object):
+        assert self.client is not None
+        return asyncio.run_coroutine_threadsafe(self.client.post(path, **kwargs), self.loop)
+
+    def wait_shutdown(self, timeout: float = 2) -> None:
+        assert self.shutdown_future is not None
+        asyncio.run_coroutine_threadsafe(
+            _await_task(self.shutdown_future), self.loop
+        ).result(timeout=timeout)
+
     def __exit__(self, exc_type, exc, tb) -> None:
         async def shutdown() -> None:
             if self.client is not None:
                 await self.client.aclose()
-            await self.lifespan.__aexit__(exc_type, exc, tb)
+            if self.shutdown_future is None:
+                await self.lifespan.__aexit__(exc_type, exc, tb)
+            else:
+                await self.shutdown_future
 
         asyncio.run_coroutine_threadsafe(shutdown(), self.loop).result(timeout=4)
         self.loop.call_soon_threadsafe(self.loop.stop)
         self.thread.join(timeout=2)
         assert not self.thread.is_alive()
         self.loop.close()
+
+
+async def _await_task(task: asyncio.Task[object]) -> None:
+    await task
+
+
+class HeldCallbackStream(httpx.AsyncByteStream):
+    def __init__(
+        self,
+        entered: Event,
+        release: asyncio.Event,
+        *,
+        cancellation_seen: Event | None = None,
+        resist_cancellation: bool = False,
+    ) -> None:
+        self.entered = entered
+        self.release = release
+        self.cancellation_seen = cancellation_seen
+        self.resist_cancellation = resist_cancellation
+
+    async def __aiter__(self):
+        self.entered.set()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            if self.cancellation_seen is not None:
+                self.cancellation_seen.set()
+            if self.resist_cancellation:
+                await self.release.wait()
+            raise
+        yield b'{"receipt_status":"STORED","result_id":"77777777-7777-4777-8777-777777777777"}'
 
 
 def valid_dispatch(attempt_id: str = ATTEMPT_ID) -> dict[str, object]:
@@ -237,6 +293,7 @@ def runtime_context(
     worker_count: int = 2,
     max_in_flight: int = 8,
     callback_policy: CallbackRetryPolicy | None = None,
+    before_callback_schedule=None,
     clock: datetime = START,
     result_ids: tuple[str, ...] | None = None,
     threaded_client: bool = False,
@@ -274,6 +331,7 @@ def runtime_context(
         clock=lambda: clock,
         result_id_factory=lambda: UUID(next(next_result)),
         before_produce=before_produce,
+        before_callback_schedule=before_callback_schedule,
         bind_execution_future=bind_execution_future,
         on_worker_waiting_gate=on_worker_waiting_gate,
         on_bind_failure=on_bind_failure,
@@ -675,6 +733,340 @@ def test_15_shutdown_drains_active_producer_without_releasing_inflight_early() -
     client.__exit__(None, None, None)
     assert cache.snapshot(UUID(ATTEMPT_ID)).state is AttemptState.FINISHED
     assert composition.shutdown_drained is True
+    assert composition.shutdown_cleanup_complete is True
+
+
+def test_24_shutdown_timeout_cancels_callback_and_preserves_finished_receipt() -> None:
+    callback_entered = Event()
+    cancellation_seen = Event()
+    callback_release = asyncio.Event()
+
+    def hold_callback(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            202,
+            headers={"content-type": "application/json"},
+            stream=HeldCallbackStream(
+                callback_entered, callback_release, cancellation_seen=cancellation_seen
+            ),
+            request=request,
+        )
+
+    with runtime_context(
+        callback_handler=hold_callback,
+        callback_policy=retry_policy(total_timeout_seconds=5, max_attempts=1),
+        threaded_client=True,
+    ) as (
+        runtime, client, requests, _
+    ):
+        response = post(client)
+        assert response.status_code == 202
+        assert callback_entered.wait(2)
+
+        cache = client.app.state.attempt_cache
+        finished = cache.snapshot(UUID(ATTEMPT_ID))
+        assert finished.state is AttemptState.FINISHED
+        assert finished.receipt is not None
+        original_receipt = finished.receipt
+        producer_future = runtime.execution_futures[ATTEMPT_ID]
+        available_before_shutdown = runtime.available_execution_capacity
+
+        client.begin_shutdown()
+        client.wait_shutdown()
+
+        try:
+            producer_future.result(timeout=2)
+            assert runtime.shutdown_drained is False
+            assert runtime.callback_close_started is True
+            assert cancellation_seen.wait(1)
+            assert runtime.shutdown_cleanup_complete is True
+            assert runtime._callback_client._client.is_closed is True
+            assert producer_future.done()
+            assert runtime.available_execution_capacity == available_before_shutdown + 1
+            after_shutdown = cache.snapshot(UUID(ATTEMPT_ID))
+            assert after_shutdown.state is AttemptState.FINISHED
+            assert after_shutdown.receipt.result_id == original_receipt.result_id
+            assert after_shutdown.receipt.raw_envelope is original_receipt.raw_envelope
+            assert len(requests) == 1
+            assert not isinstance(
+                runtime.callback_results.get(str(original_receipt.result_id)), CallbackAccepted
+            )
+        finally:
+            # Baseline cleanup: release the stream so pytest never leaves an
+            # unresolved producer or loop task, even when the red assertion fires.
+            client.loop.call_soon_threadsafe(callback_release.set)
+            producer_future.result(timeout=2)
+            asyncio.run_coroutine_threadsafe(runtime._callback_client.aclose(), client.loop).result(
+                timeout=2
+            )
+
+
+def test_25_shutdown_cancels_one_owned_same_receipt_retry() -> None:
+    first_attempt = Event()
+    requests: list[httpx.Request] = []
+
+    def transient_callback(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        first_attempt.set()
+        return httpx.Response(503, request=request)
+
+    with runtime_context(
+        callback_handler=transient_callback,
+        callback_policy=retry_policy(
+            total_timeout_seconds=6, backoff_seconds=(5,), max_attempts=3
+        ),
+        threaded_client=True,
+    ) as (runtime, client, _, signer):
+        assert post(client).status_code == 202
+        assert first_attempt.wait(2)
+        cached = client.app.state.attempt_cache.snapshot(UUID(ATTEMPT_ID))
+        assert cached.state is AttemptState.FINISHED
+        assert cached.receipt is not None
+
+        # A retained duplicate reuses the same receipt and never starts another
+        # producer or callback owner while the first callback is in backoff.
+        assert post(client).status_code == 202
+        assert runtime.registration_count == 1
+        assert len(signer.calls) == 1
+
+        producer_future = runtime.execution_futures[ATTEMPT_ID]
+        client.begin_shutdown()
+        client.wait_shutdown()
+        producer_future.result(timeout=2)
+
+        assert runtime.shutdown_drained is False
+        assert len(requests) == 1
+        assert requests[0].content is cached.receipt.raw_envelope
+        assert runtime.callback_results.get(str(cached.receipt.result_id)) is not None
+        assert not isinstance(
+            runtime.callback_results[str(cached.receipt.result_id)], CallbackAccepted
+        )
+        current = client.app.state.attempt_cache.snapshot(UUID(ATTEMPT_ID))
+        assert current.state is AttemptState.FINISHED
+        assert current.receipt.result_id == cached.receipt.result_id
+        assert current.receipt.raw_envelope is cached.receipt.raw_envelope
+
+
+def test_26_cancellation_resistant_transport_keeps_close_owner_until_released() -> None:
+    callback_entered, cancellation_seen = Event(), Event()
+    callback_release = asyncio.Event()
+
+    def resistant_callback(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            202,
+            headers={"content-type": "application/json"},
+            stream=HeldCallbackStream(
+                callback_entered,
+                callback_release,
+                cancellation_seen=cancellation_seen,
+                resist_cancellation=True,
+            ),
+            request=request,
+        )
+
+    with runtime_context(
+        callback_handler=resistant_callback,
+        callback_policy=retry_policy(total_timeout_seconds=5, max_attempts=1),
+        threaded_client=True,
+    ) as (runtime, client, requests, signer):
+        assert post(client).status_code == 202
+        assert callback_entered.wait(2)
+        cached = client.app.state.attempt_cache.snapshot(UUID(ATTEMPT_ID))
+        assert cached.state is AttemptState.FINISHED
+        assert cached.receipt is not None
+        producer_future = runtime.execution_futures[ATTEMPT_ID]
+
+        client.begin_shutdown()
+        client.wait_shutdown()
+        try:
+            producer_future.result(timeout=2)
+            assert cancellation_seen.wait(1)
+            assert runtime.shutdown_drained is False
+            assert runtime.shutdown_cleanup_complete is False
+            assert runtime.callback_close_started is True
+            assert runtime._callback_client._client.is_closed is False
+            assert runtime.active_execution_count == 0
+            assert runtime.available_execution_capacity == 8
+            assert len(requests) == 1
+            assert len(signer.calls) == 1
+            assert not isinstance(
+                runtime.callback_results.get(str(cached.receipt.result_id)), CallbackAccepted
+            )
+            current = client.app.state.attempt_cache.snapshot(UUID(ATTEMPT_ID))
+            assert current.state is AttemptState.FINISHED
+            assert current.receipt.raw_envelope is cached.receipt.raw_envelope
+        finally:
+            client.loop.call_soon_threadsafe(callback_release.set)
+
+        async def finish_cleanup() -> None:
+            assert runtime._callback_close_task is not None
+            await asyncio.wait_for(asyncio.shield(runtime._callback_close_task), timeout=2)
+
+        asyncio.run_coroutine_threadsafe(finish_cleanup(), client.loop).result(timeout=3)
+        assert runtime.shutdown_cleanup_complete is True
+        assert runtime._callback_client._client.is_closed is True
+
+        async def remaining_deliveries() -> int:
+            return len(runtime._callback_client._in_flight)
+
+        assert asyncio.run_coroutine_threadsafe(remaining_deliveries(), client.loop).result() == 0
+        for worker in tuple(runtime._executor._threads):
+            worker.join(timeout=2)
+            assert not worker.is_alive()
+
+
+def test_27_shutdown_cancels_queued_future_but_retains_running_capacity() -> None:
+    running_started, release_running = Event(), Event()
+    second_attempt_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+    def block_first(dispatch: DispatchRequest) -> None:
+        if dispatch.attempt_id == ATTEMPT_ID:
+            running_started.set()
+            assert release_running.wait(3)
+
+    with runtime_context(
+        before_produce=block_first,
+        worker_count=1,
+        max_in_flight=2,
+        threaded_client=True,
+    ) as (runtime, client, requests, signer):
+        assert post(client).status_code == 202
+        assert running_started.wait(1)
+        assert post(client, valid_dispatch(second_attempt_id)).status_code == 202
+        running_future = runtime.execution_futures[ATTEMPT_ID]
+        queued_future = runtime.execution_futures[second_attempt_id]
+        assert not running_future.done()
+        assert not queued_future.running()
+
+        client.begin_shutdown()
+        client.wait_shutdown()
+        try:
+            assert queued_future.cancelled()
+            assert runtime.active_execution_count == 1
+            assert runtime.available_execution_capacity == 1
+            second_state = client.app.state.attempt_cache.snapshot(UUID(second_attempt_id))
+            assert second_state.state.value == "FAILED_NO_RECEIPT"
+            assert not running_future.done()
+        finally:
+            release_running.set()
+
+        running_future.result(timeout=2)
+        first_state = client.app.state.attempt_cache.snapshot(UUID(ATTEMPT_ID))
+        assert first_state.state is AttemptState.FINISHED
+        assert runtime.active_execution_count == 0
+        assert runtime.available_execution_capacity == 2
+        assert runtime.registration_count == 2
+        assert len(signer.calls) == 1
+        assert requests == []
+
+
+def test_28_callback_scheduled_after_close_is_rejected_without_unowned_task() -> None:
+    before_schedule, release_schedule = Event(), Event()
+
+    def pause_before_schedule(_dispatch: DispatchRequest) -> None:
+        before_schedule.set()
+        assert release_schedule.wait(3)
+
+    with runtime_context(
+        before_callback_schedule=pause_before_schedule,
+        threaded_client=True,
+    ) as (runtime, client, requests, signer):
+        assert post(client).status_code == 202
+        assert before_schedule.wait(1)
+        cached = client.app.state.attempt_cache.snapshot(UUID(ATTEMPT_ID))
+        assert cached.state is AttemptState.FINISHED
+        assert cached.receipt is not None
+        producer_future = runtime.execution_futures[ATTEMPT_ID]
+
+        client.begin_shutdown()
+        client.wait_shutdown()
+        try:
+            assert runtime.callback_close_started is True
+            assert not producer_future.done()
+            assert runtime.available_execution_capacity == 7
+        finally:
+            release_schedule.set()
+
+        producer_future.result(timeout=2)
+        assert runtime.active_execution_count == 0
+        assert runtime.available_execution_capacity == 8
+        assert len(signer.calls) == 1
+        assert requests == []
+        current = client.app.state.attempt_cache.snapshot(UUID(ATTEMPT_ID))
+        assert current.state is AttemptState.FINISHED
+        assert current.receipt.result_id == cached.receipt.result_id
+        assert current.receipt.raw_envelope is cached.receipt.raw_envelope
+        assert runtime.callback_results.get(str(cached.receipt.result_id)) is not None
+        assert not isinstance(
+            runtime.callback_results[str(cached.receipt.result_id)], CallbackAccepted
+        )
+
+        async def deliveries() -> int:
+            return len(runtime._callback_client._in_flight)
+
+        assert asyncio.run_coroutine_threadsafe(deliveries(), client.loop).result() == 0
+
+
+def test_29_repeated_concurrent_shutdown_uses_one_cleanup_owner() -> None:
+    with runtime_context(threaded_client=True) as (runtime, client, _, _):
+        assert post(client).status_code == 202
+        assert client.wait_for_attempt(ATTEMPT_ID)
+
+        async def shutdown_twice() -> None:
+            await asyncio.gather(runtime.shutdown(), runtime.shutdown())
+            task = runtime._callback_close_task
+            deadline = runtime._shutdown_deadline
+            assert task is not None
+            await asyncio.gather(runtime.shutdown(), runtime.shutdown())
+            assert runtime._callback_close_task is task
+            assert runtime._shutdown_deadline == deadline
+
+        asyncio.run_coroutine_threadsafe(shutdown_twice(), client.loop).result(timeout=3)
+        assert runtime.shutdown_drained is True
+        assert runtime.shutdown_cleanup_complete is True
+        assert runtime._callback_client._client.is_closed is True
+        assert runtime.available_execution_capacity == 8
+
+
+def test_30_shutdown_during_registration_rejects_without_untracked_execution() -> None:
+    bind_entered, release_bind = Event(), Event()
+    bound_futures: list[Future[object]] = []
+
+    def delayed_bind(lifecycle, future) -> None:
+        bound_futures.append(future)
+        bind_entered.set()
+        assert release_bind.wait(3)
+        lifecycle.bind_execution_future(future)
+
+    with runtime_context(
+        bind_execution_future=delayed_bind,
+        threaded_client=True,
+    ) as (runtime, client, requests, signer):
+        response_future = client.post_async(
+            "/internal/v1/executions",
+            headers={"Authorization": f"Bearer {DISPATCH_TOKEN}"},
+            json=valid_dispatch(),
+        )
+        assert bind_entered.wait(1)
+        producer_future = bound_futures[0]
+        client.begin_shutdown(close_client=False)
+        client.wait_shutdown()
+
+        try:
+            assert runtime.shutdown_drained is False
+            assert runtime.active_execution_count == 1
+            assert runtime.available_execution_capacity == 7
+            assert runtime.registration_count == 0
+        finally:
+            release_bind.set()
+
+        response = response_future.result(timeout=2)
+        assert response.status_code == 503
+        producer_future.result(timeout=2)
+        assert runtime.active_execution_count == 0
+        assert runtime.available_execution_capacity == 8
+        assert runtime.registration_count == 0
+        assert signer.calls == []
+        assert requests == []
 
 
 def test_16_d16_conflicts_only_while_fingerprint_retained_and_cold_start_is_new_cache() -> None:
