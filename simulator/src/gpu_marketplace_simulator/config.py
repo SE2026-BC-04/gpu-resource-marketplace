@@ -11,6 +11,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _CANONICAL_SERVICE_TOKEN = re.compile(r"^[A-Za-z0-9_-]{43}$")
 
 
+def _is_canonical_service_token(token: str) -> bool:
+    if _CANONICAL_SERVICE_TOKEN.fullmatch(token) is None:
+        return False
+    try:
+        decoded = base64.b64decode(token + "=", altchars=b"-_", validate=True)
+    except (binascii.Error, ValueError, UnicodeEncodeError):
+        return False
+    return (
+        len(decoded) == 32
+        and base64.urlsafe_b64encode(decoded).rstrip(b"=").decode("ascii") == token
+    )
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SIMULATOR_", extra="ignore")
 
@@ -25,6 +38,8 @@ class Settings(BaseSettings):
     admission_executor_workers: int | None = Field(default=None, gt=0)
     admission_max_outstanding: int | None = Field(default=None, gt=0)
     shutdown_drain_timeout_seconds: float | None = Field(default=None, ge=0)
+    callback_url: str | None = None
+    callback_token: SecretStr | None = Field(default=None, repr=False)
 
     @field_validator("manager_dispatch_token")
     @classmethod
@@ -36,21 +51,18 @@ class Settings(BaseSettings):
             # An unprovisioned development app remains fail-closed at the route.
             return None
         token = value.get_secret_value()
-        if _CANONICAL_SERVICE_TOKEN.fullmatch(token) is None:
+        if not _is_canonical_service_token(token):
             raise ValueError("manager dispatch token must be canonical 32-byte base64url")
-        try:
-            decoded = base64.b64decode(
-                token + "=", altchars=b"-_", validate=True
-            )
-        except (binascii.Error, ValueError, UnicodeEncodeError):
-            raise ValueError(
-                "manager dispatch token must be canonical 32-byte base64url"
-            ) from None
-        if (
-            len(decoded) != 32
-            or base64.urlsafe_b64encode(decoded).rstrip(b"=").decode("ascii") != token
-        ):
-            raise ValueError("manager dispatch token must be canonical 32-byte base64url")
+        return value
+
+    @field_validator("callback_token")
+    @classmethod
+    def require_canonical_callback_token(
+        cls, value: SecretStr | None
+    ) -> SecretStr | None:
+        """Validate encoding only; token entropy is a provisioner responsibility."""
+        if value is not None and not _is_canonical_service_token(value.get_secret_value()):
+            raise ValueError("callback token must be canonical 32-byte base64url")
         return value
 
     @field_validator("dispatch_max_body_bytes", mode="before")
