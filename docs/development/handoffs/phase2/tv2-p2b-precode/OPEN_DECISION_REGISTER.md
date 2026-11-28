@@ -185,6 +185,14 @@ Docs only, in this PR; neither note changes R1 DDL and #70 is untouched. The rev
 | N1 rows the DDL accepts but the contract forbids | recorded as an adapter-level invariant: a bound `PENDING` row with a NULL `result_id`, an unbound or NULL-`result_id` `ACCEPTED` row, and an unbound or NULL-`result_id` `REJECTED` row with a verifier code are invariant breaks (no verify, no write, alert, row stays `PENDING`); `reconcile_settlement` classifies them `E-BAD`/`G-INVALID`; DDL CHECKs remain a separate R1 decision that TV3 does not require | `B-IF-07` checklist item 9; `B-IF-07A` §4; `P2B-DRT-55` | `PROPOSED_FOR_ACK` TV3 + TV1 |
 | N2 source of `verified_at` | one `clock_timestamp()` read inside the finalization UoW after the locks, shared with `accepted_at`; never `finished_at_wire`, the caller or the receipt | `B-IF-07` checklist item 10; `EVIDENCE_TRACEABILITY_MATRIX.md` row 5; `P2B-DRT-56` | `PROPOSED_FOR_ACK` TV3 + TV5 |
 
+### 1.9 TV4 re-review of `daf4087` (`ACK_WITH_ACTIONS`, one P2)
+
+Docs only, in this PR. The review is Codex-assisted and is not a human L2 approval. Every test is `NOT_RUN`.
+
+| Item | Change | Where | Status |
+|---|---|---|---|
+| P2 deadline reservation at the registry admission gate | the outstanding-operation registry is partitioned into a candidate share and a reserved deadline share (sizes `PENDING_PARAMS`, each at least 1), so the reservation covers all three resources (executor slot, pool connection, registry entry); candidate admission cannot take a deadline-share entry; a deadline operation is refused only when the deadline share itself is exhausted (overload case, escalation); a full candidate share is a candidate-throughput alarm | `B-IF-07A` §3.3 rule 3 and §3.2 slow-operation bullet; `RUNTIME_BUDGET.md`; `P2B-DRT-47` (new case: candidate share full with candidate owners outstanding, due Job still admitted and completes) | `PROPOSED_FOR_ACK` TV4 + TV1 |
+
 ## 2. Errata X-01 (proposed text for TV4 + TV2 ACK)
 
 **Finding.** `Phase_2D_v0.9.md` line 285 reads: `conditional update Listing reserved_gpu_count += head.requested_gpu_count`. No such column exists. The Phase 1 column is `gpu_listings.allocated_gpu_count` (`0001_phase1b_baseline.py`, with `CHECK (allocated_gpu_count >= 0 AND allocated_gpu_count <= total_gpu_count)`), and `database-design.md` §11.3 uses `allocated_gpu_count`.
