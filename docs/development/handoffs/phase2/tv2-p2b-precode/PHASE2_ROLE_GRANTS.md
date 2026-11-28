@@ -70,3 +70,11 @@ R2 repeats the shape of `0002`'s final check, with the Phase 2 matrix: after gra
 | Why the minimum | the repair port updates only these five columns plus `updated_at`; `state`, `dispatch_payload`, ids, normal lease columns and `acked_at` are never in a repair `SET` |
 | Limit of column grants | one role holds both the normal and the repair column lists, so a grant cannot separate the ports; the statement predicates (`state = 'ACKED' AND repair_version = :v AND repair_owner = :o`), the proposed `BEFORE UPDATE` guard (`GUARDS_TRIGGER_PLAN.md`) and native-role tests enforce it |
 | Proof | `P2B-DRT-36` (native `gpm_manager_app`: repair columns updatable, every other Outbox column and state edge refused; API `42501`); R2 self-check inventory and the checked-in expected list change only if approved |
+
+## 8. Addendum D-20 (`B-IF-07A`, proposed): discovery reads need no new grant
+
+| Item | Content |
+|---|---|
+| Reads | `list_pending_candidates`, `list_due_running_jobs` and the read-only `reconcile_settlement` (`B-IF-07A`) use only privileges already listed in §1-§2 (the last also reads `allocations`, `signed_results` and `job_reputation_contributions`, all `R(all)` for the Manager): `result_inbox` `R(id, received_at, state, bound_job_id, bound_attempt_id)`, `jobs` `R(id, status)`, `execution_attempts` `R(job_id, hard_deadline_at)` |
+| Restriction that is not a grant | the Manager holds `R(all)` on `result_inbox`, including `original_envelope_raw`; the discovery statements use an explicit column list and never select it. This is a code and test property (`P2B-DRT-39/40`), not something a column grant can enforce |
+| Proof | `P2B-DRT-40` (native `gpm_manager_app` runs the three reads; `gpm_api_app` `42501`); R2 self-check inventory and the expected list do not change |
