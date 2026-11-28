@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -41,6 +42,11 @@ class GroupLifecycle(str, Enum):
     DEGRADED = "DEGRADED"
     STOPPING = "STOPPING"
     STOPPED = "STOPPED"
+
+
+class DrainOutcome(str, Enum):
+    CLEAN = "CLEAN"
+    INCOMPLETE = "INCOMPLETE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +98,16 @@ class ManagerSupervisorError(RuntimeError):
         )
 
 
+class ManagerDrainIncompleteError(RuntimeError):
+    def __init__(self, timed_out_groups: frozenset[ManagerGroup]) -> None:
+        self.timed_out_groups = timed_out_groups
+        groups = ", ".join(sorted(group.value for group in timed_out_groups))
+        super().__init__(
+            "Manager drain observation budget expired; outstanding groups: "
+            f"{groups}"
+        )
+
+
 class RequiredGroupsMissingError(RuntimeError):
     def __init__(self, missing_groups: frozenset[ManagerGroup]) -> None:
         self.missing_groups = missing_groups
@@ -116,6 +132,7 @@ class ManagerGroupContext:
         return (
             self._supervisor.dependency_gate_open
             and not self.stop_event.is_set()
+            and not self._supervisor.shutdown_started
             and self._supervisor.failure is None
         )
 
@@ -153,8 +170,22 @@ class ManagerSupervisor:
         *,
         runners: Mapping[ManagerGroup, GroupRunner] | None = None,
         stop_event: asyncio.Event | None = None,
+        drain_budget_seconds: float | None = None,
+        drain_deadline_waiter: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
+        if drain_budget_seconds is not None and (
+            isinstance(drain_budget_seconds, bool)
+            or not isinstance(drain_budget_seconds, (int, float))
+            or not math.isfinite(drain_budget_seconds)
+            or drain_budget_seconds <= 0
+        ):
+            raise ValueError("drain_budget_seconds must be finite and positive")
+        if drain_deadline_waiter is not None and drain_budget_seconds is None:
+            raise ValueError("drain_deadline_waiter requires an explicit drain budget")
+
         self.stop_event = stop_event or asyncio.Event()
+        self._drain_budget_seconds = drain_budget_seconds
+        self._drain_deadline_waiter = drain_deadline_waiter
         self._runners = dict(runners or {})
         self.runtime_mode = (
             ManagerRuntimeMode.PHASE2_RUNTIME
@@ -171,6 +202,13 @@ class ManagerSupervisor:
         self._tasks: dict[ManagerGroup, asyncio.Task[None]] = {}
         self._failure: tuple[ManagerGroup, BaseException] | None = None
         self._failure_event = asyncio.Event()
+        self._shutdown_started = False
+        self._drain_task: asyncio.Task[None] | None = None
+        self._drain_deadline_task: asyncio.Task[None] | None = None
+        self._drain_timeout_event = asyncio.Event()
+        self._drain_outcome: DrainOutcome | None = None
+        self._timed_out_groups: frozenset[ManagerGroup] = frozenset()
+        self._cleanup_complete = False
 
     @property
     def failure(self) -> tuple[ManagerGroup, BaseException] | None:
@@ -181,8 +219,28 @@ class ManagerSupervisor:
         return self._dependency_gate_open
 
     @property
+    def shutdown_started(self) -> bool:
+        return self._shutdown_started
+
+    @property
     def active_task_count(self) -> int:
         return sum(not task.done() for task in self._tasks.values())
+
+    @property
+    def drain_outcome(self) -> DrainOutcome | None:
+        return self._drain_outcome
+
+    @property
+    def cleanup_complete(self) -> bool:
+        return self._cleanup_complete
+
+    async def wait_for_drain_timeout(self) -> None:
+        """Wait until the injected observation budget expires."""
+        if self._drain_budget_seconds is None:
+            raise RuntimeError("No drain observation budget is configured")
+        if self._cleanup_complete and self._drain_outcome is DrainOutcome.CLEAN:
+            raise RuntimeError("Drain completed before the observation budget expired")
+        await self._drain_timeout_event.wait()
 
     def snapshot(self) -> Mapping[ManagerGroup, GroupSnapshot]:
         return MappingProxyType(
@@ -274,7 +332,7 @@ class ManagerSupervisor:
         context = ManagerGroupContext(self, group)
         try:
             await runner(context)
-            if not self.stop_event.is_set():
+            if not self._shutdown_started and not self.stop_event.is_set():
                 self._record_failure(group, UnexpectedGroupExit())
         except asyncio.CancelledError as error:
             # Supervisor shutdown is cooperative; a cancelled group has not
@@ -287,26 +345,108 @@ class ManagerSupervisor:
         finally:
             state.lifecycle = GroupLifecycle.STOPPED
 
-    async def _stop_and_drain(self) -> None:
+    def _start_drain(self) -> asyncio.Task[None]:
+        """Close claims and return the single Supervisor-owned drain task."""
+        self._shutdown_started = True
         self.stop_event.set()
         for state in self._states.values():
             if state.lifecycle is not GroupLifecycle.STOPPED:
                 state.lifecycle = GroupLifecycle.STOPPING
+        if self._drain_task is None:
+            self._drain_task = asyncio.create_task(
+                self._drain_owned_tasks(), name="manager:drain"
+            )
+        return self._drain_task
 
-        if self._tasks:
-            await asyncio.gather(*self._tasks.values(), return_exceptions=True)
+    async def _drain_owned_tasks(self) -> None:
+        tasks = tuple(self._tasks.values())
+        all_tasks_done = asyncio.gather(*tasks, return_exceptions=True)
+        deadline_task: asyncio.Task[None] | None = None
+        timed_out = False
+        try:
+            if tasks and self._drain_budget_seconds is not None:
+                deadline_waiter = self._drain_deadline_waiter or asyncio.sleep
+                deadline_task = asyncio.create_task(
+                    deadline_waiter(self._drain_budget_seconds),
+                    name="manager:drain-deadline",
+                )
+                self._drain_deadline_task = deadline_task
+                done, _ = await asyncio.wait(
+                    {all_tasks_done, deadline_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if deadline_task in done and not all_tasks_done.done():
+                    try:
+                        deadline_task.result()
+                    except Exception as error:
+                        logger.error(
+                            "manager_drain_deadline_wait_failed",
+                            extra={"error_type": type(error).__name__},
+                        )
+                    timed_out = True
+                    self._timed_out_groups = frozenset(
+                        group for group, task in self._tasks.items() if not task.done()
+                    )
+                    self._drain_outcome = DrainOutcome.INCOMPLETE
+                    self._drain_timeout_event.set()
+                    logger.error(
+                        "manager_drain_incomplete",
+                        extra={
+                            "outstanding_manager_groups": sorted(
+                                group.value for group in self._timed_out_groups
+                            ),
+                            "outstanding_group_count": len(self._timed_out_groups),
+                        },
+                    )
+                    # The budget bounds observation only. Keep this task and
+                    # every runner reference owned until actual completion.
+                    await asyncio.shield(all_tasks_done)
+                else:
+                    if not deadline_task.done():
+                        deadline_task.cancel()
+                    await asyncio.gather(deadline_task, return_exceptions=True)
+                    await all_tasks_done
+            else:
+                await all_tasks_done
+        finally:
+            if deadline_task is not None and not deadline_task.done():
+                deadline_task.cancel()
+                await asyncio.gather(deadline_task, return_exceptions=True)
 
-        for state in self._states.values():
-            state.lifecycle = GroupLifecycle.STOPPED
+        for group, state in self._states.items():
+            task = self._tasks.get(group)
+            if task is None or task.done():
+                state.lifecycle = GroupLifecycle.STOPPED
+        self._cleanup_complete = True
+        if not timed_out:
+            self._drain_outcome = DrainOutcome.CLEAN
+        else:
+            logger.warning(
+                "manager_drain_cleanup_completed_after_timeout",
+                extra={
+                    "timed_out_manager_groups": sorted(
+                        group.value for group in self._timed_out_groups
+                    ),
+                    "cleanup_complete": True,
+                },
+            )
+
+    async def _stop_and_drain(self) -> None:
+        drain = self._start_drain()
+        await asyncio.shield(drain)
+        if (
+            self._drain_outcome is DrainOutcome.INCOMPLETE
+            and self._failure is None
+        ):
+            raise ManagerDrainIncompleteError(self._timed_out_groups)
 
     async def _await_drain_after_cancellation(self) -> None:
-        drain = asyncio.create_task(self._stop_and_drain(), name="manager:cancel-drain")
+        drain = self._start_drain()
         while not drain.done():
             try:
                 await asyncio.shield(drain)
             except asyncio.CancelledError:
-                # A second cancellation still cannot release Engine ownership
-                # before the group tasks have actually stopped.
+                # Repeated caller cancellation cannot release task ownership.
                 continue
         await drain
 

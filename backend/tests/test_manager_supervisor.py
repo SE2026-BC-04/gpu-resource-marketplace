@@ -691,3 +691,265 @@ def test_supervisor_cancellation_waits_for_runner_cleanup() -> None:
         assert supervisor.active_task_count == 0
 
     asyncio.run(scenario())
+
+
+class _ControlledDrainDeadline:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.expire = asyncio.Event()
+        self.budget: float | None = None
+
+    async def __call__(self, budget: float) -> None:
+        self.budget = budget
+        self.started.set()
+        await self.expire.wait()
+
+
+def _assert_no_pending_manager_tasks() -> None:
+    current = asyncio.current_task()
+    pending = [
+        task
+        for task in asyncio.all_tasks()
+        if task is not current
+        and task.get_name().startswith("manager:")
+        and not task.done()
+    ]
+    assert pending == []
+
+
+def test_bounded_drain_cooperative_runner_finishes_cleanly() -> None:
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        started = asyncio.Event()
+        cleanup_finished = asyncio.Event()
+        contexts: list[ManagerGroupContext] = []
+        timer = _ControlledDrainDeadline()
+
+        async def runner(context: ManagerGroupContext) -> None:
+            contexts.append(context)
+            started.set()
+            await context.stop_event.wait()
+            assert not context.claims_allowed
+            cleanup_finished.set()
+
+        supervisor = ManagerSupervisor(
+            runners=_with_required_groups(
+                {ManagerGroup.SCHEDULING_ALLOCATION: runner}
+            ),
+            stop_event=stop_event,
+            drain_budget_seconds=5.0,
+            drain_deadline_waiter=timer,
+        )
+        manager_task = asyncio.create_task(supervisor.run())
+        await started.wait()
+        stop_event.set()
+        assert not contexts[0].claims_allowed
+        await asyncio.wait_for(manager_task, timeout=1)
+
+        assert cleanup_finished.is_set()
+        assert supervisor.drain_outcome.value == "CLEAN"
+        assert supervisor.cleanup_complete
+        assert supervisor.active_task_count == 0
+        _assert_no_pending_manager_tasks()
+
+    asyncio.run(scenario())
+
+
+def test_bounded_drain_timeout_retains_runner_until_late_success() -> None:
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        started = asyncio.Event()
+        release = asyncio.Event()
+        contexts: list[ManagerGroupContext] = []
+        timer = _ControlledDrainDeadline()
+
+        async def uncooperative_runner(context: ManagerGroupContext) -> None:
+            contexts.append(context)
+            started.set()
+            await release.wait()
+
+        supervisor = ManagerSupervisor(
+            runners=_with_required_groups(
+                {ManagerGroup.SCHEDULING_ALLOCATION: uncooperative_runner}
+            ),
+            stop_event=stop_event,
+            drain_budget_seconds=2.5,
+            drain_deadline_waiter=timer,
+        )
+        manager_task = asyncio.create_task(supervisor.run())
+        await started.wait()
+        stop_event.set()
+        await timer.started.wait()
+        assert timer.budget == 2.5
+        timer.expire.set()
+        await supervisor.wait_for_drain_timeout()
+
+        assert supervisor.drain_outcome.value == "INCOMPLETE"
+        assert not supervisor.cleanup_complete
+        assert supervisor.active_task_count == 1
+        assert supervisor.snapshot()[
+            ManagerGroup.SCHEDULING_ALLOCATION
+        ].lifecycle is not GroupLifecycle.STOPPED
+        assert not supervisor._tasks[ManagerGroup.SCHEDULING_ALLOCATION].done()
+        assert not manager_task.done()
+        stop_event.clear()
+        assert not contexts[0].claims_allowed
+        assert supervisor.shutdown_started
+        _assert_only_owned_manager_tasks(supervisor)
+
+        release.set()
+        with pytest.raises(RuntimeError, match="drain observation budget expired"):
+            await asyncio.wait_for(manager_task, timeout=1)
+
+        assert supervisor.drain_outcome.value == "INCOMPLETE"
+        assert supervisor.cleanup_complete
+        assert supervisor.active_task_count == 0
+        assert supervisor.snapshot()[
+            ManagerGroup.SCHEDULING_ALLOCATION
+        ].lifecycle is GroupLifecycle.STOPPED
+        _assert_no_pending_manager_tasks()
+
+    asyncio.run(scenario())
+
+
+def test_late_runner_exception_preserves_fatal_error_after_timeout() -> None:
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        started = asyncio.Event()
+        release = asyncio.Event()
+        timer = _ControlledDrainDeadline()
+
+        async def late_failing_runner(context: ManagerGroupContext) -> None:
+            started.set()
+            await release.wait()
+            raise ValueError("sensitive database detail")
+
+        supervisor = ManagerSupervisor(
+            runners=_with_required_groups(
+                {ManagerGroup.SCHEDULING_ALLOCATION: late_failing_runner}
+            ),
+            stop_event=stop_event,
+            drain_budget_seconds=1.0,
+            drain_deadline_waiter=timer,
+        )
+        manager_task = asyncio.create_task(supervisor.run())
+        await started.wait()
+        stop_event.set()
+        await timer.started.wait()
+        timer.expire.set()
+        await supervisor.wait_for_drain_timeout()
+        assert not supervisor.cleanup_complete
+
+        release.set()
+        with pytest.raises(ManagerSupervisorError) as exc:
+            await asyncio.wait_for(manager_task, timeout=1)
+
+        assert exc.value.cause_type == "ValueError"
+        assert "sensitive database detail" not in str(exc.value)
+        assert supervisor.drain_outcome.value == "INCOMPLETE"
+        assert supervisor.cleanup_complete
+        _assert_no_pending_manager_tasks()
+
+    asyncio.run(scenario())
+
+
+def test_repeated_cancel_keeps_drain_owner_and_preserves_cancelled_error() -> None:
+    async def scenario() -> None:
+        started = asyncio.Event()
+        release = asyncio.Event()
+        cleanup_count = 0
+        timer = _ControlledDrainDeadline()
+
+        async def uncooperative_runner(context: ManagerGroupContext) -> None:
+            nonlocal cleanup_count
+            started.set()
+            try:
+                await release.wait()
+            finally:
+                cleanup_count += 1
+
+        supervisor = ManagerSupervisor(
+            runners=_with_required_groups(
+                {ManagerGroup.SCHEDULING_ALLOCATION: uncooperative_runner}
+            ),
+            drain_budget_seconds=3.0,
+            drain_deadline_waiter=timer,
+        )
+        manager_task = asyncio.create_task(supervisor.run())
+        await started.wait()
+        manager_task.cancel()
+        await timer.started.wait()
+        drain_task = supervisor._drain_task
+        assert drain_task is not None
+        assert supervisor._start_drain() is drain_task
+        timer.expire.set()
+        await supervisor.wait_for_drain_timeout()
+        assert not manager_task.done()
+        assert not supervisor.cleanup_complete
+
+        manager_task.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(manager_task, timeout=1)
+
+        assert supervisor._drain_task is drain_task
+        assert drain_task.done()
+        assert cleanup_count == 1
+        assert supervisor.drain_outcome.value == "INCOMPLETE"
+        assert supervisor.cleanup_complete
+        _assert_no_pending_manager_tasks()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "budget",
+    [0.0, -1.0, float("nan"), float("inf"), float("-inf")],
+)
+def test_bounded_drain_rejects_non_positive_or_non_finite_budgets(
+    budget: float,
+) -> None:
+    with pytest.raises(ValueError):
+        ManagerSupervisor(drain_budget_seconds=budget)
+
+
+def test_bounded_drain_waiter_requires_an_explicit_budget() -> None:
+    with pytest.raises(ValueError):
+        ManagerSupervisor(drain_deadline_waiter=_ControlledDrainDeadline())
+
+
+def test_foundation_mode_legacy_callers_remain_unbounded_and_compatible() -> None:
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        stop_event.set()
+        supervisor = ManagerSupervisor(stop_event=stop_event)
+
+        await supervisor.run()
+
+        assert supervisor.runtime_mode is ManagerRuntimeMode.FOUNDATION
+        assert supervisor.drain_outcome.value == "CLEAN"
+        assert supervisor.cleanup_complete
+        assert all(
+            snapshot.lifecycle is GroupLifecycle.STOPPED
+            for snapshot in supervisor.snapshot().values()
+        )
+        _assert_no_pending_manager_tasks()
+
+    asyncio.run(scenario())
+
+
+def _assert_only_owned_manager_tasks(supervisor: ManagerSupervisor) -> None:
+    owned = set(supervisor._tasks.values())
+    if supervisor._drain_task is not None:
+        owned.add(supervisor._drain_task)
+    if supervisor._drain_deadline_task is not None:
+        owned.add(supervisor._drain_deadline_task)
+    current = asyncio.current_task()
+    pending = [
+        task
+        for task in asyncio.all_tasks()
+        if task is not current
+        and task.get_name().startswith("manager:")
+        and not task.done()
+    ]
+    assert all(task in owned for task in pending)
