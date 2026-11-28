@@ -13,11 +13,11 @@ from sqlalchemy.engine import Engine
 import gpu_marketplace.domain  # noqa: F401
 from gpu_marketplace.domain.base import Base
 from test_schema_metadata import (
-    EXPECTED_CHECKS,
-    EXPECTED_FOREIGN_KEYS,
-    EXPECTED_INDEXES,
-    EXPECTED_TABLES,
-    EXPECTED_UNIQUES,
+    ALL_CHECKS,
+    ALL_FOREIGN_KEYS,
+    ALL_INDEXES,
+    ALL_TABLES,
+    ALL_UNIQUES,
 )
 
 VERSIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
@@ -57,21 +57,21 @@ def baseline_module():
     return module
 
 
-def test_upgrade_head_creates_exactly_the_ten_tables(migrated_database: Engine) -> None:
-    assert user_tables(migrated_database) == EXPECTED_TABLES
+def test_upgrade_head_creates_exactly_the_sixteen_tables(migrated_database: Engine) -> None:
+    assert user_tables(migrated_database) == ALL_TABLES
 
 
 def test_catalog_constraint_names_match_the_matrix(migrated_database: Engine) -> None:
-    assert constraint_names(migrated_database, "c") == EXPECTED_CHECKS
-    assert constraint_names(migrated_database, "f") == set(EXPECTED_FOREIGN_KEYS)
+    assert constraint_names(migrated_database, "c") == ALL_CHECKS
+    assert constraint_names(migrated_database, "f") == set(ALL_FOREIGN_KEYS)
     with migrated_database.connect() as connection:
         index_names = set(
             connection.execute(
                 text("SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename <> 'alembic_version'")
             ).scalars()
         )
-    primary_keys = {f"pk_{table}" for table in EXPECTED_TABLES}
-    assert index_names == primary_keys | EXPECTED_UNIQUES | EXPECTED_INDEXES
+    primary_keys = {f"pk_{table}" for table in ALL_TABLES}
+    assert index_names == primary_keys | ALL_UNIQUES | ALL_INDEXES
 
 
 def test_roles_are_seeded(migrated_database: Engine) -> None:
@@ -95,7 +95,7 @@ def test_downgrade_then_upgrade_round_trips(migrated_database: Engine, alembic_c
     command.downgrade(alembic_config, "base")
     assert user_tables(migrated_database) == set()
     command.upgrade(alembic_config, "head")
-    assert user_tables(migrated_database) == EXPECTED_TABLES
+    assert user_tables(migrated_database) == ALL_TABLES
     with migrated_database.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM roles")).scalar_one() == 3
 

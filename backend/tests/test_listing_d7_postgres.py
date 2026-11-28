@@ -45,7 +45,9 @@ D7_PARENT = "0004_phase1b_jobs_guard_delete"
 def test_migration_graph_has_one_head_and_d7_follows_accepted_d3():
     config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == [D7_REVISION]
+    # D7 stays in the chain, right after accepted D3; later accepted revisions (Phase 2B R1) may follow it.
+    assert len(script.get_heads()) == 1
+    assert D7_REVISION in {revision.revision for revision in script.walk_revisions()}
     assert script.get_revision(D7_REVISION).down_revision == D7_PARENT
 
 
@@ -80,7 +82,10 @@ def acl_snapshot(connection):
         connection.execute(
             text(
                 "SELECT relname, relacl::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
-                "WHERE n.nspname='public' AND relkind IN ('r','S') ORDER BY relname"
+                "WHERE n.nspname='public' AND relkind IN ('r','S') "
+                # The D7 downgrade stops at 0004, which predates the Phase 2B R1 tables; they carry no ACL.
+                "AND relname NOT IN ('execution_attempts','allocations','execution_outbox',"
+                "'result_inbox','signed_results','job_reputation_contributions') ORDER BY relname"
             )
         ).all(),
         connection.execute(
@@ -439,9 +444,10 @@ def test_migration_round_trip_preserves_rows_d1_acls_and_rejects_missing_d7(
     with baseline_database.connect() as owner:
         assert acl_snapshot(owner) == expected_acls
         assert jobs_guard_snapshot(owner) == expected_jobs_guard
+        head = ScriptDirectory.from_config(alembic_config).get_current_head()
         assert (
             owner.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            == D7_REVISION
+            == head
         )
     with make_uow(sessions) as uow:
         assert uow.listings.get(data.listing) == before
