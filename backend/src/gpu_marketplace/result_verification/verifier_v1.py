@@ -22,7 +22,10 @@ Order of checks (fixed):
 7. ``key.key_id`` must equal ``payload.key_id``, else ``TrustedKeyError`` (the
    adapter returned the wrong row; not a fault of the receipt).
 8. ``KEY_WORKER_MISMATCH``: the key row belongs to another Worker than the payload.
-9. The public key must be 32 ``bytes`` and loadable, else ``TrustedKeyError``.
+9. The public key must be 32 ``bytes``, must not be an unsafe encoding (see
+   "Public-key validity") and must load, else ``TrustedKeyError``. Only a loader
+   ``ValueError`` means unusable key material; any other loader exception is
+   ``VerifierInternalError`` (retryable), never a key verdict.
 10. Ed25519 over ``SIGNED_RESULT_V1_PREFIX + payload_jcs_raw``. Only an
     ``InvalidSignature`` is ``INVALID_SIGNATURE``; any other exception is
     ``VerifierInternalError`` and never a rejection.
@@ -38,6 +41,54 @@ no row has this ``key_id``. If the registry is unavailable, times out or cannot 
 read, the adapter must raise and must not call this function (section 7.9 R1).
 
 Exception messages are fixed strings; input, keys and signatures are never echoed.
+
+Public-key validity (PROPOSED policy, TV2/TV5 ACK pending; TV1/TV5 review of #72)
+---------------------------------------------------------------------------------
+On the pinned ``cryptography`` 46.0.7 (OpenSSL backend) ``Ed25519PublicKey.from_public_bytes``
+accepts any 32 bytes and never decodes the point. The signature R=identity, S=0 is then
+accepted for every message when the key is the identity point, and for a fraction of
+messages when it is another small-order point or a non-canonical encoding of one (see the
+reproduction tests). Such a key would make any envelope "verify", so before verifying the
+verifier refuses, with ``TrustedKeyError``: (a) a ``y`` coordinate that is not below the
+field prime (non-canonical encoding), and (b) a constant blocklist of the eight small-order
+encodings plus the two non-canonical ``x = 0`` / sign-bit-set encodings. There is no
+curve arithmetic here: only an integer comparison and a constant set, on top of the
+vetted backend. An unusable key is a fault of the trusted key row, never a verdict on the
+receipt: no ``VerifiedV1Receipt`` and no ``INVALID_SIGNATURE``.
+
+KNOWN LIMITATION: a 32-byte string that is not a curve point is not detected here (the
+backend cannot tell it apart from a bad signature without decoding the point, which would
+need curve arithmetic). It cannot forge a signature, but a genuine receipt checked against
+such a row is answered ``INVALID_SIGNATURE``. Registration (G1, proof of possession) must
+refuse it before the key can be active; that is outside this module.
+
+Trust and provenance (PROPOSED, TV1/TV2/TV5 ACK pending)
+--------------------------------------------------------
+``_ISSUER`` and the frozen dataclasses only prevent accidental construction of a receipt.
+They are not a security boundary: any code in the same process can import ``_ISSUER``, and
+``dataclasses.replace`` keeps the issuer while changing any field. The receipts are typed
+carriers handed between trusted code of the same process (TV1 orchestration and TV2
+adapters). The adapter must therefore re-check, under the locks and against the locked Inbox
+row, the raw evidence, the identities and the values before it writes (TV2 ``finalize_one`` /
+``reject_candidate``); an identity check alone does not prove that a signature was verified
+for an arbitrary forged carrier. Negative tests for modified carriers belong to the future
+adapter boundary and are NOT implemented here: a ``dataclasses.replace`` receipt with another
+outcome or digest; a receipt whose ``payload_jcs_raw`` / ``signature_raw`` differ from the
+locked row; a receipt whose ids differ from the locked Inbox row or Job; a receipt for a row
+that is no longer ``PENDING``; and a ``RejectedV1Receipt`` whose code the locked recheck does
+not reproduce.
+
+Key lookup boundary (PROPOSED, owner ACK pending)
+-------------------------------------------------
+``result_inbox`` does not store ``key_id``; it exists only inside the signed payload. The
+caller reads it with ``read_signed_key_id_v1`` (the same hash check and strict parse as the
+verifier, same error mapping), looks the key up by ``key_id`` (its primary key), and passes
+either the row or ``KEY_ABSENT`` (only for a definitive "no row" answer) to the verifier.
+
+Cost: a lookup followed by a verification parses the envelope twice, and
+``verify_signed_result_v1`` itself parses it twice (``parse_signed_envelope_v1`` and then
+``extract_signed_parts_v1``, in P2C-07, which is deliberately unchanged here). At the proposed
+16 KiB limit this is small; account for it in the future operation budget.
 """
 
 from __future__ import annotations
@@ -53,12 +104,34 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from gpu_marketplace.result_verification.wire_v1 import (
+    ParsedSignedEnvelopeV1,
     SignedV1WireError,
     extract_signed_parts_v1,
     parse_signed_envelope_v1,
 )
 
 SIGNED_RESULT_V1_PREFIX = b"GPU-MARKETPLACE:SIGNED-RESULT:V1\n"
+
+# Ed25519 field prime 2**255 - 19 and the mask of the 255 ``y`` bits of an encoding.
+_FIELD_PRIME = (1 << 255) - 19
+_Y_MASK = (1 << 255) - 1
+# Small-order encodings that make "R = identity, S = 0" verify (see the module docstring):
+# the 8 small-order points, plus the two non-canonical encodings with x = 0 and the sign bit set.
+_UNSAFE_PUBLIC_KEY_ENCODINGS = frozenset(
+    bytes.fromhex(value)
+    for value in (
+        "0100000000000000000000000000000000000000000000000000000000000000",  # identity
+        "0100000000000000000000000000000000000000000000000000000000000080",  # identity, x=0 sign=1 (non-canonical)
+        "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",  # order 2 (y = -1)
+        "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",  # order 2, x=0 sign=1 (non-canonical)
+        "0000000000000000000000000000000000000000000000000000000000000000",  # order 4 (y = 0)
+        "0000000000000000000000000000000000000000000000000000000000000080",  # order 4 (y = 0, other x)
+        "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",  # order 8
+        "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",  # order 8
+        "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",  # order 8
+        "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",  # order 8
+    )
+)
 
 # Module-private capability: only this module can build a receipt.
 _ISSUER = object()
@@ -177,7 +250,13 @@ KEY_ABSENT = KeyAbsentV1()
 
 @dataclass(frozen=True, slots=True)
 class VerifiedV1Receipt:
-    """Signature and context verified. Built only by ``verify_signed_result_v1``."""
+    """Signature and context verified. Built only by ``verify_signed_result_v1``.
+
+    A typed carrier for trusted code of the same process. The private issuer token and
+    the frozen dataclass only prevent accidental construction: this is not a security
+    boundary (``dataclasses.replace`` keeps the issuer). The adapter must re-check the
+    locked evidence, identities and values itself (module docstring, "Trust and provenance").
+    """
 
     inbox_id: UUID
     result_id: UUID
@@ -203,7 +282,12 @@ class VerifiedV1Receipt:
 
 @dataclass(frozen=True, slots=True)
 class RejectedV1Receipt:
-    """Definitive rejection of the examined row. Built only by the verifier."""
+    """Definitive rejection of the examined row. Built only by the verifier.
+
+    Same convention as ``VerifiedV1Receipt``: a typed carrier between trusted code of the
+    same process, not a security boundary. The adapter re-checks the locked row before it
+    writes a rejection.
+    """
 
     inbox_id: UUID
     result_id: UUID
@@ -248,11 +332,70 @@ def _check_arguments(
         raise TypeError("binding must be a TrustedInboxBindingV1")
     if type(key) is not TrustedWorkerKeyV1 and type(key) is not KeyAbsentV1:
         raise TypeError("key must be a TrustedWorkerKeyV1 or KEY_ABSENT")
+    _check_limits(max_bytes, max_depth)
+
+
+def _check_limits(max_bytes: object, max_depth: object) -> None:
     for value, name in ((max_bytes, "max_bytes"), (max_depth, "max_depth")):
         if type(value) is not int:
             raise TypeError(f"{name} must be an int")
         if value < 1:
             raise ValueError(f"{name} must be positive")
+
+
+def _parse_checked(
+    original_envelope_raw: bytes, expected_sha256: bytes, max_bytes: int, max_depth: int
+) -> ParsedSignedEnvelopeV1:
+    """The one hash check + strict parse shared by the verifier and ``read_signed_key_id_v1``."""
+    actual_sha256 = hashlib.sha256(original_envelope_raw).digest()
+    if not hmac.compare_digest(actual_sha256, expected_sha256):
+        raise EvidenceIntegrityError("ENVELOPE_HASH_MISMATCH")
+    try:
+        return parse_signed_envelope_v1(original_envelope_raw, max_bytes=max_bytes, max_depth=max_depth)
+    except SignedV1WireError as error:
+        raise ParserDriftError(f"ENVELOPE_NOT_STRICT_V1_{error.code.value}") from None
+
+
+def _unsafe_public_key_reason(public_key_raw: bytes) -> str | None:
+    """Reason a 32-byte key encoding is refused before verifying, or ``None`` (see module docstring)."""
+    if int.from_bytes(public_key_raw, "little") & _Y_MASK >= _FIELD_PRIME:
+        return "PUBLIC_KEY_NON_CANONICAL_ENCODING"
+    if public_key_raw in _UNSAFE_PUBLIC_KEY_ENCODINGS:
+        return "PUBLIC_KEY_SMALL_ORDER"
+    return None
+
+
+def read_signed_key_id_v1(
+    original_envelope_raw: bytes,
+    *,
+    envelope_sha256: bytes,
+    max_bytes: int,
+    max_depth: int,
+) -> UUID:
+    """Return the ``key_id`` signed in a retained envelope, for the trusted key lookup. PROPOSED.
+
+    Pure and I/O free. Applies the same hash check and strict parse as
+    ``verify_signed_result_v1`` (one shared code path) and the same error mapping: a hash that
+    differs is ``EvidenceIntegrityError`` and bytes that no longer parse as strict V1 are
+    ``ParserDriftError``, both faults and never a verdict. The result is untrusted until the
+    verifier has checked the signature; it only selects which row to look up by primary key.
+    ``max_bytes`` and ``max_depth`` are required, as for the verifier. It parses the envelope
+    once and does not extract the signed parts.
+    """
+    if type(original_envelope_raw) is not bytes:
+        raise TypeError("original_envelope_raw must be bytes")
+    if type(envelope_sha256) is not bytes:
+        raise TypeError("envelope_sha256 must be bytes")
+    if len(envelope_sha256) != 32:
+        raise ValueError("envelope_sha256 must be exactly 32 bytes")
+    _check_limits(max_bytes, max_depth)
+    try:
+        parsed = _parse_checked(original_envelope_raw, envelope_sha256, max_bytes, max_depth)
+        return UUID(parsed.envelope.payload.key_id)
+    except SignedV1VerificationFault:
+        raise
+    except Exception:
+        raise VerifierInternalError("UNEXPECTED_FAILURE") from None
 
 
 def _verify(
@@ -262,12 +405,8 @@ def _verify(
     max_bytes: int,
     max_depth: int,
 ) -> VerifiedV1Receipt | RejectedV1Receipt:
-    actual_sha256 = hashlib.sha256(original_envelope_raw).digest()
-    if not hmac.compare_digest(actual_sha256, binding.envelope_sha256):
-        raise EvidenceIntegrityError("ENVELOPE_HASH_MISMATCH")
-
+    parsed = _parse_checked(original_envelope_raw, binding.envelope_sha256, max_bytes, max_depth)
     try:
-        parsed = parse_signed_envelope_v1(original_envelope_raw, max_bytes=max_bytes, max_depth=max_depth)
         payload_jcs_raw, signature_raw = extract_signed_parts_v1(
             original_envelope_raw, max_bytes=max_bytes, max_depth=max_depth
         )
@@ -296,9 +435,14 @@ def _verify(
 
     if type(key.public_key_raw) is not bytes or len(key.public_key_raw) != 32:
         raise TrustedKeyError("PUBLIC_KEY_NOT_32_BYTES")
+    unsafe_reason = _unsafe_public_key_reason(key.public_key_raw)
+    if unsafe_reason is not None:
+        raise TrustedKeyError(unsafe_reason)
     try:
         public_key = Ed25519PublicKey.from_public_bytes(key.public_key_raw)
-    except Exception:
+    except ValueError:
+        # Only a loader ValueError proves unusable key material. Anything else is an
+        # unexpected backend failure and becomes a retryable VerifierInternalError.
         raise TrustedKeyError("PUBLIC_KEY_NOT_LOADABLE") from None
 
     try:
