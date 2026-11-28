@@ -205,7 +205,7 @@ class ManagerSupervisor:
         self._shutdown_started = False
         self._drain_task: asyncio.Task[None] | None = None
         self._drain_deadline_task: asyncio.Task[None] | None = None
-        self._drain_timeout_event = asyncio.Event()
+        self._drain_observation_event = asyncio.Event()
         self._drain_outcome: DrainOutcome | None = None
         self._timed_out_groups: frozenset[ManagerGroup] = frozenset()
         self._cleanup_complete = False
@@ -234,13 +234,14 @@ class ManagerSupervisor:
     def cleanup_complete(self) -> bool:
         return self._cleanup_complete
 
-    async def wait_for_drain_timeout(self) -> None:
-        """Wait until the injected observation budget expires."""
+    async def wait_for_drain_timeout(self) -> DrainOutcome:
+        """Wait for the drain observation to resolve as CLEAN or INCOMPLETE."""
         if self._drain_budget_seconds is None:
             raise RuntimeError("No drain observation budget is configured")
-        if self._cleanup_complete and self._drain_outcome is DrainOutcome.CLEAN:
-            raise RuntimeError("Drain completed before the observation budget expired")
-        await self._drain_timeout_event.wait()
+        await self._drain_observation_event.wait()
+        if self._drain_outcome is None:
+            raise RuntimeError("Drain observation completed without an outcome")
+        return self._drain_outcome
 
     def snapshot(self) -> Mapping[ManagerGroup, GroupSnapshot]:
         return MappingProxyType(
@@ -388,7 +389,7 @@ class ManagerSupervisor:
                         group for group, task in self._tasks.items() if not task.done()
                     )
                     self._drain_outcome = DrainOutcome.INCOMPLETE
-                    self._drain_timeout_event.set()
+                    self._drain_observation_event.set()
                     logger.error(
                         "manager_drain_incomplete",
                         extra={
@@ -420,6 +421,7 @@ class ManagerSupervisor:
         self._cleanup_complete = True
         if not timed_out:
             self._drain_outcome = DrainOutcome.CLEAN
+            self._drain_observation_event.set()
         else:
             logger.warning(
                 "manager_drain_cleanup_completed_after_timeout",
@@ -457,7 +459,8 @@ class ManagerSupervisor:
 
     def _record_transient(self, group: ManagerGroup, error: BaseException) -> None:
         state = self._states[group]
-        state.lifecycle = GroupLifecycle.DEGRADED
+        if self._can_change_lifecycle(group):
+            state.lifecycle = GroupLifecycle.DEGRADED
         state.diagnostic_type = type(error).__name__
         logger.warning(
             "manager_group_degraded",
@@ -469,10 +472,18 @@ class ManagerSupervisor:
 
     def _record_recovered(self, group: ManagerGroup) -> None:
         state = self._states[group]
-        if not self.stop_event.is_set() and self._failure is None:
+        if self._can_change_lifecycle(group) and self._failure is None:
             state.lifecycle = GroupLifecycle.RUNNING
             state.diagnostic_type = None
             logger.info("manager_group_recovered", extra={"manager_group": group.value})
+
+    def _can_change_lifecycle(self, group: ManagerGroup) -> bool:
+        return (
+            not self._shutdown_started
+            and not self.stop_event.is_set()
+            and self._states[group].lifecycle
+            not in {GroupLifecycle.STOPPING, GroupLifecycle.STOPPED}
+        )
 
     def _record_stall(self, group: ManagerGroup) -> None:
         self._states[group].diagnostic_type = ReportedGroupStall.__name__
@@ -482,7 +493,8 @@ class ManagerSupervisor:
         if self._failure is None:
             self._failure = (group, error)
             state = self._states[group]
-            state.lifecycle = GroupLifecycle.DEGRADED
+            if self._can_change_lifecycle(group):
+                state.lifecycle = GroupLifecycle.DEGRADED
             state.diagnostic_type = type(error).__name__
             self._failure_event.set()
             logger.error(
