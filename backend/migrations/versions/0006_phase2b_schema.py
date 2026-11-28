@@ -32,18 +32,39 @@ Decisions carried by the DDL (all from the lead's R1 decision, no others invente
 
 Not in R1: D-19 repair columns, D-20 discovery reads, the optional D-09 allocation index, any grant or revoke.
 
-Preflight fails closed before any DDL (wrong parent, one of the six tables already present, a Phase 1 unique target
-missing or on other columns, a second head). Downgrade drops the tables in reverse dependency order and refuses
-while any of them holds a row, because those rows are accepted evidence; set
-``GPU_MARKETPLACE_PHASE2_DISPOSABLE_DOWNGRADE=1`` only on a disposable database. Reverting this file in Git does not
-undo an applied revision.
+Safety gates (PR #70 review by TV1; none of them grants, revokes or changes anything outside these six tables):
+
+* Preflight fails closed before any DDL: wrong parent, one of the six tables already present, a Phase 1 unique
+  target missing or on other columns, a second head, or a ``search_path`` that does not resolve to schema ``public``.
+  The CREATE/DROP/foreign-key names below are unqualified exactly like revisions 0001-0005, so the revision
+  enforces the pinned contract (``current_schema()`` is ``public`` and ``alembic_version``, ``jobs`` and
+  ``worker_public_keys`` resolve to their ``public`` tables, which also rejects a ``pg_temp`` shadow) instead of
+  assuming it.
+* Zero effective privilege: "this revision has no GRANT" does not prove the runtime roles hold nothing, because
+  default ACLs of the migration owner, PUBLIC and role membership attach privileges to every new table. After its last
+  DDL statement and before it can commit, ``upgrade()`` reads the effective table and column privileges of every
+  ``gpm_api_*`` / ``gpm_manager_*`` role, of every role they belong to (inherited or SET-able) and of PUBLIC on the six
+  tables. Any finding, or a missing expected runtime role, raises and rolls the whole revision back. Nothing is ever
+  granted or revoked here; the operator removes the cause (typically a ``pg_default_acl`` entry) as the owner.
+* Downgrade: it refuses while any of the six tables holds a row, because those rows are accepted evidence, and there
+  is NO override (an environment flag cannot prove that a database is disposable). The guard takes ACCESS EXCLUSIVE
+  locks on all six tables in a fixed order (``LOCK_ORDER``), checks them empty and the same transaction drops them, so a
+  writer that commits after the check cannot lose its row: it waits for the lock and then either sees the tables gone
+  or is checked after it. A bounded ``lock_timeout`` (``DEFAULT_LOCK_TIMEOUT`` unless the session already has one)
+  turns an indefinitely blocked downgrade into a clean refusal. To remove populated Phase 2 tables, recreate the
+  disposable database instead. Reverting this file in Git does not undo an applied revision.
+
+Dispatch payload ownership: ``ck_execution_outbox_payload_shape`` pins only the exact ten-key set, the fixed
+``simulation_input``, the two row-local ids and the string type of the three entity ids. It does not validate the full
+dispatch contract. ``gpu_count``, ``duration_seconds``, the two timestamps (type, range, wire format, equality with
+``execution_attempts``) and the UUID form and Job match of ``job_id`` / ``worker_id`` / ``listing_id`` belong to the
+Manager dispatch serializer and to P2B-DRT-18; their negative tests ship with that later, separately authorized code.
 
 Revision ID: 0006_phase2b_schema
 Revises: 0005_listing_d7
 Create Date: 2026-11-27
 """
 
-import os
 from collections.abc import Sequence
 from typing import Union
 
@@ -57,7 +78,6 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 PARENT = "0005_listing_d7"
-DISPOSABLE_FLAG = "GPU_MARKETPLACE_PHASE2_DISPOSABLE_DOWNGRADE"
 
 # Creation order; the downgrade uses the reverse.
 PHASE2_TABLES = (
@@ -68,6 +88,21 @@ PHASE2_TABLES = (
     "signed_results",
     "job_reputation_contributions",
 )
+
+# Fixed lock order for the downgrade guard: parents first, i.e. the order in which a writer builds the graph, so that a
+# writer inserting parent-then-child cannot deadlock with it. The drop order in ``downgrade()`` is the reverse.
+LOCK_ORDER = PHASE2_TABLES
+DEFAULT_LOCK_TIMEOUT = "10s"
+
+# Unqualified names that the revision's CREATE/DROP statements and foreign keys resolve through ``search_path``.
+SEARCH_PATH_NAMES = ("alembic_version", "jobs", "worker_public_keys")
+
+# Runtime role families the zero-privilege check covers (direct, inherited and PUBLIC reach).
+RUNTIME_ROLES = ("gpm_api_rw", "gpm_manager_rw", "gpm_api_app", "gpm_manager_app")
+RUNTIME_ROLE_PATTERN = "^gpm_(api|manager)_"
+TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
+COLUMN_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "REFERENCES")
+MAX_REPORTED_FINDINGS = 20
 
 # Phase 1 objects that the new composite foreign keys point at: (table, constraint, type, columns).
 PHASE1_TARGETS = (
@@ -114,8 +149,33 @@ REJECTION_CODE_CHECK = (
 )
 
 
+def require_public_schema_resolution(bind: sa.engine.Connection, names: Sequence[str], when: str) -> None:
+    """The unqualified names of this revision must resolve to schema ``public`` (the pinned ``search_path`` contract)."""
+    current, path = bind.execute(sa.text("SELECT current_schema(), current_setting('search_path')")).one()
+    if current != "public":
+        raise RuntimeError(
+            f"Phase 2B R1 refused: search_path must resolve to schema public (this revision, like 0001-0005, uses "
+            f"unqualified CREATE/DROP and foreign-key names) but current_schema() is {current!r} with search_path "
+            f"{path!r}; {when}"
+        )
+    shadowed = [
+        name
+        for name in names
+        if bind.execute(
+            sa.text("SELECT to_regclass(:bare) IS NOT NULL AND to_regclass(:bare) IS DISTINCT FROM to_regclass(:qualified)"),
+            {"bare": name, "qualified": f"public.{name}"},
+        ).scalar_one()
+    ]
+    if shadowed:
+        raise RuntimeError(
+            f"Phase 2B R1 refused: search_path {path!r} resolves {', '.join(shadowed)} outside schema public "
+            f"(for example a temporary table or another schema earlier in the path); {when}"
+        )
+
+
 def run_preflight(bind: sa.engine.Connection, heads: Sequence[str]) -> None:
     """Fail closed, before any DDL, when the database is not exactly what this revision was written for."""
+    require_public_schema_resolution(bind, SEARCH_PATH_NAMES, "no DDL was run")
     versions = list(bind.execute(sa.text("SELECT version_num FROM public.alembic_version")).scalars())
     if versions != [PARENT]:
         raise RuntimeError(
@@ -160,19 +220,132 @@ def run_preflight(bind: sa.engine.Connection, heads: Sequence[str]) -> None:
         )
 
 
-def run_downgrade_guard(bind: sa.engine.Connection, disposable: bool) -> None:
-    """Refuse to drop accepted evidence: any row in any of the six tables blocks the downgrade."""
+def run_downgrade_guard(bind: sa.engine.Connection) -> None:
+    """Lock the six tables, then refuse to drop accepted evidence: any row in any of them blocks the downgrade.
+
+    The ACCESS EXCLUSIVE locks are taken before the emptiness check and live until the surrounding transaction ends,
+    so the same transaction that passes this check also drops the tables (``downgrade()``). A concurrent writer
+    cannot commit a row between the check and the drop; it queues behind the lock instead.
+    """
+    require_public_schema_resolution(bind, LOCK_ORDER, "no DDL was run")
+    if bind.execute(sa.text("SELECT current_setting('lock_timeout')")).scalar_one() in ("0", "0ms"):
+        bind.execute(sa.text(f"SET LOCAL lock_timeout = '{DEFAULT_LOCK_TIMEOUT}'"))
+    for table in LOCK_ORDER:
+        bind.execute(sa.text(f"LOCK TABLE public.{table} IN ACCESS EXCLUSIVE MODE"))  # noqa: S608 (fixed names)
     populated = [
         table
-        for table in reversed(PHASE2_TABLES)
+        for table in reversed(LOCK_ORDER)
         if bind.execute(sa.text(f"SELECT EXISTS (SELECT 1 FROM public.{table})")).scalar_one()  # noqa: S608
     ]
-    if populated and not disposable:
+    if populated:
         raise RuntimeError(
             f"Phase 2B R1 downgrade refused: table(s) {', '.join(populated)} hold rows (Inbox bytes, signed results "
-            "or contributions are accepted evidence and a downgrade would destroy them). On a disposable database "
-            f"only, set {DISPOSABLE_FLAG}=1 to drop them anyway; no DDL was run"
+            "or contributions are accepted evidence and a downgrade would destroy them). There is no override: "
+            "export or retire the evidence through its own authorized process, or recreate a disposable database; "
+            "no DDL was run"
         )
+
+
+PRIVILEGE_FINDINGS_SQL = """
+WITH RECURSIVE closure(oid) AS (
+    SELECT r.oid FROM pg_roles r WHERE r.rolname ~ :pattern
+    UNION
+    SELECT m.roleid FROM pg_auth_members m JOIN closure c ON m.member = c.oid
+),
+targets AS (
+    SELECT c.oid, c.relname FROM pg_class c
+    WHERE c.relnamespace = 'public'::regnamespace AND c.relname = ANY(CAST(:tables AS text[]))
+)
+SELECT r.rolname AS grantee, t.relname AS table_name, p.priv AS privilege, 'table' AS scope
+FROM closure cl JOIN pg_roles r ON r.oid = cl.oid CROSS JOIN targets t
+CROSS JOIN unnest(CAST(:table_privileges AS text[])) AS p(priv)
+WHERE has_table_privilege(r.oid, t.oid, p.priv)
+UNION ALL
+SELECT r.rolname, t.relname, p.priv, 'column'
+FROM closure cl JOIN pg_roles r ON r.oid = cl.oid CROSS JOIN targets t
+CROSS JOIN unnest(CAST(:column_privileges AS text[])) AS p(priv)
+WHERE has_any_column_privilege(r.oid, t.oid, p.priv)
+UNION ALL
+SELECT 'PUBLIC', t.relname, a.privilege_type, 'table'
+FROM targets t JOIN pg_class c ON c.oid = t.oid
+CROSS JOIN LATERAL aclexplode(c.relacl) AS a WHERE a.grantee = 0
+UNION ALL
+SELECT 'PUBLIC', t.relname, a.privilege_type, 'column'
+FROM targets t JOIN pg_attribute att ON att.attrelid = t.oid AND att.attnum > 0 AND NOT att.attisdropped
+CROSS JOIN LATERAL aclexplode(att.attacl) AS a WHERE a.grantee = 0
+ORDER BY 1, 2, 3, 4
+"""
+
+DEFAULT_ACL_HINTS_SQL = """
+SELECT CASE WHEN d.defaclnamespace = 0 THEN 'every schema' ELSE d.defaclnamespace::regnamespace::text END,
+       CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END,
+       a.privilege_type
+FROM pg_default_acl d CROSS JOIN LATERAL aclexplode(d.defaclacl) AS a
+WHERE d.defaclobjtype = 'r'
+  AND d.defaclrole = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+  AND d.defaclnamespace IN (0, 'public'::regnamespace)
+  AND a.grantee <> d.defaclrole
+ORDER BY 1, 2, 3
+"""
+
+
+def run_privilege_check(bind: sa.engine.Connection) -> None:
+    """Fail closed when any runtime role or PUBLIC holds a privilege on the six tables (R1 must grant nothing).
+
+    Read-only: it never grants or revokes. Table and column privileges are evaluated as the server sees them
+    (``has_table_privilege`` / ``has_any_column_privilege``: direct, inherited, PUBLIC, default ACL, superuser),
+    for every ``gpm_api_*`` / ``gpm_manager_*`` role and every role they belong to whatever the INHERIT/SET flags,
+    plus the explicit PUBLIC entries of the table and column ACLs.
+    """
+    present = set(
+        bind.execute(
+            sa.text("SELECT rolname FROM pg_roles WHERE rolname = ANY(CAST(:roles AS text[]))"),
+            {"roles": list(RUNTIME_ROLES)},
+        ).scalars()
+    )
+    missing = [role for role in RUNTIME_ROLES if role not in present]
+    if missing:
+        raise RuntimeError(
+            f"Phase 2B R1 refused: expected runtime role(s) {', '.join(missing)} not found, so the zero-privilege "
+            "check cannot be proven; run the role bootstrap (revision 0002 needs them too). The revision is rolled "
+            "back as a whole; nothing was granted or revoked"
+        )
+
+    findings = bind.execute(
+        sa.text(PRIVILEGE_FINDINGS_SQL),
+        {
+            "pattern": RUNTIME_ROLE_PATTERN,
+            "tables": list(PHASE2_TABLES),
+            "table_privileges": list(TABLE_PRIVILEGES),
+            "column_privileges": list(COLUMN_PRIVILEGES),
+        },
+    ).all()
+    if not findings:
+        return
+
+    unique = list(dict.fromkeys(tuple(row) for row in findings))
+    lines = [
+        f"{grantee} has {privilege}{' (column level)' if scope == 'column' else ''} on {table}"
+        for grantee, table, privilege, scope in unique[:MAX_REPORTED_FINDINGS]
+    ]
+    more = len(unique) - len(lines)
+    hints = bind.execute(sa.text(DEFAULT_ACL_HINTS_SQL)).all()
+    hint_text = (
+        "; pg_default_acl of the migration owner ("
+        + ", ".join(f"{privilege} to {grantee} in {schema}" for schema, grantee, privilege in hints)
+        + ") attaches privileges to every new table"
+        if hints
+        else ""
+    )
+    raise RuntimeError(
+        "Phase 2B R1 refused: effective privilege on the six Phase 2 tables for a runtime role or PUBLIC, but this "
+        "revision must grant nothing (R2 owns grants): "
+        + "; ".join(lines)
+        + (f"; and {more} more" if more else "")
+        + hint_text
+        + ". The revision is rolled back as a whole; nothing was granted or revoked. Review the default ACLs, "
+        "role memberships and grants as the database owner, then retry"
+    )
 
 
 def upgrade() -> None:
@@ -389,11 +562,14 @@ def upgrade() -> None:
         ),
     )
 
+    # Last statement before the revision can commit: R1 must leave every runtime role and PUBLIC with nothing.
+    run_privilege_check(bind)
+
 
 def downgrade() -> None:
     if context.is_offline_mode():
         raise RuntimeError("Phase 2B R1 needs a live connection for its downgrade guard; offline SQL is refused")
-    run_downgrade_guard(op.get_bind(), os.environ.get(DISPOSABLE_FLAG) == "1")
+    run_downgrade_guard(op.get_bind())  # locks the six tables; the drops below run in the same transaction
 
     op.drop_table("job_reputation_contributions")
     op.drop_table("signed_results")

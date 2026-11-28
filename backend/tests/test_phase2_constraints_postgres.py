@@ -408,6 +408,44 @@ def test_outbox_payload_shape_accepts_the_ten_key_payload_and_is_not_a_cross_tab
     insert_outbox(conn, seed, attempt, event_id=event, payload=json.dumps(payload))
 
 
+def test_outbox_payload_shape_does_not_validate_the_remaining_field_types_or_values(
+    conn: Connection, seed: Phase1Seed, attempt: str
+) -> None:
+    """Division of ownership recorded for TV1 review (PR #70, point 3), pinned so nobody assumes more.
+
+    The DDL owns the exact ten-key set, the fixed ``simulation_input``, the two row-local ids and the string type
+    of the three entity ids. It does NOT check ``gpu_count``, ``duration_seconds``, ``finish_due_at`` or
+    ``hard_deadline_at`` (type, range, wire format, equality with ``execution_attempts``) nor that ``job_id``,
+    ``worker_id`` and ``listing_id`` are UUID text or match their Job. The Manager dispatch serializer owns those
+    checks (OPEN_DECISION_REGISTER, TV5 re-review row: "field type tests kept in the Manager serializer"), together
+    with the transaction rule P2B-DRT-18. The negative serializer tests ship with that later, separately authorized
+    code, not with R1. Until then a payload that passes this CHECK is NOT a validated dispatch contract.
+    """
+    permissive = {
+        "gpu_count_string": ("gpu_count", "many"),
+        "gpu_count_negative": ("gpu_count", -5),
+        "duration_zero": ("duration_seconds", 0),
+        "duration_null": ("duration_seconds", None),
+        "finish_not_a_timestamp": ("finish_due_at", "not-a-timestamp"),
+        "hard_deadline_number": ("hard_deadline_at", 7),
+        "job_id_not_a_uuid": ("job_id", "not-a-uuid"),
+    }
+    for name, (key, value) in permissive.items():
+        event = new_id()
+        payload = _good_payload(seed, attempt, event)
+        payload[key] = value
+        savepoint = conn.begin_nested()
+        try:
+            conn.execute(
+                text(OUTBOX_INSERT),
+                outbox_params(seed, attempt, event_id=event, payload=json.dumps(payload)),
+            )
+        except Exception as error:  # noqa: BLE001
+            pytest.fail(f"{name}: the DDL now validates {key}; update the ownership note and this test ({error})")
+        finally:
+            savepoint.rollback()
+
+
 def test_outbox_payload_shape_failure_is_a_check_violation_not_an_evaluation_error(
     conn: Connection, seed: Phase1Seed, attempt: str
 ) -> None:
